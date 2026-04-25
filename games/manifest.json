@@ -11,6 +11,12 @@
       "title": "Guess the Number",
       "description": "Find the secret number between 1 and 100 in as few guesses as you can.",
       "tags": ["puzzle", "solo"]
+    },
+    {
+      "id": "tetris",
+      "title": "Tetris",
+      "description": "Stack falling blocks to clear lines. Classic arcade puzzler with seven tetrominoes.",
+      "tags": ["arcade", "puzzle", "solo"]
     }
   ]
 }
