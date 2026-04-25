@@ -4,9 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Games</title>
+    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <h1>Games</h1>
-    <p>Placeholder page.</p>
+    <header>
+      <h1>Games</h1>
+      <p class="tagline">A small collection of browser games.</p>
+    </header>
+    <main>
+      <input
+        id="search"
+        type="search"
+        placeholder="Search games..."
+        autocomplete="off"
+      />
+      <ul id="game-list" class="games-grid"></ul>
+      <p id="empty" class="empty" hidden>No games match your search.</p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>

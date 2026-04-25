@@ -1,0 +1,16 @@
+{
+  "games": [
+    {
+      "id": "click-counter",
+      "title": "Click Counter",
+      "description": "How fast can you click? Rack up as many clicks as possible in 10 seconds.",
+      "tags": ["arcade", "solo"]
+    },
+    {
+      "id": "guess-the-number",
+      "title": "Guess the Number",
+      "description": "Find the secret number between 1 and 100 in as few guesses as you can.",
+      "tags": ["puzzle", "solo"]
+    }
+  ]
+}
