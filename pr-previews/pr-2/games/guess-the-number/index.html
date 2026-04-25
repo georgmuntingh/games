@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guess the Number</title>
+    <script type="module" crossorigin src="/games/pr-previews/pr-2/assets/games/guess-the-number-DH0QhrKy.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-2/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-2/assets/guess-the-number-rGeQXhll.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-2/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Guess the Number</h1>
+      <p>I'm thinking of a number between <strong>1</strong> and <strong>100</strong>.</p>
+      <form id="guess-form">
+        <input
+          id="guess"
+          type="number"
+          min="1"
+          max="100"
+          required
+          autocomplete="off"
+          autofocus
+        />
+        <button type="submit">Guess</button>
+      </form>
+      <p id="feedback" class="feedback"></p>
+      <p class="stats">Guesses: <span id="count">0</span></p>
+      <button id="reset" type="button" hidden>Play again</button>
+    </main>
+  </body>
+</html>
