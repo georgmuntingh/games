@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tetris</title>
+    <link rel="stylesheet" href="/shared/ui.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Tetris</h1>
+      <div class="layout">
+        <canvas id="board" width="300" height="600" aria-label="Tetris board"></canvas>
+        <aside class="sidebar">
+          <div class="panel">
+            <h2>Next</h2>
+            <canvas id="next" width="120" height="120"></canvas>
+          </div>
+          <div class="panel stats">
+            <div><span class="label">Score</span><span id="score">0</span></div>
+            <div><span class="label">Lines</span><span id="lines">0</span></div>
+            <div><span class="label">Level</span><span id="level">1</span></div>
+          </div>
+          <button id="play">Start</button>
+          <details class="controls">
+            <summary>Controls</summary>
+            <ul>
+              <li><kbd>←</kbd> <kbd>→</kbd> move</li>
+              <li><kbd>↓</kbd> soft drop</li>
+              <li><kbd>↑</kbd> / <kbd>X</kbd> rotate cw</li>
+              <li><kbd>Z</kbd> rotate ccw</li>
+              <li><kbd>Space</kbd> hard drop</li>
+              <li><kbd>P</kbd> pause</li>
+            </ul>
+          </details>
+        </aside>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
