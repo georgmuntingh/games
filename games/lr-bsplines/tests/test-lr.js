@@ -89,11 +89,30 @@ test('splitBSpline preserves the function (1D test)', () => {
 
 // 3. Meshline-traversal predicate ---------------------------------------
 test('meshlineSplitsBSpline: full traversal', () => {
-  const B = { kx: [0, 0.25, 0.5, 0.75], ky: [0, 0.25, 0.5, 0.75], coeff: 1 };
+  // B's y knot vector does NOT yet include 0.5, so a multiplicity-1 line at
+  // y=0.5 should split this B-spline.
+  const B = { kx: [0, 0.25, 0.5, 0.75], ky: [0, 0.25, 0.75, 1.0], coeff: 1 };
   const ml = { dir: 'h', c: 0.5, a: 0, b: 1, m: 1 };
   const r = meshlineSplitsBSpline(B, ml);
   assertTrue(r !== null, 'should split');
   assertEq(r.dir, 'h');
+  assertClose(r.tau, 0.5);
+});
+
+test('meshlineSplitsBSpline: knot already present at sufficient mult does not split', () => {
+  // B already has 0.5 in its local y-knots; a mult-1 line adds nothing.
+  const B = { kx: [0, 0.25, 0.5, 0.75], ky: [0, 0.25, 0.5, 0.75], coeff: 1 };
+  const ml = { dir: 'h', c: 0.5, a: 0, b: 1, m: 1 };
+  assertEq(meshlineSplitsBSpline(B, ml), null);
+});
+
+test('meshlineSplitsBSpline: knot present at deficient mult does split', () => {
+  // Same B as above but the meshline has higher multiplicity than the local
+  // knot count, so it should add another copy of 0.5.
+  const B = { kx: [0, 0.25, 0.5, 0.75], ky: [0, 0.25, 0.5, 0.75], coeff: 1 };
+  const ml = { dir: 'h', c: 0.5, a: 0, b: 1, m: 2 };
+  const r = meshlineSplitsBSpline(B, ml);
+  assertTrue(r !== null, 'should split');
   assertClose(r.tau, 0.5);
 });
 
