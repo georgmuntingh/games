@@ -1,12 +1,15 @@
-// Phase 3 — state management. Renderer and interactive insertion UX
-// land in Phases 4 and 5; until then the SVG shows a minimal placeholder.
+// Phases 3 + 4: state management and static SVG rendering. Phase 5 will
+// layer interactive mesh-line insertion on top of the rendered anchors.
 
 import {
-  createInitialState,
-  insertMeshLine,
+  approxEq,
   cloneState,
-  serialize,
+  computeAnchors,
+  createInitialState,
   deserialize,
+  distinct,
+  insertMeshLine,
+  serialize,
 } from './lr-math.js';
 
 // --- DOM references --------------------------------------------------------
@@ -180,7 +183,7 @@ function notifyChange() {
   inputNy.disabled = lock;
   inputOpen.disabled = lock;
   renderBSplineList();
-  renderPlaceholder();
+  renderBoard();
 }
 
 function renderBSplineList() {
@@ -208,18 +211,149 @@ function renderBSplineList() {
     .join('');
 }
 
-function renderPlaceholder() {
-  const s = store.current;
-  board.innerHTML =
-    `<rect class="domain-bg" x="40" y="40" width="520" height="520" />` +
-    `<text x="300" y="290" text-anchor="middle" dominant-baseline="middle" ` +
-    `      fill="currentColor" font-size="14" opacity="0.55">` +
-    `${s.bsplines.length} active B-splines` +
-    `</text>` +
-    `<text x="300" y="310" text-anchor="middle" dominant-baseline="middle" ` +
-    `      fill="currentColor" font-size="11" opacity="0.35">` +
-    `(mesh renderer arrives in Phase 4)` +
-    `</text>`;
+// --- SVG rendering (Phase 4) ----------------------------------------------
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const VB = { x0: 40, y0: 40, w: 520, h: 520 };
+const STROKE_BASE = 1.5;
+const STROKE_STEP = 1.6;
+const ANCHOR_RADIUS = 4.5;
+
+function uxToSvg(state, u, v) {
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const sx = VB.x0 + ((u - xmin) / (xmax - xmin)) * VB.w;
+  const sy = VB.y0 + ((ymax - v) / (ymax - ymin)) * VB.h;
+  return [sx, sy];
+}
+
+function strokeWidthForMult(m) {
+  return STROKE_BASE + Math.max(0, m - 1) * STROKE_STEP;
+}
+
+function svgEl(name, attrs = {}, content = null) {
+  const el = document.createElementNS(SVG_NS, name);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null) continue;
+    el.setAttribute(k, v);
+  }
+  if (typeof content === 'string') {
+    el.textContent = content;
+  } else if (Array.isArray(content)) {
+    for (const c of content) el.appendChild(c);
+  }
+  return el;
+}
+
+function renderBoard() {
+  const state = store.current;
+  while (board.firstChild) board.removeChild(board.firstChild);
+
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const [bx0, by0] = uxToSvg(state, xmin, ymax);
+  const [bx1, by1] = uxToSvg(state, xmax, ymin);
+
+  // Domain background
+  board.appendChild(
+    svgEl('rect', {
+      class: 'domain-bg',
+      x: bx0,
+      y: by0,
+      width: bx1 - bx0,
+      height: by1 - by0,
+      rx: 1,
+    })
+  );
+
+  // Axis tick labels (distinct knot positions; multiplicity is encoded in
+  // the mesh-line stroke thickness so we don't repeat it here).
+  for (const v of distinct(state.knotsX)) {
+    const [sx, sy] = uxToSvg(state, v, ymin);
+    board.appendChild(
+      svgEl(
+        'text',
+        {
+          class: 'knot-tick',
+          x: sx,
+          y: sy + 16,
+          'text-anchor': 'middle',
+        },
+        v.toFixed(2)
+      )
+    );
+  }
+  for (const v of distinct(state.knotsY)) {
+    const [sx, sy] = uxToSvg(state, xmin, v);
+    board.appendChild(
+      svgEl(
+        'text',
+        {
+          class: 'knot-tick',
+          x: sx - 8,
+          y: sy + 4,
+          'text-anchor': 'end',
+        },
+        v.toFixed(2)
+      )
+    );
+  }
+
+  // Mesh-line segments
+  for (const ml of state.meshlines) {
+    let p0, p1;
+    if (ml.dir === 'h') {
+      p0 = uxToSvg(state, ml.a, ml.c);
+      p1 = uxToSvg(state, ml.b, ml.c);
+    } else {
+      p0 = uxToSvg(state, ml.c, ml.a);
+      p1 = uxToSvg(state, ml.c, ml.b);
+    }
+    const isBoundary =
+      (ml.dir === 'h' && (approxEq(ml.c, ymin) || approxEq(ml.c, ymax))) ||
+      (ml.dir === 'v' && (approxEq(ml.c, xmin) || approxEq(ml.c, xmax)));
+    const line = svgEl('line', {
+      class: 'mesh-line' + (isBoundary ? ' boundary' : ''),
+      x1: p0[0],
+      y1: p0[1],
+      x2: p1[0],
+      y2: p1[1],
+      'stroke-width': strokeWidthForMult(ml.m),
+      'stroke-linecap': 'butt',
+    });
+    const axis = ml.dir === 'h' ? 'y' : 'x';
+    line.appendChild(
+      svgEl(
+        'title',
+        {},
+        `${axis} = ${ml.c.toFixed(3)}   m = ${ml.m}   extent = [${ml.a.toFixed(3)}, ${ml.b.toFixed(3)}]`
+      )
+    );
+    board.appendChild(line);
+  }
+
+  // Anchor circles (positions only; click handlers land in Phase 5)
+  const anchors = computeAnchors(state);
+  for (const a of anchors) {
+    let cx, cy;
+    if (a.dir === 'h') [cx, cy] = uxToSvg(state, a.mid, a.c);
+    else [cx, cy] = uxToSvg(state, a.c, a.mid);
+    const c = svgEl('circle', {
+      class: 'anchor',
+      cx,
+      cy,
+      r: ANCHOR_RADIUS,
+      'data-dir': a.dir,
+      'data-c': a.c,
+      'data-edgelo': a.edgeLo,
+      'data-edgehi': a.edgeHi,
+    });
+    c.appendChild(
+      svgEl(
+        'title',
+        {},
+        `${a.dir === 'h' ? 'horizontal' : 'vertical'} edge midpoint`
+      )
+    );
+    board.appendChild(c);
+  }
 }
 
 function setStatus(msg, isError = false) {

@@ -232,7 +232,7 @@ export function createInitialState({ p, q, Nx, Ny, openKnots, domain }) {
   };
 }
 
-function distinct(arr) {
+export function distinct(arr) {
   const out = [];
   for (const v of arr) if (!out.some((u) => approxEq(u, v))) out.push(v);
   out.sort((a, b) => a - b);

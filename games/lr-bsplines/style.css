@@ -305,7 +305,7 @@ button#reset-btn {
 .mesh-line {
   stroke: #2a2e36;
   stroke-linecap: square;
-  pointer-events: none;
+  cursor: default;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -316,6 +316,10 @@ button#reset-btn {
 
 .mesh-line.boundary {
   stroke: #6b7280;
+}
+
+.mesh-line:hover {
+  stroke: var(--ui-accent);
 }
 
 .domain-bg {
@@ -354,6 +358,7 @@ button#reset-btn {
   stroke-dasharray: 5 4;
   stroke-width: 2;
   fill: none;
+  pointer-events: none;
 }
 
 .preview-line.valid {
