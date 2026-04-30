@@ -1,5 +1,6 @@
-// Phases 3 + 4: state management and static SVG rendering. Phase 5 will
-// layer interactive mesh-line insertion on top of the rendered anchors.
+// Phases 3 + 4 + 5: state management, SVG rendering, and interactive
+// mesh-line insertion. Phase 6 will add the basis-function inset and
+// two-way hover highlighting; Phases 7+ are panel polish and manifest.
 
 import {
   approxEq,
@@ -9,12 +10,17 @@ import {
   deserialize,
   distinct,
   insertMeshLine,
+  meshlineFromAnchors,
+  previewSplitTargets,
   serialize,
 } from './lr-math.js';
 
 // --- DOM references --------------------------------------------------------
 const board = document.getElementById('board');
 const status = document.getElementById('status');
+const floatingMult = document.getElementById('floating-mult');
+const floatingMultVal = document.getElementById('mult-val');
+const canvasWrap = board.parentElement;
 
 const inputP = document.getElementById('p');
 const inputQ = document.getElementById('q');
@@ -45,6 +51,132 @@ const store = {
   redoStack: [],
   selectedBSplineIndex: null,
 };
+
+// --- Insertion state machine (Phase 5) ------------------------------------
+const insertion = {
+  mode: 'idle',          // 'idle' | 'firstPicked'
+  firstAnchor: null,
+  hotAnchor: null,
+  multiplicity: 1,
+};
+
+function maxMultiplicity() {
+  const s = store.current;
+  return s ? Math.max(s.p, s.q) + 1 : 6;
+}
+
+function setMultiplicity(m) {
+  insertion.multiplicity = clampInt(m, 1, maxMultiplicity());
+  inputMult.value = insertion.multiplicity;
+  floatingMultVal.textContent = insertion.multiplicity;
+}
+
+function anchorEquals(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.dir === b.dir &&
+    approxEq(a.c, b.c) &&
+    approxEq(a.edgeLo, b.edgeLo) &&
+    approxEq(a.edgeHi, b.edgeHi)
+  );
+}
+
+function anchorIsCompatible(a, first) {
+  return a.dir === first.dir && approxEq(a.c, first.c);
+}
+
+function startInsertion(anchor) {
+  insertion.mode = 'firstPicked';
+  insertion.firstAnchor = anchor;
+  insertion.hotAnchor = anchor; // cursor is on the anchor we just clicked
+  setMultiplicity(insertion.multiplicity);
+  floatingMult.hidden = false;
+  positionFloatingMult();
+  setStatus(
+    `Picked ${anchor.dir === 'h' ? 'horizontal' : 'vertical'} anchor at ${anchor.dir === 'h' ? 'y' : 'x'}=${anchor.c.toFixed(3)}. Pick a second anchor on the same line, or press Esc to cancel.`
+  );
+  renderBoard();
+}
+
+function cancelInsertion(reason) {
+  insertion.mode = 'idle';
+  insertion.firstAnchor = null;
+  insertion.hotAnchor = null;
+  floatingMult.hidden = true;
+  if (reason) setStatus(reason);
+  renderBoard();
+}
+
+function tryCommitFromAnchors(secondAnchor) {
+  const first = insertion.firstAnchor;
+  if (!anchorIsCompatible(secondAnchor, first)) {
+    setStatus('Both anchors must lie on the same mesh-line.', true);
+    return;
+  }
+  const ml = meshlineFromAnchors(first, secondAnchor, insertion.multiplicity);
+  if (!ml) {
+    setStatus('Could not build mesh-line from these anchors.', true);
+    return;
+  }
+  const targets = previewSplitTargets(store.current, ml);
+  commitInsertion(ml);
+  if (targets.length === 0) {
+    setStatus(
+      `Inserted m=${ml.m} ${ml.dir === 'h' ? 'horizontal' : 'vertical'} line. Warning: no B-splines were split (not a strict LR refinement).`,
+      true
+    );
+  } else {
+    setStatus(
+      `Inserted m=${ml.m} ${ml.dir === 'h' ? 'horizontal' : 'vertical'} line — ${targets.length} B-spline${targets.length === 1 ? '' : 's'} split; basis now has ${store.current.bsplines.length}.`
+    );
+  }
+  cancelInsertion(null);
+}
+
+function positionFloatingMult(clientX, clientY) {
+  // Position relative to the canvas-wrap; default to a fixed corner if we
+  // don't yet have cursor coordinates.
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  if (clientX === undefined) {
+    floatingMult.style.left = `8px`;
+    floatingMult.style.top = `8px`;
+    return;
+  }
+  const x = Math.max(8, Math.min(wrapRect.width - 160, clientX - wrapRect.left + 14));
+  const y = Math.max(8, Math.min(wrapRect.height - 40, clientY - wrapRect.top + 14));
+  floatingMult.style.left = `${x}px`;
+  floatingMult.style.top = `${y}px`;
+}
+
+function svgPointFromEvent(event) {
+  const pt = board.createSVGPoint();
+  pt.x = event.clientX;
+  pt.y = event.clientY;
+  const ctm = board.getScreenCTM();
+  if (!ctm) return null;
+  const local = pt.matrixTransform(ctm.inverse());
+  return [local.x, local.y];
+}
+
+function nearestCompatibleAnchor(svgPt) {
+  const state = store.current;
+  if (!svgPt || insertion.mode !== 'firstPicked') return null;
+  const first = insertion.firstAnchor;
+  const anchors = computeAnchors(state).filter((a) => anchorIsCompatible(a, first));
+  let best = null;
+  let bestDist = Infinity;
+  for (const a of anchors) {
+    let cx, cy;
+    if (a.dir === 'h') [cx, cy] = uxToSvg(state, a.mid, a.c);
+    else [cx, cy] = uxToSvg(state, a.c, a.mid);
+    const d = Math.hypot(svgPt[0] - cx, svgPt[1] - cy);
+    if (d < bestDist) {
+      bestDist = d;
+      best = a;
+    }
+  }
+  return best;
+}
 
 function clampInt(v, lo, hi) {
   const n = Math.floor(Number(v));
@@ -182,6 +314,7 @@ function notifyChange() {
   inputNx.disabled = lock;
   inputNy.disabled = lock;
   inputOpen.disabled = lock;
+  setMultiplicity(insertion.multiplicity);
   renderBSplineList();
   renderBoard();
 }
@@ -329,14 +462,72 @@ function renderBoard() {
     board.appendChild(line);
   }
 
-  // Anchor circles (positions only; click handlers land in Phase 5)
+  // Insertion overlay (Phase 5): shaded supports + preview line, drawn
+  // beneath the anchors so anchors stay clickable on top.
+  let previewMl = null;
+  let previewTargets = [];
+  if (insertion.mode === 'firstPicked' && insertion.hotAnchor) {
+    previewMl = meshlineFromAnchors(
+      insertion.firstAnchor,
+      insertion.hotAnchor,
+      insertion.multiplicity
+    );
+    if (previewMl) {
+      previewTargets = previewSplitTargets(state, previewMl);
+      // Shade each would-be-split B-spline's support; alpha composes
+      // additively so overlapping supports darken automatically.
+      for (const B of previewTargets) {
+        const [px0, py0] = uxToSvg(state, B.kx[0], B.ky[B.ky.length - 1]);
+        const [px1, py1] = uxToSvg(state, B.kx[B.kx.length - 1], B.ky[0]);
+        board.appendChild(
+          svgEl('rect', {
+            class: 'bspline-shade',
+            x: Math.min(px0, px1),
+            y: Math.min(py0, py1),
+            width: Math.abs(px1 - px0),
+            height: Math.abs(py1 - py0),
+          })
+        );
+      }
+      // Preview line.
+      let pp0, pp1;
+      if (previewMl.dir === 'h') {
+        pp0 = uxToSvg(state, previewMl.a, previewMl.c);
+        pp1 = uxToSvg(state, previewMl.b, previewMl.c);
+      } else {
+        pp0 = uxToSvg(state, previewMl.c, previewMl.a);
+        pp1 = uxToSvg(state, previewMl.c, previewMl.b);
+      }
+      const cls =
+        previewTargets.length === 0 ? 'preview-line warning' : 'preview-line valid';
+      board.appendChild(
+        svgEl('line', {
+          class: cls,
+          x1: pp0[0],
+          y1: pp0[1],
+          x2: pp1[0],
+          y2: pp1[1],
+        })
+      );
+    }
+  }
+
+  // Anchor circles, with state-dependent classes.
   const anchors = computeAnchors(state);
   for (const a of anchors) {
     let cx, cy;
     if (a.dir === 'h') [cx, cy] = uxToSvg(state, a.mid, a.c);
     else [cx, cy] = uxToSvg(state, a.c, a.mid);
+    let extra = '';
+    if (insertion.mode === 'firstPicked') {
+      if (anchorEquals(a, insertion.firstAnchor)) extra = ' first-pick';
+      else if (anchorIsCompatible(a, insertion.firstAnchor)) extra = ' compatible';
+      if (anchorEquals(a, insertion.hotAnchor) && extra !== ' first-pick') {
+        extra = ' hot';
+      }
+    }
     const c = svgEl('circle', {
-      class: 'anchor',
+      class: 'anchor' + extra,
       cx,
       cy,
       r: ANCHOR_RADIUS,
@@ -352,7 +543,21 @@ function renderBoard() {
         `${a.dir === 'h' ? 'horizontal' : 'vertical'} edge midpoint`
       )
     );
+    c.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) return; // right-click handled by contextmenu
+      e.preventDefault();
+      e.stopPropagation();
+      onAnchorPick(a);
+    });
     board.appendChild(c);
+  }
+}
+
+function onAnchorPick(anchor) {
+  if (insertion.mode === 'idle') {
+    startInsertion(anchor);
+  } else {
+    tryCommitFromAnchors(anchor);
   }
 }
 
@@ -388,12 +593,57 @@ for (const el of cfgInputs) {
 }
 
 inputMult.addEventListener('change', () => {
-  const v = clampInt(inputMult.value, 1, Math.max(store.current.p, store.current.q) + 1);
-  inputMult.value = v;
+  setMultiplicity(Number(inputMult.value));
+  if (insertion.mode === 'firstPicked') renderBoard();
 });
+
+// Pointer move on the board updates the preview and the floating
+// multiplicity badge while in firstPicked mode.
+board.addEventListener('pointermove', (e) => {
+  if (insertion.mode !== 'firstPicked') return;
+  positionFloatingMult(e.clientX, e.clientY);
+  const svgPt = svgPointFromEvent(e);
+  const candidate = nearestCompatibleAnchor(svgPt);
+  if (!anchorEquals(candidate, insertion.hotAnchor)) {
+    insertion.hotAnchor = candidate;
+    renderBoard();
+  }
+});
+
+// Click on empty canvas (outside any anchor) cancels.
+board.addEventListener('pointerdown', (e) => {
+  if (e.button === 2) return;
+  if (insertion.mode === 'firstPicked') {
+    cancelInsertion('Insertion cancelled.');
+  }
+});
+
+// Right-click cancels.
+board.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (insertion.mode === 'firstPicked') cancelInsertion('Insertion cancelled.');
+});
+
+// Wheel adjusts multiplicity while in firstPicked mode.
+board.addEventListener(
+  'wheel',
+  (e) => {
+    if (insertion.mode !== 'firstPicked') return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    setMultiplicity(insertion.multiplicity + delta);
+    renderBoard();
+  },
+  { passive: false }
+);
 
 window.addEventListener('keydown', (e) => {
   const ctrl = e.ctrlKey || e.metaKey;
+  if (e.key === 'Escape' && insertion.mode === 'firstPicked') {
+    e.preventDefault();
+    cancelInsertion('Insertion cancelled.');
+    return;
+  }
   if (ctrl && (e.key === 'z' || e.key === 'Z')) {
     e.preventDefault();
     if (e.shiftKey) redo();
@@ -402,6 +652,10 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     redo();
   }
+});
+
+window.addEventListener('resize', () => {
+  if (insertion.mode === 'firstPicked') positionFloatingMult();
 });
 
 // Expose a small dev API for manual smoke-testing of Phase 3 from the console
@@ -417,4 +671,5 @@ window.lrDev = {
 // --- Init ------------------------------------------------------------------
 writeConfigToControls();
 rebuildFromConfig();
+setMultiplicity(1);
 setStatus('Ready.');
