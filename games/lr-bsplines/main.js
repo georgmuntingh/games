@@ -9,6 +9,7 @@ import {
   createInitialState,
   deserialize,
   distinct,
+  evalBSpline2D,
   insertMeshLine,
   meshlineFromAnchors,
   previewSplitTargets,
@@ -41,6 +42,11 @@ const statMeshlines = document.getElementById('stat-meshlines');
 const statBsplines = document.getElementById('stat-bsplines');
 const statRefinements = document.getElementById('stat-refinements');
 
+const inset = document.getElementById('inset');
+const insetCtx = inset.getContext('2d');
+const insetToggle = document.getElementById('inset-toggle');
+const insetLabelEl = document.getElementById('inset-label');
+
 // --- Store -----------------------------------------------------------------
 const store = {
   initialConfig: {
@@ -50,6 +56,8 @@ const store = {
   undoStack: [],
   redoStack: [],
   selectedBSplineIndex: null,
+  hoveredBSplineIndex: null,
+  insetMode: 'contour', // 'contour' | 'wireframe'
 };
 
 // --- Insertion state machine (Phase 5) ------------------------------------
@@ -235,11 +243,16 @@ function rebuildFromConfig() {
   notifyChange();
 }
 
+function clearSelectionAndHover() {
+  store.selectedBSplineIndex = null;
+  store.hoveredBSplineIndex = null;
+}
+
 function commitInsertion(meshline) {
   store.undoStack.push(cloneState(store.current));
   store.redoStack = [];
   const result = insertMeshLine(store.current, meshline);
-  store.selectedBSplineIndex = null;
+  clearSelectionAndHover();
   notifyChange();
   return result;
 }
@@ -248,7 +261,7 @@ function undo() {
   if (store.undoStack.length === 0) return;
   store.redoStack.push(cloneState(store.current));
   store.current = store.undoStack.pop();
-  store.selectedBSplineIndex = null;
+  clearSelectionAndHover();
   notifyChange();
   setStatus('Undone.');
 }
@@ -257,7 +270,7 @@ function redo() {
   if (store.redoStack.length === 0) return;
   store.undoStack.push(cloneState(store.current));
   store.current = store.redoStack.pop();
-  store.selectedBSplineIndex = null;
+  clearSelectionAndHover();
   notifyChange();
   setStatus('Redone.');
 }
@@ -341,6 +354,7 @@ function notifyChange() {
   setMultiplicity(insertion.multiplicity);
   renderBSplineList();
   renderBoard();
+  renderInset();
 }
 
 function renderBSplineList() {
@@ -357,15 +371,38 @@ function renderBSplineList() {
   bsplineList.innerHTML = indices
     .map((i) => {
       const B = s.bsplines[i];
-      const sel = i === store.selectedBSplineIndex ? ' selected' : '';
+      const cls = [];
+      if (i === store.selectedBSplineIndex) cls.push('selected');
+      if (i === store.hoveredBSplineIndex) cls.push('hover');
       return (
-        `<li class="${sel}" data-index="${i}">` +
+        `<li class="${cls.join(' ')}" data-index="${i}">` +
         `<span class="coeff">c=${B.coeff.toFixed(3)}</span>` +
         `<span class="kv">x: ${fmt(B.kx)}<br>y: ${fmt(B.ky)}</span>` +
         `</li>`
       );
     })
     .join('');
+  // Wire click + hover handlers on each entry.
+  for (const li of bsplineList.querySelectorAll('li')) {
+    const idx = Number(li.dataset.index);
+    li.addEventListener('click', () => {
+      store.selectedBSplineIndex =
+        store.selectedBSplineIndex === idx ? null : idx;
+      renderBSplineList();
+      renderBoard();
+      renderInset();
+    });
+    li.addEventListener('mouseenter', () => {
+      store.hoveredBSplineIndex = idx;
+      renderBoard();
+    });
+    li.addEventListener('mouseleave', () => {
+      if (store.hoveredBSplineIndex === idx) {
+        store.hoveredBSplineIndex = null;
+        renderBoard();
+      }
+    });
+  }
 }
 
 // --- SVG rendering (Phase 4) ----------------------------------------------
@@ -536,6 +573,32 @@ function renderBoard() {
     }
   }
 
+  // Highlight overlays for the selected (solid blue outline) and hovered
+  // (lighter shade) B-splines from the basis list.
+  const drawSupport = (idx, cls) => {
+    if (idx === null || idx === undefined) return;
+    const B = state.bsplines[idx];
+    if (!B) return;
+    const [px0, py0] = uxToSvg(state, B.kx[0], B.ky[B.ky.length - 1]);
+    const [px1, py1] = uxToSvg(state, B.kx[B.kx.length - 1], B.ky[0]);
+    board.appendChild(
+      svgEl('rect', {
+        class: cls,
+        x: Math.min(px0, px1),
+        y: Math.min(py0, py1),
+        width: Math.abs(px1 - px0),
+        height: Math.abs(py1 - py0),
+      })
+    );
+  };
+  if (
+    store.hoveredBSplineIndex !== null &&
+    store.hoveredBSplineIndex !== store.selectedBSplineIndex
+  ) {
+    drawSupport(store.hoveredBSplineIndex, 'bspline-shade');
+  }
+  drawSupport(store.selectedBSplineIndex, 'bspline-highlight');
+
   // Anchor circles, with state-dependent classes.
   const anchors = computeAnchors(state);
   for (const a of anchors) {
@@ -575,6 +638,268 @@ function renderBoard() {
     });
     board.appendChild(c);
   }
+}
+
+// --- Hover detection on the main canvas (Phase 6) -------------------------
+function svgPointToUserCoords(svgPt) {
+  const state = store.current;
+  if (!svgPt || !state) return null;
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const u = xmin + ((svgPt[0] - VB.x0) / VB.w) * (xmax - xmin);
+  const v = ymax - ((svgPt[1] - VB.y0) / VB.h) * (ymax - ymin);
+  return [u, v];
+}
+
+function bsplineUnderPoint(state, u, v) {
+  let bestIdx = null;
+  let bestArea = Infinity;
+  for (let i = 0; i < state.bsplines.length; i++) {
+    const B = state.bsplines[i];
+    const x0 = B.kx[0];
+    const x1 = B.kx[B.kx.length - 1];
+    const y0 = B.ky[0];
+    const y1 = B.ky[B.ky.length - 1];
+    if (u < x0 || u > x1 || v < y0 || v > y1) continue;
+    const area = (x1 - x0) * (y1 - y0);
+    if (area < bestArea) {
+      bestArea = area;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+function setHoveredBSpline(idx) {
+  if (idx === store.hoveredBSplineIndex) return;
+  store.hoveredBSplineIndex = idx;
+  renderBSplineList();
+  renderBoard();
+  // Scroll the list to the hovered entry, if any.
+  if (idx !== null) {
+    const target = bsplineList.querySelector(`li[data-index="${idx}"]`);
+    if (target) target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+// --- Inset rendering (Phase 6) ---------------------------------------------
+function viridisRGB(t) {
+  const stops = [
+    [0.0, 68, 1, 84],
+    [0.25, 59, 82, 139],
+    [0.5, 33, 144, 141],
+    [0.75, 93, 201, 99],
+    [1.0, 253, 231, 37],
+  ];
+  const tt = Math.max(0, Math.min(1, t));
+  for (let i = 1; i < stops.length; i++) {
+    const [t1, r1, g1, b1] = stops[i];
+    const [t0, r0, g0, b0] = stops[i - 1];
+    if (tt <= t1) {
+      const f = (tt - t0) / (t1 - t0);
+      return [
+        Math.round(r0 + (r1 - r0) * f),
+        Math.round(g0 + (g1 - g0) * f),
+        Math.round(b0 + (b1 - b0) * f),
+      ];
+    }
+  }
+  return [253, 231, 37];
+}
+
+function sampleBSplineGrid(B, N) {
+  const x0 = B.kx[0];
+  const x1 = B.kx[B.kx.length - 1];
+  const y0 = B.ky[0];
+  const y1 = B.ky[B.ky.length - 1];
+  const grid = new Float32Array(N * N);
+  let maxV = 0;
+  for (let j = 0; j < N; j++) {
+    const v = y0 + ((y1 - y0) * j) / (N - 1);
+    for (let i = 0; i < N; i++) {
+      const u = x0 + ((x1 - x0) * i) / (N - 1);
+      const val = evalBSpline2D(B, u, v);
+      grid[j * N + i] = val;
+      if (val > maxV) maxV = val;
+    }
+  }
+  return { grid, maxV: maxV || 1 };
+}
+
+function renderContour(B) {
+  const W = inset.width;
+  const H = inset.height;
+  const N = 80;
+  const { grid, maxV } = sampleBSplineGrid(B, N);
+  const img = insetCtx.createImageData(W, H);
+  for (let py = 0; py < H; py++) {
+    const gj = ((H - 1 - py) / (H - 1)) * (N - 1);
+    const j0 = Math.floor(gj);
+    const j1 = Math.min(N - 1, j0 + 1);
+    const fj = gj - j0;
+    for (let px = 0; px < W; px++) {
+      const gi = (px / (W - 1)) * (N - 1);
+      const i0 = Math.floor(gi);
+      const i1 = Math.min(N - 1, i0 + 1);
+      const fi = gi - i0;
+      const v00 = grid[j0 * N + i0];
+      const v01 = grid[j0 * N + i1];
+      const v10 = grid[j1 * N + i0];
+      const v11 = grid[j1 * N + i1];
+      const v =
+        (1 - fi) * (1 - fj) * v00 +
+        fi * (1 - fj) * v01 +
+        (1 - fi) * fj * v10 +
+        fi * fj * v11;
+      const [r, g, b] = viridisRGB(v / maxV);
+      const idx = (py * W + px) * 4;
+      img.data[idx] = r;
+      img.data[idx + 1] = g;
+      img.data[idx + 2] = b;
+      img.data[idx + 3] = 255;
+    }
+  }
+  insetCtx.putImageData(img, 0, 0);
+  // Faint isolines at 0.25, 0.5, 0.75 of max via marching squares (cheap version).
+  insetCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+  insetCtx.lineWidth = 1;
+  for (const level of [0.25, 0.5, 0.75]) {
+    drawIsoline(grid, N, W, H, level * maxV);
+  }
+  // Border.
+  insetCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+  insetCtx.lineWidth = 1;
+  insetCtx.strokeRect(0.5, 0.5, W - 1, H - 1);
+}
+
+function drawIsoline(grid, N, W, H, level) {
+  // Marching squares — line segments per cell.
+  const toCanvas = (gi, gj) => {
+    const px = (gi / (N - 1)) * (W - 1);
+    const py = (1 - gj / (N - 1)) * (H - 1);
+    return [px, py];
+  };
+  const interp = (a, b, va, vb) => (level - va) / (vb - va);
+  insetCtx.beginPath();
+  for (let j = 0; j < N - 1; j++) {
+    for (let i = 0; i < N - 1; i++) {
+      const v00 = grid[j * N + i];
+      const v10 = grid[j * N + i + 1];
+      const v01 = grid[(j + 1) * N + i];
+      const v11 = grid[(j + 1) * N + i + 1];
+      const code =
+        (v00 > level ? 1 : 0) |
+        (v10 > level ? 2 : 0) |
+        (v11 > level ? 4 : 0) |
+        (v01 > level ? 8 : 0);
+      if (code === 0 || code === 15) continue;
+      // Edge midpoints
+      const eBot = () => toCanvas(i + interp(0, 1, v00, v10), j);
+      const eRight = () => toCanvas(i + 1, j + interp(0, 1, v10, v11));
+      const eTop = () => toCanvas(i + interp(0, 1, v01, v11), j + 1);
+      const eLeft = () => toCanvas(i, j + interp(0, 1, v00, v01));
+      const segs = {
+        1: [eLeft(), eBot()],
+        2: [eBot(), eRight()],
+        3: [eLeft(), eRight()],
+        4: [eTop(), eRight()],
+        5: [eLeft(), eTop(), eBot(), eRight()],
+        6: [eBot(), eTop()],
+        7: [eLeft(), eTop()],
+        8: [eLeft(), eTop()],
+        9: [eBot(), eTop()],
+        10: [eLeft(), eBot(), eTop(), eRight()],
+        11: [eTop(), eRight()],
+        12: [eLeft(), eRight()],
+        13: [eBot(), eRight()],
+        14: [eLeft(), eBot()],
+      }[code];
+      for (let k = 0; k < segs.length; k += 2) {
+        insetCtx.moveTo(segs[k][0], segs[k][1]);
+        insetCtx.lineTo(segs[k + 1][0], segs[k + 1][1]);
+      }
+    }
+  }
+  insetCtx.stroke();
+}
+
+function renderWireframe(B) {
+  const W = inset.width;
+  const H = inset.height;
+  const M = 28;
+  const { grid, maxV } = sampleBSplineGrid(B, M);
+  const margin = 14;
+  const drawW = W - 2 * margin;
+  const drawH = H - 2 * margin;
+  const project = (i, j) => {
+    const u = i / (M - 1);
+    const v = j / (M - 1);
+    const z = grid[j * M + i] / maxV;
+    const cx = u * 0.7 + v * 0.25 + 0.05;
+    const cy = 1 - z * 0.7 - v * 0.25;
+    return [margin + cx * drawW, margin + cy * drawH];
+  };
+  // Floor box outline (z=0).
+  insetCtx.strokeStyle = 'rgba(255,255,255,0.18)';
+  insetCtx.lineWidth = 1;
+  insetCtx.beginPath();
+  const corners = [
+    [0, 0], [M - 1, 0], [M - 1, M - 1], [0, M - 1], [0, 0],
+  ];
+  for (let k = 0; k < corners.length; k++) {
+    const [i, j] = corners[k];
+    // Project floor corner with z=0 (override grid value temporarily).
+    const u = i / (M - 1);
+    const v = j / (M - 1);
+    const cx = u * 0.7 + v * 0.25 + 0.05;
+    const cy = 1 - 0 - v * 0.25;
+    const px = margin + cx * drawW;
+    const py = margin + cy * drawH;
+    if (k === 0) insetCtx.moveTo(px, py);
+    else insetCtx.lineTo(px, py);
+  }
+  insetCtx.stroke();
+  // Wireframe surface, painter's algorithm: back-to-front (high j first).
+  insetCtx.strokeStyle = 'rgba(96, 165, 250, 0.75)';
+  insetCtx.lineWidth = 0.9;
+  for (let j = M - 1; j >= 0; j--) {
+    insetCtx.beginPath();
+    for (let i = 0; i < M; i++) {
+      const [px, py] = project(i, j);
+      if (i === 0) insetCtx.moveTo(px, py);
+      else insetCtx.lineTo(px, py);
+    }
+    insetCtx.stroke();
+  }
+  for (let i = 0; i < M; i++) {
+    insetCtx.beginPath();
+    for (let j = 0; j < M; j++) {
+      const [px, py] = project(i, j);
+      if (j === 0) insetCtx.moveTo(px, py);
+      else insetCtx.lineTo(px, py);
+    }
+    insetCtx.stroke();
+  }
+}
+
+function renderInset() {
+  const W = inset.width;
+  const H = inset.height;
+  insetCtx.fillStyle = '#0b0d12';
+  insetCtx.fillRect(0, 0, W, H);
+  const idx = store.selectedBSplineIndex;
+  const B = idx !== null && idx !== undefined ? store.current.bsplines[idx] : null;
+  if (!B) {
+    insetLabelEl.textContent = '—';
+    insetCtx.fillStyle = 'rgba(255,255,255,0.45)';
+    insetCtx.font = '11px system-ui, sans-serif';
+    insetCtx.textAlign = 'center';
+    insetCtx.textBaseline = 'middle';
+    insetCtx.fillText('Click a B-spline to preview', W / 2, H / 2);
+    return;
+  }
+  insetLabelEl.textContent = `B[${idx}]   c=${B.coeff.toFixed(3)}`;
+  if (store.insetMode === 'contour') renderContour(B);
+  else renderWireframe(B);
 }
 
 function onAnchorPointerDown(anchor, e) {
@@ -628,21 +953,42 @@ inputMult.addEventListener('change', () => {
 
 // Pointer move on the board updates the preview and the floating
 // multiplicity badge while in firstPicked mode. Also tracks drag distance
-// so a press-and-drag insertion can be committed on pointerup.
+// so a press-and-drag insertion can be committed on pointerup. In idle
+// mode it does B-spline hover detection (smallest-containing-support wins)
+// for two-way list↔canvas sync.
 board.addEventListener('pointermove', (e) => {
-  if (insertion.mode !== 'firstPicked') return;
-  positionFloatingMult(e.clientX, e.clientY);
-  if (drag.pointerDown) {
-    const dx = e.clientX - drag.startClientX;
-    const dy = e.clientY - drag.startClientY;
-    if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) drag.moved = true;
+  if (insertion.mode === 'firstPicked') {
+    positionFloatingMult(e.clientX, e.clientY);
+    if (drag.pointerDown) {
+      const dx = e.clientX - drag.startClientX;
+      const dy = e.clientY - drag.startClientY;
+      if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) drag.moved = true;
+    }
+    const svgPt = svgPointFromEvent(e);
+    const candidate = nearestCompatibleAnchor(svgPt);
+    if (!anchorEquals(candidate, insertion.hotAnchor)) {
+      insertion.hotAnchor = candidate;
+      renderBoard();
+    }
+    return;
   }
+  // idle mode: hover detection.
   const svgPt = svgPointFromEvent(e);
-  const candidate = nearestCompatibleAnchor(svgPt);
-  if (!anchorEquals(candidate, insertion.hotAnchor)) {
-    insertion.hotAnchor = candidate;
-    renderBoard();
+  const userPt = svgPointToUserCoords(svgPt);
+  if (!userPt) return;
+  const state = store.current;
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const [u, v] = userPt;
+  if (u < xmin || u > xmax || v < ymin || v > ymax) {
+    setHoveredBSpline(null);
+    return;
   }
+  setHoveredBSpline(bsplineUnderPoint(state, u, v));
+});
+
+// Clear hover when pointer leaves the board.
+board.addEventListener('pointerleave', () => {
+  if (insertion.mode !== 'firstPicked') setHoveredBSpline(null);
 });
 
 // Click on empty canvas (outside any anchor) cancels.
@@ -705,6 +1051,14 @@ window.addEventListener('keydown', (e) => {
 
 window.addEventListener('resize', () => {
   if (insertion.mode === 'firstPicked') positionFloatingMult();
+});
+
+insetToggle.addEventListener('click', () => {
+  store.insetMode = store.insetMode === 'contour' ? 'wireframe' : 'contour';
+  insetToggle.textContent =
+    store.insetMode === 'contour' ? '2D contour' : '3D wireframe';
+  insetToggle.dataset.mode = store.insetMode;
+  renderInset();
 });
 
 // Expose a small dev API for manual smoke-testing of Phase 3 from the console
