@@ -406,14 +406,31 @@ export function computeAnchors(state) {
   return [...seen.values()];
 }
 
-// Given two anchors (assumed validated to be collinear and on the same direction),
-// build the meshline they describe.
+// Build a mesh-line from two compatible anchors.
+//
+// Two anchors are compatible if they share a direction AND either:
+//   (a) they lie on the same existing mesh-line (same `c`) — picking a pair
+//       on that line raises its multiplicity over the union of their edges, or
+//   (b) they share an edge midpoint (same `mid`) but lie on different
+//       existing mesh-lines (different `c`) — picking the pair defines a new
+//       *perpendicular* mesh-line at that midpoint, spanning between the two
+//       existing mesh-lines.
+//
+// Returns null if the anchors are not compatible.
 export function meshlineFromAnchors(a1, a2, mult) {
   if (a1.dir !== a2.dir) return null;
-  if (!approxEq(a1.c, a2.c)) return null;
-  const lo = Math.min(a1.edgeLo, a2.edgeLo);
-  const hi = Math.max(a1.edgeHi, a2.edgeHi);
-  return { dir: a1.dir, c: a1.c, a: lo, b: hi, m: mult };
+  if (approxEq(a1.c, a2.c)) {
+    const lo = Math.min(a1.edgeLo, a2.edgeLo);
+    const hi = Math.max(a1.edgeHi, a2.edgeHi);
+    return { dir: a1.dir, c: a1.c, a: lo, b: hi, m: mult };
+  }
+  if (approxEq(a1.mid, a2.mid)) {
+    const newDir = a1.dir === 'h' ? 'v' : 'h';
+    const lo = Math.min(a1.c, a2.c);
+    const hi = Math.max(a1.c, a2.c);
+    return { dir: newDir, c: a1.mid, a: lo, b: hi, m: mult };
+  }
+  return null;
 }
 
 export function cloneState(state) {

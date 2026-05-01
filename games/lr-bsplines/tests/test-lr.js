@@ -245,7 +245,7 @@ test('anchor count for Nx=1, Ny=1 open biquadratic', () => {
   assertEq(anchors.length, 12);
 });
 
-test('meshlineFromAnchors: builds correct meshline from two anchors on same line', () => {
+test('meshlineFromAnchors: same mesh-line, different edges raises multiplicity', () => {
   const a1 = { dir: 'h', c: 0.5, edgeLo: 0, edgeHi: 0.25, mid: 0.125 };
   const a2 = { dir: 'h', c: 0.5, edgeLo: 0.5, edgeHi: 0.75, mid: 0.625 };
   const ml = meshlineFromAnchors(a1, a2, 1);
@@ -254,6 +254,25 @@ test('meshlineFromAnchors: builds correct meshline from two anchors on same line
   assertClose(ml.a, 0);
   assertClose(ml.b, 0.75);
   assertEq(ml.m, 1);
+});
+
+test('meshlineFromAnchors: same mid on different mesh-lines defines a new perpendicular line', () => {
+  // Two horizontal-anchor edge midpoints at x=0.5 on different y-mesh-lines.
+  const a1 = { dir: 'h', c: 0,   edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  const a2 = { dir: 'h', c: 0.5, edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  const ml = meshlineFromAnchors(a1, a2, 1);
+  assertEq(ml.dir, 'v');
+  assertClose(ml.c, 0.5);
+  assertClose(ml.a, 0);
+  assertClose(ml.b, 0.5);
+});
+
+test('meshlineFromAnchors: incompatible anchors return null', () => {
+  const a1 = { dir: 'h', c: 0,   edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  const a2 = { dir: 'h', c: 0.5, edgeLo: 0, edgeHi: 1, mid: 0.25 };
+  assertEq(meshlineFromAnchors(a1, a2, 1), null);
+  const a3 = { dir: 'v', c: 0.5, edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  assertEq(meshlineFromAnchors(a1, a3, 1), null);
 });
 
 // 7. Serialize / deserialize roundtrip -----------------------------------

@@ -60,6 +60,15 @@ const insertion = {
   multiplicity: 1,
 };
 
+// Drag tracking for the press-and-drag insertion mechanism.
+const drag = {
+  pointerDown: false,
+  startClientX: 0,
+  startClientY: 0,
+  moved: false,
+};
+const DRAG_THRESHOLD_PX = 5;
+
 function maxMultiplicity() {
   const s = store.current;
   return s ? Math.max(s.p, s.q) + 1 : 6;
@@ -82,18 +91,22 @@ function anchorEquals(a, b) {
 }
 
 function anchorIsCompatible(a, first) {
-  return a.dir === first.dir && approxEq(a.c, first.c);
+  if (a.dir !== first.dir) return false;
+  // Same existing mesh-line (raises multiplicity), OR same midpoint on a
+  // different mesh-line (defines a new perpendicular mesh-line).
+  return approxEq(a.c, first.c) || approxEq(a.mid, first.mid);
 }
 
 function startInsertion(anchor) {
   insertion.mode = 'firstPicked';
   insertion.firstAnchor = anchor;
-  insertion.hotAnchor = anchor; // cursor is on the anchor we just clicked
+  insertion.hotAnchor = anchor;
   setMultiplicity(insertion.multiplicity);
   floatingMult.hidden = false;
   positionFloatingMult();
+  const newPerp = anchor.dir === 'h' ? 'vertical' : 'horizontal';
   setStatus(
-    `Picked ${anchor.dir === 'h' ? 'horizontal' : 'vertical'} anchor at ${anchor.dir === 'h' ? 'y' : 'x'}=${anchor.c.toFixed(3)}. Pick a second anchor on the same line, or press Esc to cancel.`
+    `Picked anchor. Choose a second anchor with the same midpoint to insert a new ${newPerp} mesh-line, or one on the same existing mesh-line to raise its multiplicity. Hold-and-drag also works; Esc cancels.`
   );
   renderBoard();
 }
@@ -110,7 +123,10 @@ function cancelInsertion(reason) {
 function tryCommitFromAnchors(secondAnchor) {
   const first = insertion.firstAnchor;
   if (!anchorIsCompatible(secondAnchor, first)) {
-    setStatus('Both anchors must lie on the same mesh-line.', true);
+    setStatus(
+      'Anchors must share a direction and either lie on the same mesh-line or share the same midpoint.',
+      true
+    );
     return;
   }
   const ml = meshlineFromAnchors(first, secondAnchor, insertion.multiplicity);
@@ -118,16 +134,19 @@ function tryCommitFromAnchors(secondAnchor) {
     setStatus('Could not build mesh-line from these anchors.', true);
     return;
   }
+  const isRaisingMult = approxEq(first.c, secondAnchor.c);
   const targets = previewSplitTargets(store.current, ml);
   commitInsertion(ml);
+  const dirWord = ml.dir === 'h' ? 'horizontal' : 'vertical';
+  const axis = ml.dir === 'h' ? 'y' : 'x';
+  const action = isRaisingMult
+    ? `Raised multiplicity of the ${dirWord} mesh-line at ${axis}=${ml.c.toFixed(3)}`
+    : `Inserted new ${dirWord} mesh-line at ${axis}=${ml.c.toFixed(3)}`;
   if (targets.length === 0) {
-    setStatus(
-      `Inserted m=${ml.m} ${ml.dir === 'h' ? 'horizontal' : 'vertical'} line. Warning: no B-splines were split (not a strict LR refinement).`,
-      true
-    );
+    setStatus(`${action} (m=${ml.m}). Warning: no B-splines were split — not a strict LR refinement.`, true);
   } else {
     setStatus(
-      `Inserted m=${ml.m} ${ml.dir === 'h' ? 'horizontal' : 'vertical'} line — ${targets.length} B-spline${targets.length === 1 ? '' : 's'} split; basis now has ${store.current.bsplines.length}.`
+      `${action} (m=${ml.m}) — ${targets.length} B-spline${targets.length === 1 ? '' : 's'} split; basis now has ${store.current.bsplines.length}.`
     );
   }
   cancelInsertion(null);
@@ -158,6 +177,11 @@ function svgPointFromEvent(event) {
   return [local.x, local.y];
 }
 
+// SVG-unit threshold beyond which we no longer snap to the nearest compatible
+// anchor. Values are in viewBox units (the viewBox is 600x600). About 13% of
+// the side gives a comfortable hit-target on both desktop and mobile.
+const SNAP_RADIUS = 80;
+
 function nearestCompatibleAnchor(svgPt) {
   const state = store.current;
   if (!svgPt || insertion.mode !== 'firstPicked') return null;
@@ -175,7 +199,7 @@ function nearestCompatibleAnchor(svgPt) {
       best = a;
     }
   }
-  return best;
+  return bestDist <= SNAP_RADIUS ? best : null;
 }
 
 function clampInt(v, lo, hi) {
@@ -547,16 +571,21 @@ function renderBoard() {
       if (e.button === 2) return; // right-click handled by contextmenu
       e.preventDefault();
       e.stopPropagation();
-      onAnchorPick(a);
+      onAnchorPointerDown(a, e);
     });
     board.appendChild(c);
   }
 }
 
-function onAnchorPick(anchor) {
+function onAnchorPointerDown(anchor, e) {
+  drag.pointerDown = true;
+  drag.startClientX = e.clientX;
+  drag.startClientY = e.clientY;
+  drag.moved = false;
   if (insertion.mode === 'idle') {
     startInsertion(anchor);
   } else {
+    // Click-then-click flow: commit using this anchor as the second pick.
     tryCommitFromAnchors(anchor);
   }
 }
@@ -598,10 +627,16 @@ inputMult.addEventListener('change', () => {
 });
 
 // Pointer move on the board updates the preview and the floating
-// multiplicity badge while in firstPicked mode.
+// multiplicity badge while in firstPicked mode. Also tracks drag distance
+// so a press-and-drag insertion can be committed on pointerup.
 board.addEventListener('pointermove', (e) => {
   if (insertion.mode !== 'firstPicked') return;
   positionFloatingMult(e.clientX, e.clientY);
+  if (drag.pointerDown) {
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) drag.moved = true;
+  }
   const svgPt = svgPointFromEvent(e);
   const candidate = nearestCompatibleAnchor(svgPt);
   if (!anchorEquals(candidate, insertion.hotAnchor)) {
@@ -616,6 +651,20 @@ board.addEventListener('pointerdown', (e) => {
   if (insertion.mode === 'firstPicked') {
     cancelInsertion('Insertion cancelled.');
   }
+});
+
+// Pointerup on the document so we can recover even if the user drags off
+// the board. If a real drag happened, commit using the snapped hot anchor.
+document.addEventListener('pointerup', () => {
+  const wasDrag = drag.pointerDown && drag.moved;
+  drag.pointerDown = false;
+  drag.moved = false;
+  if (!wasDrag || insertion.mode !== 'firstPicked') return;
+  if (insertion.hotAnchor && !anchorEquals(insertion.hotAnchor, insertion.firstAnchor)) {
+    tryCommitFromAnchors(insertion.hotAnchor);
+  }
+  // Otherwise the drag dissolved without a snap; stay in firstPicked so the
+  // user can try again or press Esc.
 });
 
 // Right-click cancels.
