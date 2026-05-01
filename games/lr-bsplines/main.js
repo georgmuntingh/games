@@ -1,6 +1,18 @@
-// Phases 3 + 4 + 5: state management, SVG rendering, and interactive
-// mesh-line insertion. Phase 6 will add the basis-function inset and
-// two-way hover highlighting; Phases 7+ are panel polish and manifest.
+// LR B-spline Refinement — interactive game.
+//
+// Implements the LR-mesh + LR B-spline data model from
+// Dokken, Lyche & Pettersen, "Polynomial splines over locally refined
+// box-partitions", CAGD 2013, on top of the math module in lr-math.js.
+//
+// Layout:
+//   * a store with current state + undo / redo stacks,
+//   * an SVG renderer that paints the mesh-lines, anchors, B-spline
+//     support overlays, and the in-flight insertion preview,
+//   * an insertion state machine driving two interaction styles:
+//       click-then-click, and press-and-drag (with snap-to-anchor),
+//   * a basis-function list with two-way hover sync to the canvas
+//     and a 2D-contour / 3D-wireframe inset preview,
+//   * keyboard, mouse-wheel and touch handlers.
 
 import {
   approxEq,
@@ -60,7 +72,7 @@ const store = {
   insetMode: 'contour', // 'contour' | 'wireframe'
 };
 
-// --- Insertion state machine (Phase 5) ------------------------------------
+// --- Insertion state machine ----------------------------------------------
 const insertion = {
   mode: 'idle',          // 'idle' | 'firstPicked'
   firstAnchor: null,
@@ -405,7 +417,7 @@ function renderBSplineList() {
   }
 }
 
-// --- SVG rendering (Phase 4) ----------------------------------------------
+// --- SVG rendering --------------------------------------------------------
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const VB = { x0: 40, y0: 40, w: 520, h: 520 };
 const STROKE_BASE = 1.5;
@@ -640,7 +652,7 @@ function renderBoard() {
   }
 }
 
-// --- Hover detection on the main canvas (Phase 6) -------------------------
+// --- Hover detection on the main canvas -----------------------------------
 function svgPointToUserCoords(svgPt) {
   const state = store.current;
   if (!svgPt || !state) return null;
@@ -681,7 +693,7 @@ function setHoveredBSpline(idx) {
   }
 }
 
-// --- Inset rendering (Phase 6) ---------------------------------------------
+// --- Inset rendering ------------------------------------------------------
 function viridisRGB(t) {
   const stops = [
     [0.0, 68, 1, 84],
@@ -1060,16 +1072,6 @@ insetToggle.addEventListener('click', () => {
   insetToggle.dataset.mode = store.insetMode;
   renderInset();
 });
-
-// Expose a small dev API for manual smoke-testing of Phase 3 from the console
-// before the real insertion UX lands in Phase 5.
-window.lrDev = {
-  store,
-  commitInsertion,
-  reset,
-  undo,
-  redo,
-};
 
 // --- Init ------------------------------------------------------------------
 writeConfigToControls();

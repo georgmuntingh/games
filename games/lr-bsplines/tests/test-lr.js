@@ -8,6 +8,7 @@ import {
   insertMeshLine,
   computeAnchors,
   meshlineFromAnchors,
+  previewSplitTargets,
   serialize,
   deserialize,
   approxEq,
@@ -320,7 +321,90 @@ test('multiplicity-2 horizontal split reduces continuity at γ', () => {
   }
 });
 
-// Run -------------------------------------------------------------------
+// 9. End-to-end Phase-9 walkthrough scenarios -----------------------------
+test('default config (Nx=Ny=2, biquadratic open) produces 25 B-splines', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  // knotsX length = (p+1) + Nx + (p+1) = 3+2+3 = 8 -> 8 - 3 = 5 B-splines in x;
+  // same in y; total = 25.
+  assertEq(s.bsplines.length, 25);
+});
+
+test('default config has 24 anchors (4 mesh-lines × 3 edges, both directions)', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  assertEq(computeAnchors(s).length, 24);
+});
+
+test('press-and-drag perpendicular: same-mid + different-c builds a new perpendicular line', () => {
+  // Picks two anchors on horizontal mesh-lines at the same mid_x, on different
+  // y-mesh-lines, to insert a new vertical mesh-line through their midpoint.
+  const a1 = { dir: 'h', c: 0,    edgeLo: 0, edgeHi: 1 / 3, mid: 1 / 6 };
+  const a2 = { dir: 'h', c: 1/3,  edgeLo: 0, edgeHi: 1 / 3, mid: 1 / 6 };
+  const ml = meshlineFromAnchors(a1, a2, 1);
+  assertEq(ml.dir, 'v');
+  assertClose(ml.c, 1 / 6);
+  assertClose(ml.a, 0);
+  assertClose(ml.b, 1 / 3);
+});
+
+test('full pipeline: insert perpendicular line on default mesh, basis grows, PoU holds', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const before = s.bsplines.length;
+  // Insert a vertical mesh-line at x=1/6 spanning y ∈ [0, 1/3]; this should
+  // split B-splines whose support is fully traversed.
+  insertMeshLine(s, { dir: 'v', c: 1 / 6, a: 0, b: 1 / 3, m: 1 });
+  assertTrue(s.bsplines.length > before, 'basis must grow');
+  for (const x of [0.05, 0.2, 0.55, 0.95]) {
+    for (const y of [0.05, 0.2, 0.55, 0.95]) {
+      let sum = 0;
+      for (const B of s.bsplines) sum += B.coeff * evalBSpline2D(B, x, y);
+      assertClose(sum, 1, 1e-6, `pou at (${x},${y})`);
+    }
+  }
+});
+
+test('multiple sequential insertions preserve PoU', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'v', c: 1 / 6, a: 0, b: 1 / 3, m: 1 });
+  insertMeshLine(s, { dir: 'h', c: 1 / 6, a: 0, b: 1 / 3, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 5 / 6, a: 2 / 3, b: 1, m: 1 });
+  for (const x of [0.07, 0.4, 0.85]) {
+    for (const y of [0.07, 0.4, 0.85]) {
+      let sum = 0;
+      for (const B of s.bsplines) sum += B.coeff * evalBSpline2D(B, x, y);
+      assertClose(sum, 1, 1e-6, `pou at (${x},${y})`);
+    }
+  }
+});
+
+test('previewSplitTargets is consistent with the cascade', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const ml = { dir: 'v', c: 1 / 6, a: 0, b: 1 / 3, m: 1 };
+  const targets = previewSplitTargets(s, ml);
+  assertTrue(targets.length > 0, 'preview should report at least one target');
+  // After insertion, the listed targets must no longer appear verbatim in
+  // the basis (they have been split).
+  insertMeshLine(s, ml);
+  for (const orig of targets) {
+    const stillThere = s.bsplines.some(
+      (B) =>
+        B.kx.length === orig.kx.length &&
+        B.ky.length === orig.ky.length &&
+        B.kx.every((v, k) => approxEq(v, orig.kx[k])) &&
+        B.ky.every((v, k) => approxEq(v, orig.ky[k]))
+    );
+    assertTrue(!stillThere, 'predicted target B-spline must have been replaced');
+  }
+});
 export function runAll() {
   const out = { pass: 0, fail: 0, results: [] };
   for (const t of tests) {
