@@ -89,6 +89,24 @@ const drag = {
 };
 const DRAG_THRESHOLD_PX = 5;
 
+// Long-press detection for mobile/touch — promotes the B-spline under the
+// finger to selected and reveals the basis-functions preview, mirroring the
+// desktop double-click gesture.
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_PX = 10;
+const longPress = {
+  timerId: null,
+  startClientX: 0,
+  startClientY: 0,
+};
+
+function cancelLongPress() {
+  if (longPress.timerId !== null) {
+    clearTimeout(longPress.timerId);
+    longPress.timerId = null;
+  }
+}
+
 function maxMultiplicity() {
   const s = store.current;
   return s ? Math.max(s.p, s.q) + 1 : 6;
@@ -103,6 +121,7 @@ function setMultiplicity(m) {
 function anchorEquals(a, b) {
   if (!a || !b) return false;
   return (
+    a.kind === b.kind &&
     a.dir === b.dir &&
     approxEq(a.c, b.c) &&
     approxEq(a.edgeLo, b.edgeLo) &&
@@ -111,10 +130,15 @@ function anchorEquals(a, b) {
 }
 
 function anchorIsCompatible(a, first) {
-  if (a.dir !== first.dir) return false;
-  // Same existing mesh-line (raises multiplicity), OR same midpoint on a
-  // different mesh-line (defines a new perpendicular mesh-line).
-  return approxEq(a.c, first.c) || approxEq(a.mid, first.mid);
+  // Same direction: either on the same host line (same c) or aligned at the
+  // same perpendicular-axis coord (same mid) for a new perpendicular line.
+  if (a.dir === first.dir) {
+    return approxEq(a.c, first.c) || approxEq(a.mid, first.mid);
+  }
+  // Cross direction: a sits on the perpendicular line a1 would induce; this
+  // lets the drag snap to endpoints of perpendicular mesh-lines (T-junctions)
+  // as well as edge midpoints of perpendicular lines.
+  return approxEq(a.c, first.mid);
 }
 
 function startInsertion(anchor) {
@@ -126,7 +150,9 @@ function startInsertion(anchor) {
   positionFloatingMult();
   const newPerp = anchor.dir === 'h' ? 'vertical' : 'horizontal';
   setStatus(
-    `Picked anchor. Choose a second anchor with the same midpoint to insert a new ${newPerp} mesh-line, or one on the same existing mesh-line to raise its multiplicity. Hold-and-drag also works; Esc cancels.`
+    `Picked anchor. Choose a second anchor on the same mesh-line to raise its multiplicity, ` +
+      `or one aligned at this position (including a T-junction endpoint) ` +
+      `to insert a new ${newPerp} mesh-line. Hold-and-drag also works; Esc cancels.`
   );
   renderBoard();
 }
@@ -423,6 +449,12 @@ const VB = { x0: 40, y0: 40, w: 520, h: 520 };
 const STROKE_BASE = 1.5;
 const STROKE_STEP = 1.6;
 const ANCHOR_RADIUS = 4.5;
+// Larger transparent hit-target — keeps anchors clickable even when the
+// underlying mesh-line stroke is wider than the marker itself, which happens
+// on boundary lines under open knot vectors (multiplicity p+1, q+1). Sized
+// to stay below the minimum anchor spacing at the maximum supported
+// Nx/Ny=20 (≈25 SVG units between adjacent edge midpoints).
+const ANCHOR_HIT_RADIUS = 10;
 
 function uxToSvg(state, u, v) {
   const [xmin, xmax, ymin, ymax] = state.domain;
@@ -611,9 +643,12 @@ function renderBoard() {
   }
   drawSupport(store.selectedBSplineIndex, 'bspline-highlight');
 
-  // Anchor circles, with state-dependent classes.
+  // Anchor markers, with state-dependent classes. Midpoint anchors are
+  // circles; T-junction anchors are squares so the user can tell them apart.
+  // Hit-targets are rendered in a first pass and markers in a second pass so
+  // visible markers are always on top of every transparent hit-target.
   const anchors = computeAnchors(state);
-  for (const a of anchors) {
+  const anchorViews = anchors.map((a) => {
     let cx, cy;
     if (a.dir === 'h') [cx, cy] = uxToSvg(state, a.mid, a.c);
     else [cx, cy] = uxToSvg(state, a.c, a.mid);
@@ -625,30 +660,63 @@ function renderBoard() {
         extra = ' hot';
       }
     }
-    const c = svgEl('circle', {
-      class: 'anchor' + extra,
-      cx,
-      cy,
-      r: ANCHOR_RADIUS,
-      'data-dir': a.dir,
-      'data-c': a.c,
-      'data-edgelo': a.edgeLo,
-      'data-edgehi': a.edgeHi,
+    return { a, cx, cy, extra };
+  });
+  const onPointerDownFor = (a) => (e) => {
+    if (e.button === 2) return; // right-click handled by contextmenu
+    e.preventDefault();
+    e.stopPropagation();
+    onAnchorPointerDown(a, e);
+  };
+  // Pass 1: oversized transparent hit-targets so anchors stay clickable on
+  // top of high-multiplicity boundary lines whose stroke can crowd the
+  // visible marker.
+  for (const v of anchorViews) {
+    const hit = svgEl('circle', {
+      class: 'anchor-hit',
+      cx: v.cx,
+      cy: v.cy,
+      r: ANCHOR_HIT_RADIUS,
     });
-    c.appendChild(
-      svgEl(
-        'title',
-        {},
-        `${a.dir === 'h' ? 'horizontal' : 'vertical'} edge midpoint`
-      )
-    );
-    c.addEventListener('pointerdown', (e) => {
-      if (e.button === 2) return; // right-click handled by contextmenu
-      e.preventDefault();
-      e.stopPropagation();
-      onAnchorPointerDown(a, e);
-    });
-    board.appendChild(c);
+    hit.addEventListener('pointerdown', onPointerDownFor(v.a));
+    board.appendChild(hit);
+  }
+  // Pass 2: visible markers on top.
+  for (const v of anchorViews) {
+    const a = v.a;
+    const isTJ = a.kind === 'tjunction';
+    const titleText = isTJ
+      ? `${a.dir === 'h' ? 'horizontal' : 'vertical'} mesh-line endpoint (T-junction)`
+      : `${a.dir === 'h' ? 'horizontal' : 'vertical'} edge midpoint`;
+    let marker;
+    if (isTJ) {
+      const s = ANCHOR_RADIUS * 1.7;
+      marker = svgEl('rect', {
+        class: 'anchor tjunction' + v.extra,
+        x: v.cx - s / 2,
+        y: v.cy - s / 2,
+        width: s,
+        height: s,
+        'data-dir': a.dir,
+        'data-c': a.c,
+        'data-edgelo': a.edgeLo,
+        'data-edgehi': a.edgeHi,
+      });
+    } else {
+      marker = svgEl('circle', {
+        class: 'anchor' + v.extra,
+        cx: v.cx,
+        cy: v.cy,
+        r: ANCHOR_RADIUS,
+        'data-dir': a.dir,
+        'data-c': a.c,
+        'data-edgelo': a.edgeLo,
+        'data-edgehi': a.edgeHi,
+      });
+    }
+    marker.appendChild(svgEl('title', {}, titleText));
+    marker.addEventListener('pointerdown', onPointerDownFor(a));
+    board.appendChild(marker);
   }
 }
 
@@ -686,11 +754,33 @@ function setHoveredBSpline(idx) {
   store.hoveredBSplineIndex = idx;
   renderBSplineList();
   renderBoard();
-  // Scroll the list to the hovered entry, if any.
-  if (idx !== null) {
-    const target = bsplineList.querySelector(`li[data-index="${idx}"]`);
-    if (target) target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  // Scroll only the inner basis-list to the hovered entry. Avoids pulling
+  // the whole page (and the canvas) out from under the user — particularly
+  // problematic on mobile where the sidebar sits below the canvas.
+  if (idx !== null) scrollListItemIntoView(idx);
+}
+
+// Scroll only the bspline-list element to bring `idx` into view. Unlike
+// Element.scrollIntoView(), this never bubbles up to scroll outer ancestors,
+// so it does not move the page on mobile/single-column layouts.
+function scrollListItemIntoView(idx) {
+  const target = bsplineList.querySelector(`li[data-index="${idx}"]`);
+  if (!target) return;
+  const listRect = bsplineList.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  if (targetRect.top < listRect.top) {
+    bsplineList.scrollTop -= listRect.top - targetRect.top;
+  } else if (targetRect.bottom > listRect.bottom) {
+    bsplineList.scrollTop += targetRect.bottom - listRect.bottom;
   }
+}
+
+// Scroll the page so the basis-functions inset preview is comfortably in view.
+// Triggered on desktop double-click and mobile long-press inside a B-spline's
+// support — both explicit "show me this B-spline" gestures, distinct from
+// the passive hover/tap that just highlights it on the canvas.
+function scrollToInsetPreview() {
+  inset.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 // --- Inset rendering ------------------------------------------------------
@@ -969,6 +1059,11 @@ inputMult.addEventListener('change', () => {
 // mode it does B-spline hover detection (smallest-containing-support wins)
 // for two-way list↔canvas sync.
 board.addEventListener('pointermove', (e) => {
+  if (longPress.timerId !== null) {
+    const dx = e.clientX - longPress.startClientX;
+    const dy = e.clientY - longPress.startClientY;
+    if (Math.hypot(dx, dy) > LONG_PRESS_MOVE_PX) cancelLongPress();
+  }
   if (insertion.mode === 'firstPicked') {
     positionFloatingMult(e.clientX, e.clientY);
     if (drag.pointerDown) {
@@ -1003,17 +1098,49 @@ board.addEventListener('pointerleave', () => {
   if (insertion.mode !== 'firstPicked') setHoveredBSpline(null);
 });
 
-// Click on empty canvas (outside any anchor) cancels.
+// Click on empty canvas (outside any anchor) cancels insertion. Also arms
+// a long-press timer for touch input, which — when held still inside a
+// B-spline's support — promotes that B-spline to selected and scrolls the
+// preview into view (the touch counterpart of desktop's double-click).
 board.addEventListener('pointerdown', (e) => {
   if (e.button === 2) return;
   if (insertion.mode === 'firstPicked') {
     cancelInsertion('Insertion cancelled.');
+    return;
+  }
+  if (e.pointerType !== 'mouse') {
+    cancelLongPress();
+    longPress.startClientX = e.clientX;
+    longPress.startClientY = e.clientY;
+    const evt = e;
+    longPress.timerId = setTimeout(() => {
+      longPress.timerId = null;
+      selectBSplineAndShowPreview(evt);
+    }, LONG_PRESS_MS);
   }
 });
+
+function selectBSplineAndShowPreview(e) {
+  const svgPt = svgPointFromEvent(e);
+  const userPt = svgPointToUserCoords(svgPt);
+  if (!userPt) return;
+  const state = store.current;
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const [u, v] = userPt;
+  if (u < xmin || u > xmax || v < ymin || v > ymax) return;
+  const idx = bsplineUnderPoint(state, u, v);
+  if (idx === null) return;
+  store.selectedBSplineIndex = idx;
+  renderBSplineList();
+  renderBoard();
+  renderInset();
+  scrollToInsetPreview();
+}
 
 // Pointerup on the document so we can recover even if the user drags off
 // the board. If a real drag happened, commit using the snapped hot anchor.
 document.addEventListener('pointerup', () => {
+  cancelLongPress();
   const wasDrag = drag.pointerDown && drag.moved;
   drag.pointerDown = false;
   drag.moved = false;
@@ -1023,6 +1150,16 @@ document.addEventListener('pointerup', () => {
   }
   // Otherwise the drag dissolved without a snap; stay in firstPicked so the
   // user can try again or press Esc.
+});
+
+document.addEventListener('pointercancel', cancelLongPress);
+
+// Desktop double-click on a B-spline support: promote that B-spline to
+// selected and scroll to the basis-functions preview. Mirrors the long-press
+// gesture on touch devices.
+board.addEventListener('dblclick', (e) => {
+  if (insertion.mode === 'firstPicked') return;
+  selectBSplineAndShowPreview(e);
 });
 
 // Right-click cancels.

@@ -351,11 +351,15 @@ export function insertMeshLine(state, ml) {
 }
 
 // Anchor points: for each meshline segment in the current LR-mesh, the midpoint
-// of every edge between two adjacent crossings is an anchor.
+// of every edge between two adjacent crossings is an anchor (kind 'midpoint').
 // An "edge" along a horizontal meshline is the interval between two adjacent
 // vertical meshlines that cross it (and are within the horizontal extent).
+// In addition, the endpoint of any *partial* meshline (i.e. one that does not
+// span the full perpendicular domain) yields a 'tjunction' anchor — a natural
+// starting point for refining by continuing or extending that meshline.
 export function computeAnchors(state) {
   const anchors = [];
+  const [xmin, xmax, ymin, ymax] = state.domain;
   // For horizontal meshlines: anchors lie at the midpoints between adjacent
   // vertical meshlines whose constant value lies in [ml.a, ml.b] AND whose
   // extent covers the horizontal meshline's c.
@@ -387,6 +391,7 @@ export function computeAnchors(state) {
       if (hi - lo < EPS) continue;
       const mid = (lo + hi) / 2;
       anchors.push({
+        kind: 'midpoint',
         dir: ml.dir,
         c: ml.c,
         edgeLo: lo,
@@ -396,11 +401,46 @@ export function computeAnchors(state) {
       });
     }
   }
-  // De-duplicate anchors by (dir, c, edgeLo, edgeHi). Multiple meshline records
-  // can describe the same edge after coalescing.
+  // T-junction anchors: every endpoint of a partial meshline that lands on a
+  // perpendicular meshline. Full-span meshlines (e.g., the original boundary
+  // lines, which run corner-to-corner across the domain) are skipped — there
+  // is no useful refinement that "continues" them.
+  for (const ml of state.meshlines) {
+    const isFullSpan =
+      ml.dir === 'h'
+        ? approxEq(ml.a, xmin) && approxEq(ml.b, xmax)
+        : approxEq(ml.a, ymin) && approxEq(ml.b, ymax);
+    if (isFullSpan) continue;
+    for (const endpoint of [ml.a, ml.b]) {
+      // Confirm the endpoint sits on a perpendicular meshline, otherwise it
+      // is a free end (which shouldn't really occur in a valid LR-mesh, but
+      // guarding anyway).
+      let touchesPerpendicular = false;
+      for (const other of state.meshlines) {
+        if (other.dir === ml.dir) continue;
+        if (!approxEq(other.c, endpoint)) continue;
+        if (other.a <= ml.c + EPS && other.b >= ml.c - EPS) {
+          touchesPerpendicular = true;
+          break;
+        }
+      }
+      if (!touchesPerpendicular) continue;
+      anchors.push({
+        kind: 'tjunction',
+        dir: ml.dir,
+        c: ml.c,
+        edgeLo: endpoint,
+        edgeHi: endpoint,
+        mid: endpoint,
+        meshline: ml,
+      });
+    }
+  }
+  // De-duplicate anchors by (kind, dir, c, edgeLo, edgeHi). Multiple meshline
+  // records can describe the same edge or endpoint after coalescing.
   const seen = new Map();
   for (const a of anchors) {
-    const key = `${a.dir}|${a.c.toFixed(10)}|${a.edgeLo.toFixed(10)}|${a.edgeHi.toFixed(10)}`;
+    const key = `${a.kind}|${a.dir}|${a.c.toFixed(10)}|${a.edgeLo.toFixed(10)}|${a.edgeHi.toFixed(10)}`;
     if (!seen.has(key)) seen.set(key, a);
   }
   return [...seen.values()];
@@ -408,29 +448,54 @@ export function computeAnchors(state) {
 
 // Build a mesh-line from two compatible anchors.
 //
-// Two anchors are compatible if they share a direction AND either:
-//   (a) they lie on the same existing mesh-line (same `c`) — picking a pair
-//       on that line raises its multiplicity over the union of their edges, or
-//   (b) they share an edge midpoint (same `mid`) but lie on different
-//       existing mesh-lines (different `c`) — picking the pair defines a new
-//       *perpendicular* mesh-line at that midpoint, spanning between the two
-//       existing mesh-lines.
+// Anchor positions in 2D space are:
+//   horizontal anchor → (mid, c)
+//   vertical   anchor → (c, mid)
+// where `mid` is the edge midpoint (or endpoint coord, for T-junction
+// anchors) and `c` is the host mesh-line's constant.
+//
+// Two anchors are compatible in three ways:
+//   (a) same direction AND same `c` — they lie on the same existing host
+//       mesh-line; the pair raises multiplicity / extends its extent over
+//       the union of their edges or endpoints.
+//   (b) same direction AND same `mid` — they share a perpendicular-axis
+//       coordinate while sitting on different host lines; the pair defines
+//       a new perpendicular mesh-line at that coordinate, spanning between
+//       the two host lines.
+//   (c) cross direction AND `a2.c == a1.mid` — `a2` (the second pick) lies
+//       on the perpendicular line that `a1` would induce; the pair defines
+//       a new perpendicular mesh-line at `a1.mid`, spanning from `a1.c` to
+//       `a2.mid`. This lets the user drag from one anchor and drop on the
+//       endpoint (T-junction) of any perpendicular mesh-line that aligns
+//       with `a1`'s position.
+//
+// T-junction anchors participate in all three cases; their `mid` is the
+// endpoint coord rather than an edge midpoint, but the geometry still
+// applies.
 //
 // Returns null if the anchors are not compatible.
 export function meshlineFromAnchors(a1, a2, mult) {
-  if (a1.dir !== a2.dir) return null;
-  if (approxEq(a1.c, a2.c)) {
+  // Case (a): same host mesh-line.
+  if (a1.dir === a2.dir && approxEq(a1.c, a2.c)) {
     const lo = Math.min(a1.edgeLo, a2.edgeLo);
     const hi = Math.max(a1.edgeHi, a2.edgeHi);
+    if (hi - lo < EPS) return null;
     return { dir: a1.dir, c: a1.c, a: lo, b: hi, m: mult };
   }
-  if (approxEq(a1.mid, a2.mid)) {
-    const newDir = a1.dir === 'h' ? 'v' : 'h';
-    const lo = Math.min(a1.c, a2.c);
-    const hi = Math.max(a1.c, a2.c);
-    return { dir: newDir, c: a1.mid, a: lo, b: hi, m: mult };
+  // Cases (b) and (c): a new mesh-line perpendicular to a1's host, at c=a1.mid.
+  const newDir = a1.dir === 'h' ? 'v' : 'h';
+  let a2PerpPos; // a2's coordinate along the new line's direction
+  if (a1.dir === a2.dir) {
+    if (!approxEq(a1.mid, a2.mid)) return null;
+    a2PerpPos = a2.c;
+  } else {
+    if (!approxEq(a2.c, a1.mid)) return null;
+    a2PerpPos = a2.mid;
   }
-  return null;
+  const lo = Math.min(a1.c, a2PerpPos);
+  const hi = Math.max(a1.c, a2PerpPos);
+  if (hi - lo < EPS) return null;
+  return { dir: newDir, c: a1.mid, a: lo, b: hi, m: mult };
 }
 
 export function cloneState(state) {

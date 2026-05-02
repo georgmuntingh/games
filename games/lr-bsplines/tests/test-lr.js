@@ -270,10 +270,45 @@ test('meshlineFromAnchors: same mid on different mesh-lines defines a new perpen
 
 test('meshlineFromAnchors: incompatible anchors return null', () => {
   const a1 = { dir: 'h', c: 0,   edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  // Same direction, different c, different mid -> not compatible.
   const a2 = { dir: 'h', c: 0.5, edgeLo: 0, edgeHi: 1, mid: 0.25 };
   assertEq(meshlineFromAnchors(a1, a2, 1), null);
-  const a3 = { dir: 'v', c: 0.5, edgeLo: 0, edgeHi: 1, mid: 0.5 };
-  assertEq(meshlineFromAnchors(a1, a3, 1), null);
+  // Cross direction with no alignment between a4.c and a1.mid -> not compatible.
+  const a4 = { dir: 'v', c: 0.25, edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  assertEq(meshlineFromAnchors(a1, a4, 1), null);
+});
+
+test('meshlineFromAnchors: cross-direction snap to perpendicular endpoint', () => {
+  // a1 is a midpoint anchor on horizontal line y=0 at mid x=0.5.
+  // a2 is a T-junction at the lower endpoint (y=0.5) of a vertical line at x=0.5.
+  // Together they should define a vertical mesh-line at x=0.5 from y=0 to y=0.5.
+  const a1 = { kind: 'midpoint', dir: 'h', c: 0,   edgeLo: 0, edgeHi: 1, mid: 0.5 };
+  const a2 = { kind: 'tjunction', dir: 'v', c: 0.5, edgeLo: 0.5, edgeHi: 0.5, mid: 0.5 };
+  const ml = meshlineFromAnchors(a1, a2, 1);
+  assertEq(ml.dir, 'v');
+  assertClose(ml.c, 0.5);
+  assertClose(ml.a, 0);
+  assertClose(ml.b, 0.5);
+});
+
+test('computeAnchors: T-junctions appear at endpoints of partial mesh-lines', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  // Insert a partial vertical line at x=0.25 spanning y in [0, 0.5]; its
+  // endpoints are at the bottom boundary and the y=0.5 horizontal — both on
+  // perpendicular meshlines, so both endpoints should yield T-junctions.
+  insertMeshLine(s, { dir: 'v', c: 0.25, a: 0, b: 0.5, m: 1 });
+  const tjs = computeAnchors(s).filter((a) => a.kind === 'tjunction');
+  assertTrue(tjs.length >= 2, `expected ≥2 T-junction anchors, got ${tjs.length}`);
+  const hasLower = tjs.some(
+    (a) => a.dir === 'v' && Math.abs(a.c - 0.25) < 1e-9 && Math.abs(a.mid - 0) < 1e-9
+  );
+  const hasUpper = tjs.some(
+    (a) => a.dir === 'v' && Math.abs(a.c - 0.25) < 1e-9 && Math.abs(a.mid - 0.5) < 1e-9
+  );
+  assertTrue(hasLower, 'lower endpoint T-junction missing');
+  assertTrue(hasUpper, 'upper endpoint T-junction missing');
 });
 
 // 7. Serialize / deserialize roundtrip -----------------------------------

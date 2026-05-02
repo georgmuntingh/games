@@ -341,8 +341,18 @@ button#reset-btn {
   transition: r 0.1s, fill 0.1s;
 }
 
+/* T-junction anchors are squares so they read as "endpoint of a mesh-line"
+   distinct from circular edge-midpoint anchors. */
+.anchor.tjunction {
+  stroke: #16a34a;
+}
+
 .anchor.hot {
   fill: var(--ui-accent);
+}
+
+.anchor.tjunction.hot {
+  fill: #16a34a;
 }
 
 .anchor.first-pick {
@@ -352,6 +362,19 @@ button#reset-btn {
 
 .anchor.compatible {
   fill: rgba(96, 165, 250, 0.3);
+}
+
+.anchor.tjunction.compatible {
+  fill: rgba(22, 163, 74, 0.3);
+}
+
+/* Transparent oversize hit-target sits beneath the visible marker so anchors
+   stay clickable on top of high-multiplicity boundary lines whose stroke can
+   otherwise be thicker than the marker itself. */
+.anchor-hit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: crosshair;
 }
 
 .preview-line {
