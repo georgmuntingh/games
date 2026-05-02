@@ -17,6 +17,12 @@
       "title": "Tetris",
       "description": "Stack falling blocks to clear lines. Classic arcade puzzler with seven tetrominoes.",
       "tags": ["arcade", "puzzle", "solo"]
+    },
+    {
+      "id": "lr-bsplines",
+      "title": "Refinement",
+      "description": "Build locally refined B-spline bases interactively.",
+      "tags": ["math", "visualization", "interactive"]
     }
   ]
 }

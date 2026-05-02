@@ -13,10 +13,15 @@ const gameInputs = Object.fromEntries(
         entry.isDirectory() &&
         existsSync(resolve(gamesDir, entry.name, 'index.html'))
     )
-    .map((entry) => [
-      `games/${entry.name}`,
-      resolve(gamesDir, entry.name, 'index.html'),
-    ])
+    .flatMap((entry) => {
+      const gameDir = resolve(gamesDir, entry.name);
+      const entries = [[`games/${entry.name}`, resolve(gameDir, 'index.html')]];
+      const testsHtml = resolve(gameDir, 'tests', 'index.html');
+      if (existsSync(testsHtml)) {
+        entries.push([`games/${entry.name}/tests`, testsHtml]);
+      }
+      return entries;
+    })
 );
 
 export default defineConfig(({ command }) => ({
