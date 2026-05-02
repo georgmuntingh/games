@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Refinement</title>
+    <script type="module" crossorigin src="/games/pr-previews/pr-4/assets/games/lr-bsplines-CMyl8lMQ.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-4/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-4/assets/lr-math-CfJdNCi4.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-4/assets/lr-bsplines-DYNLVMYE.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-4/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Refinement</h1>
+      <p class="subtitle">
+        Build locally refined B-spline bases interactively. Following Dokken,
+        Lyche &amp; Pettersen, <em>Polynomial splines over locally refined
+        box-partitions</em> (CAGD 2013).
+      </p>
+
+      <div class="layout">
+        <div class="canvas-wrap">
+          <svg
+            id="board"
+            viewBox="0 0 600 600"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-label="LR B-spline mesh"
+          ></svg>
+          <div id="floating-mult" class="floating-mult" hidden>
+            multiplicity <span id="mult-val">1</span>
+            <small>(scroll to change)</small>
+          </div>
+          <p id="status" class="status" aria-live="polite"></p>
+        </div>
+
+        <aside class="sidebar">
+          <details class="panel" open>
+            <summary>Domain &amp; mesh</summary>
+            <div class="row">
+              <label
+                >N<sub>x</sub> (interior knot lines)
+                <input id="nx" type="number" min="0" max="20" value="2" />
+              </label>
+              <label
+                >N<sub>y</sub>
+                <input id="ny" type="number" min="0" max="20" value="2" />
+              </label>
+            </div>
+            <div class="row">
+              <label class="check"
+                ><input id="open-knots" type="checkbox" checked /> Open knot
+                vectors (multiplicity p+1 / q+1 at boundaries)</label
+              >
+            </div>
+          </details>
+
+          <details class="panel" open>
+            <summary>Bidegree</summary>
+            <div class="row">
+              <label
+                >p (x-degree)
+                <input id="p" type="number" min="1" max="5" value="2" />
+              </label>
+              <label
+                >q (y-degree)
+                <input id="q" type="number" min="1" max="5" value="2" />
+              </label>
+            </div>
+            <p class="note">
+              Changing p, q, N<sub>x</sub>, N<sub>y</sub> resets the mesh and
+              clears refinement history.
+            </p>
+            <button id="reset-btn" type="button">Reset to tensor product</button>
+          </details>
+
+          <details class="panel" open>
+            <summary>Insertion tool</summary>
+            <p class="note">
+              Tap an edge midpoint (circle) or mesh-line endpoint (square,
+              T-junction), then a second compatible anchor. The preview
+              turns green when at least one B-spline would be split. Use
+              <kbd>Esc</kbd> or right-click to cancel. Double-click (or
+              long-press on touch) inside a B-spline's support to scroll to
+              its preview.
+            </p>
+            <div class="row">
+              <label
+                >Multiplicity
+                <input id="mult" type="number" min="1" max="6" value="1" />
+              </label>
+              <button id="undo-btn" type="button" title="Ctrl+Z">Undo</button>
+              <button id="redo-btn" type="button" title="Ctrl+Y">Redo</button>
+            </div>
+            <div class="row">
+              <button id="export-btn" type="button">Export JSON</button>
+              <label class="file-button">
+                Import…
+                <input id="import-input" type="file" accept="application/json" hidden />
+              </label>
+            </div>
+          </details>
+
+          <details class="panel" open>
+            <summary>
+              Basis functions <span id="bspline-count" class="badge">0</span>
+            </summary>
+            <div class="inset-wrap">
+              <canvas id="inset" width="240" height="200"></canvas>
+              <div class="inset-controls">
+                <button
+                  id="inset-toggle"
+                  type="button"
+                  class="toggle-btn"
+                  data-mode="contour"
+                >
+                  2D contour
+                </button>
+                <span id="inset-label" class="inset-label">—</span>
+              </div>
+            </div>
+            <ul id="bspline-list" class="bspline-list"></ul>
+          </details>
+
+          <details class="panel">
+            <summary>Statistics</summary>
+            <ul class="stats">
+              <li><span class="label">Mesh-line records</span><span id="stat-meshlines">0</span></li>
+              <li><span class="label">Active B-splines</span><span id="stat-bsplines">0</span></li>
+              <li><span class="label">Refinements</span><span id="stat-refinements">0</span></li>
+            </ul>
+            <p class="note">
+              <a href="./tests/">Run math tests →</a>
+            </p>
+          </details>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>
