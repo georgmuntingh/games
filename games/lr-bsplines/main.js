@@ -27,6 +27,7 @@ import {
   previewSplitTargets,
   serialize,
 } from './lr-math.js';
+import { renderDualPolyHTML } from './marsden.js';
 
 // --- DOM references --------------------------------------------------------
 const board = document.getElementById('board');
@@ -412,10 +413,16 @@ function renderBSplineList() {
       const cls = [];
       if (i === store.selectedBSplineIndex) cls.push('selected');
       if (i === store.hoveredBSplineIndex) cls.push('hover');
+      const dualHTML = B.dualPoly ? renderDualPolyHTML(B.dualPoly) : '';
+      const factored =
+        B.dualPoly && B.dualPoly.terms && B.dualPoly.terms.length <= 1;
       return (
         `<li class="${cls.join(' ')}" data-index="${i}">` +
         `<span class="coeff">c=${B.coeff.toFixed(3)}</span>` +
         `<span class="kv">x: ${fmt(B.kx)}<br>y: ${fmt(B.ky)}</span>` +
+        (dualHTML
+          ? `<span class="dual${factored ? '' : ' nonfactored'}">p(y) = ${dualHTML}</span>`
+          : '') +
         `</li>`
       );
     })

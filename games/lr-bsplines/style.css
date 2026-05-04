@@ -243,6 +243,21 @@ button#reset-btn {
   font-weight: 600;
 }
 
+/* Marsden dual polynomial of the B-spline. Rendered as a single product when
+   it factors, or a sum of products when refinement has produced a more
+   general form (.nonfactored — coloured to draw attention). */
+.bspline-list .dual {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--ui-fg);
+  font-size: 0.7rem;
+  word-break: break-word;
+}
+
+.bspline-list .dual.nonfactored {
+  color: #f59e0b;
+}
+
 .inset-wrap {
   margin: 0.25rem 0;
 }

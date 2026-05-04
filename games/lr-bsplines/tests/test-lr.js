@@ -13,6 +13,14 @@ import {
   deserialize,
   approxEq,
 } from '../lr-math.js';
+import {
+  initialDualPoly,
+  evalDualPoly,
+  scaleDualPoly,
+  addDualPoly,
+  simplifyDualPoly,
+  renderDualPolyHTML,
+} from '../marsden.js';
 
 const tests = [];
 function test(name, fn) {
@@ -440,6 +448,228 @@ test('previewSplitTargets is consistent with the cascade', () => {
     assertTrue(!stillThere, 'predicted target B-spline must have been replaced');
   }
 });
+// 10. Marsden identity ----------------------------------------------------
+function checkMarsden(state, samples) {
+  const { p, q } = state;
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  for (const [x1, x2, y1, y2] of samples) {
+    const lhs = Math.pow(y1 - x1, p) * Math.pow(y2 - x2, q);
+    let rhs = 0;
+    for (const B of state.bsplines) {
+      const Bval = evalBSpline2D(B, x1, x2);
+      if (Bval === 0) continue;
+      rhs += evalDualPoly(B.dualPoly, y1, y2) * Bval;
+    }
+    assertClose(rhs, lhs, 1e-6, `Marsden at x=(${x1},${x2}) y=(${y1},${y2})`);
+  }
+  // Reference samples not used; arguments just for tag.
+  return [xmin, xmax, ymin, ymax];
+}
+
+function gridSamples(state) {
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const xs = [];
+  for (let i = 1; i < 5; i++) xs.push(xmin + ((xmax - xmin) * i) / 5);
+  const ys = [];
+  for (let j = 1; j < 5; j++) ys.push(ymin + ((ymax - ymin) * j) / 5);
+  // y-points for the dual polynomial — Marsden is a polynomial identity in y,
+  // so any reals work. Pick a mix inside and outside the domain.
+  const Ys = [-0.3, 0.15, 0.5, 0.83, 1.4];
+  const samples = [];
+  for (const x1 of xs)
+    for (const x2 of ys)
+      for (const y1 of Ys)
+        for (const y2 of Ys) samples.push([x1, x2, y1, y2]);
+  return samples;
+}
+
+test('initial dual polynomial: bidegree (2,2) tensor product → factored form', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (const B of s.bsplines) {
+    assertEq(B.dualPoly.terms.length, 1, 'initial dual must be a single product');
+    const t = B.dualPoly.terms[0];
+    assertEq(t.xRoots.length, 2, 'two x-dual points for p=2');
+    assertEq(t.yRoots.length, 2, 'two y-dual points for q=2');
+    // Roots must equal the interior knots.
+    const xs = B.kx.slice(1, 3).slice().sort((a, b) => a - b);
+    const ys = B.ky.slice(1, 3).slice().sort((a, b) => a - b);
+    assertClose(t.xRoots[0], xs[0]);
+    assertClose(t.xRoots[1], xs[1]);
+    assertClose(t.yRoots[0], ys[0]);
+    assertClose(t.yRoots[1], ys[1]);
+    assertClose(t.coeff, 1);
+  }
+});
+
+test('Marsden identity holds on initial tensor product, biquadratic', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity holds on initial tensor product, bilinear', () => {
+  const s = createInitialState({
+    p: 1, q: 1, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  // Bilinear: 2 dual points (1 in x + 1 in y) per B-spline.
+  for (const B of s.bsplines) {
+    assertEq(B.dualPoly.terms.length, 1);
+    assertEq(B.dualPoly.terms[0].xRoots.length, 1);
+    assertEq(B.dualPoly.terms[0].yRoots.length, 1);
+  }
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity holds on initial tensor product, mixed (p=2,q=3)', () => {
+  const s = createInitialState({
+    p: 2, q: 3, Nx: 1, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity is preserved by a global horizontal split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.3, a: 0, b: 1, m: 1 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity is preserved by sequential global splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.25, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.6, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'h', c: 0.75, a: 0, b: 1, m: 1 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity is preserved by a partial (LR) split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity holds at full multiplicity (p+1) horizontal split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 0, Ny: 0, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.5, a: 0, b: 1, m: 2 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('global tensor-product knot insertion keeps every dual poly factored', () => {
+  // A globally inserted full-span horizontal line is a tensor-product knot
+  // insertion in the y-direction; Cox-de Boor guarantees that every new
+  // B-spline's dual polynomial has the natural factored form.
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.2, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.7, a: 0, b: 1, m: 1 });
+  for (const B of s.bsplines) {
+    assertEq(
+      B.dualPoly.terms.length,
+      1,
+      `B-spline ${JSON.stringify({ kx: B.kx, ky: B.ky })} should factor`
+    );
+    // And the factored roots must match the natural ones (interior knots).
+    const t = B.dualPoly.terms[0];
+    const natX = B.kx.slice(1, s.p + 1).slice().sort((a, b) => a - b);
+    const natY = B.ky.slice(1, s.q + 1).slice().sort((a, b) => a - b);
+    for (let k = 0; k < natX.length; k++) assertClose(t.xRoots[k], natX[k]);
+    for (let k = 0; k < natY.length; k++) assertClose(t.yRoots[k], natY[k]);
+  }
+});
+
+test('Marsden round-trips through serialize/deserialize', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  const recovered = deserialize(serialize(s));
+  // Sample a few (x, y) points; the recovered state must satisfy Marsden.
+  const samples = [];
+  for (const x1 of [0.1, 0.45, 0.8])
+    for (const x2 of [0.1, 0.45, 0.8])
+      for (const y1 of [-0.1, 0.4, 1.1])
+        for (const y2 of [-0.1, 0.4, 1.1]) samples.push([x1, x2, y1, y2]);
+  checkMarsden(recovered, samples);
+});
+
+// 11. Marsden algebra units ------------------------------------------------
+test('simplifyDualPoly factors a sum that secretly is one product', () => {
+  // (y1-1)(y2-1) + (y1-1)(y2-2) = (y1-1)(2 y2 - 3) = 2 (y1-1)(y2 - 1.5).
+  const poly = {
+    terms: [
+      { coeff: 1, xRoots: [1], yRoots: [1] },
+      { coeff: 1, xRoots: [1], yRoots: [2] },
+    ],
+  };
+  const simplified = simplifyDualPoly(poly);
+  assertEq(simplified.terms.length, 1, 'should collapse to one term');
+  const t = simplified.terms[0];
+  assertClose(t.coeff, 2);
+  assertClose(t.xRoots[0], 1);
+  assertClose(t.yRoots[0], 1.5);
+});
+
+test('simplifyDualPoly leaves a non-factorable sum as multiple terms', () => {
+  // (y1-0)(y2-0) + (y1-1)(y2-1)  is NOT separable (y1 y2 + y1 y2 - y1 - y2 + 1
+  // = 2 y1 y2 - y1 - y2 + 1; the coefficient matrix has rank 2).
+  const poly = {
+    terms: [
+      { coeff: 1, xRoots: [0], yRoots: [0] },
+      { coeff: 1, xRoots: [1], yRoots: [1] },
+    ],
+  };
+  const simplified = simplifyDualPoly(poly);
+  assertTrue(simplified.terms.length >= 2, 'should remain a sum of two terms');
+});
+
+test('simplifyDualPoly cancels opposite terms', () => {
+  const poly = {
+    terms: [
+      { coeff: 1, xRoots: [0.5], yRoots: [0.5] },
+      { coeff: -1, xRoots: [0.5], yRoots: [0.5] },
+    ],
+  };
+  const simplified = simplifyDualPoly(poly);
+  assertEq(simplified.terms.length, 0, 'opposite terms cancel');
+});
+
+test('scaleDualPoly multiplies every term coefficient', () => {
+  const p = initialDualPoly([0, 0, 0.5, 1], [0, 0, 0.5, 1], 2, 2);
+  const s = scaleDualPoly(p, 0.5);
+  assertEq(s.terms.length, 1);
+  assertClose(s.terms[0].coeff, 0.5);
+});
+
+test('addDualPoly combines and simplifies', () => {
+  const a = { terms: [{ coeff: 1, xRoots: [1], yRoots: [1] }] };
+  const b = { terms: [{ coeff: 2, xRoots: [1], yRoots: [1] }] };
+  const r = addDualPoly(a, b);
+  assertEq(r.terms.length, 1);
+  assertClose(r.terms[0].coeff, 3);
+});
+
+test('renderDualPolyHTML formats a single product with subscripted variables', () => {
+  const poly = {
+    terms: [{ coeff: 1, xRoots: [0.25], yRoots: [0.5] }],
+  };
+  const html = renderDualPolyHTML(poly);
+  assertTrue(html.includes('y<sub>1</sub>'), 'has y_1');
+  assertTrue(html.includes('y<sub>2</sub>'), 'has y_2');
+  assertTrue(html.includes('0.25'), 'has the x-root');
+  assertTrue(html.includes('0.50'), 'has the y-root');
+});
+
 export function runAll() {
   const out = { pass: 0, fail: 0, results: [] };
   for (const t of tests) {
