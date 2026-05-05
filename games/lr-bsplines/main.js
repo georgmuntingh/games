@@ -725,6 +725,50 @@ function renderBoard() {
     marker.addEventListener('pointerdown', onPointerDownFor(a));
     board.appendChild(marker);
   }
+
+  // Dual points of the hovered / selected B-spline. Drawn last so they sit on
+  // top of every other layer. Only meaningful when the dual polynomial is a
+  // single product term: those roots are the "dual points" of that B-spline,
+  // x-direction roots projected onto the x-axis and y-direction roots onto
+  // the y-axis. Non-factored polynomials (sums of products) have no clean
+  // dual points and are skipped — the basis-functions panel shows the full
+  // sum in that case.
+  const drawDualPoints = (idx, extra) => {
+    if (idx === null || idx === undefined) return;
+    const B = state.bsplines[idx];
+    if (!B || !B.dualPoly || B.dualPoly.terms.length !== 1) return;
+    const term = B.dualPoly.terms[0];
+    const cls = 'dual-point' + (extra ? ' ' + extra : '');
+    for (const r of term.xRoots) {
+      const [sx] = uxToSvg(state, r, ymin);
+      const dot = svgEl('circle', {
+        class: cls,
+        cx: sx,
+        cy: by1,
+        r: 4.5,
+      });
+      dot.appendChild(svgEl('title', {}, `dual point  y₁ = ${r.toFixed(3)}`));
+      board.appendChild(dot);
+    }
+    for (const r of term.yRoots) {
+      const [, sy] = uxToSvg(state, xmin, r);
+      const dot = svgEl('circle', {
+        class: cls,
+        cx: bx0,
+        cy: sy,
+        r: 4.5,
+      });
+      dot.appendChild(svgEl('title', {}, `dual point  y₂ = ${r.toFixed(3)}`));
+      board.appendChild(dot);
+    }
+  };
+  if (
+    store.hoveredBSplineIndex !== null &&
+    store.hoveredBSplineIndex !== store.selectedBSplineIndex
+  ) {
+    drawDualPoints(store.hoveredBSplineIndex, 'hover');
+  }
+  drawDualPoints(store.selectedBSplineIndex, 'selected');
 }
 
 // --- Hover detection on the main canvas -----------------------------------

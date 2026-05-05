@@ -430,6 +430,21 @@ button#reset-btn {
   font-size: 10px;
 }
 
+/* Dual points: roots of the (factorized) dual polynomial of the highlighted
+   B-spline. Drawn on the x- and y-axes (boundary mesh-lines) of the domain
+   so the user sees where each axis-tagged dual point lies. */
+.dual-point {
+  fill: #a855f7;
+  stroke: var(--ui-bg);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.dual-point.hover {
+  fill: rgba(168, 85, 247, 0.55);
+  stroke-opacity: 0.7;
+}
+
 kbd {
   display: inline-block;
   padding: 0.05rem 0.35rem;
