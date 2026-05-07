@@ -27,7 +27,11 @@ import {
   previewSplitTargets,
   serialize,
 } from './lr-math.js';
-import { expandPolynomialInBasis, renderDualPolyHTML } from './marsden.js';
+import {
+  expandPolynomialInBasis,
+  grevillePoint,
+  renderDualPolyHTML,
+} from './marsden.js';
 
 // --- DOM references --------------------------------------------------------
 const board = document.getElementById('board');
@@ -776,6 +780,34 @@ function renderBoard() {
     drawDualPoints(store.hoveredBSplineIndex, 'hover');
   }
   drawDualPoints(store.selectedBSplineIndex, 'selected');
+
+  // Greville point of the highlighted / hovered B-spline. Drawn as an "×"
+  // cross over a thicker bg-coloured halo so it stays visible even when it
+  // coincides with one of the dual points (filled circles, drawn just below).
+  const drawGreville = (idx, extra) => {
+    if (idx === null || idx === undefined) return;
+    const B = state.bsplines[idx];
+    if (!B) return;
+    const g = grevillePoint(B, state.p, state.q);
+    if (!g) return;
+    const [cx, cy] = uxToSvg(state, g[0], g[1]);
+    const r = 6.5;
+    const d = `M ${cx - r} ${cy - r} L ${cx + r} ${cy + r} M ${cx + r} ${cy - r} L ${cx - r} ${cy + r}`;
+    const halo = svgEl('path', { class: 'greville-halo' + (extra ? ' ' + extra : ''), d });
+    const cross = svgEl('path', { class: 'greville-cross' + (extra ? ' ' + extra : ''), d });
+    cross.appendChild(
+      svgEl('title', {}, `Greville point  (${g[0].toFixed(3)}, ${g[1].toFixed(3)})`)
+    );
+    board.appendChild(halo);
+    board.appendChild(cross);
+  };
+  if (
+    store.hoveredBSplineIndex !== null &&
+    store.hoveredBSplineIndex !== store.selectedBSplineIndex
+  ) {
+    drawGreville(store.hoveredBSplineIndex, 'hover');
+  }
+  drawGreville(store.selectedBSplineIndex, 'selected');
 }
 
 // --- Hover detection on the main canvas -----------------------------------
@@ -788,19 +820,20 @@ function svgPointToUserCoords(svgPt) {
   return [u, v];
 }
 
+// Returns the index of the active B-spline whose Greville point — the mean
+// of its dual points — is closest to (u, v). Greville is a natural "centre"
+// for the B-spline (and in the factored case literally the mean of dual
+// points), so this picks the B-spline whose centre the cursor is nearest to,
+// regardless of overlapping supports.
 function bsplineUnderPoint(state, u, v) {
   let bestIdx = null;
-  let bestArea = Infinity;
+  let bestDist = Infinity;
   for (let i = 0; i < state.bsplines.length; i++) {
-    const B = state.bsplines[i];
-    const x0 = B.kx[0];
-    const x1 = B.kx[B.kx.length - 1];
-    const y0 = B.ky[0];
-    const y1 = B.ky[B.ky.length - 1];
-    if (u < x0 || u > x1 || v < y0 || v > y1) continue;
-    const area = (x1 - x0) * (y1 - y0);
-    if (area < bestArea) {
-      bestArea = area;
+    const g = grevillePoint(state.bsplines[i], state.p, state.q);
+    if (!g) continue;
+    const d = Math.hypot(u - g[0], v - g[1]);
+    if (d < bestDist) {
+      bestDist = d;
       bestIdx = i;
     }
   }

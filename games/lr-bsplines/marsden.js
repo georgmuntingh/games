@@ -365,6 +365,24 @@ export function evalPolyXY(fMatrix, x1, x2) {
   return s;
 }
 
+// Greville point of a B-spline. For a *factored* dual polynomial whose dual
+// points are kx[1..p] in x and ky[1..q] in y, this is the standard
+//   γ = (mean(xRoots), mean(yRoots)).
+// For a non-factored dualPoly the same number drops out of the dual functional:
+//   γ_x = λ_j(x1) / λ_j(1) = − P[p−1, q] / (p · P[p, q]),
+//   γ_y = λ_j(x2) / λ_j(1) = − P[p, q−1] / (q · P[p, q]),
+// where P[i, j] = [y1^i y2^j] p_j(y). Falls back to support midpoints when
+// p = 0 or q = 0 (no interior knots in that direction).
+export function grevillePoint(B, p, q) {
+  if (!B || !B.dualPoly) return null;
+  const P = polyToMatrix(B.dualPoly, p, q);
+  const lead = P[p][q];
+  if (Math.abs(lead) < 1e-12) return null;
+  const gx = p === 0 ? (B.kx[0] + B.kx[1]) / 2 : -P[p - 1][q] / (p * lead);
+  const gy = q === 0 ? (B.ky[0] + B.ky[1]) / 2 : -P[p][q - 1] / (q * lead);
+  return [gx, gy];
+}
+
 // --- Rendering -------------------------------------------------------------
 
 function fmtNum(v) {

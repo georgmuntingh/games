@@ -464,6 +464,33 @@ button#marsden-test-btn {
   stroke-opacity: 0.7;
 }
 
+/* Greville point of the highlighted B-spline: rendered as an × cross over a
+   bg-coloured halo so it stays visible against any underlying mesh-line,
+   support shading, or dual-point dot it may coincide with. */
+.greville-cross {
+  stroke: #ec4899;
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.greville-halo {
+  stroke: var(--ui-bg);
+  stroke-width: 5;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.greville-cross.hover {
+  stroke: rgba(236, 72, 153, 0.6);
+}
+
+.greville-halo.hover {
+  stroke-opacity: 0.6;
+}
+
 kbd {
   display: inline-block;
   padding: 0.05rem 0.35rem;

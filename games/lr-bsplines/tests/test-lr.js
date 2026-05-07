@@ -23,6 +23,7 @@ import {
   dualFunctionalMatrix,
   expandPolynomialInBasis,
   evalPolyXY,
+  grevillePoint,
 } from '../marsden.js';
 
 const tests = [];
@@ -796,6 +797,59 @@ test('expandPolynomialInBasis: bilinear (p=q=1) constant and linear monomials', 
           Math.pow(x1, a) * Math.pow(x2, b),
           1e-6
         );
+  }
+});
+
+// 13. Greville points -----------------------------------------------------
+test('grevillePoint equals the mean of dual points on an initial p=q=2 tensor product', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (const B of s.bsplines) {
+    const t = B.dualPoly.terms[0];
+    const meanX = t.xRoots.reduce((u, v) => u + v, 0) / s.p;
+    const meanY = t.yRoots.reduce((u, v) => u + v, 0) / s.q;
+    const g = grevillePoint(B, s.p, s.q);
+    assertClose(g[0], meanX, 1e-9, 'x-coord');
+    assertClose(g[1], meanY, 1e-9, 'y-coord');
+  }
+});
+
+test('grevillePoint lies inside each B-spline support after refinement', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  for (const B of s.bsplines) {
+    const g = grevillePoint(B, s.p, s.q);
+    assertTrue(
+      g[0] >= B.kx[0] - 1e-9 && g[0] <= B.kx[B.kx.length - 1] + 1e-9,
+      'γ_x inside support'
+    );
+    assertTrue(
+      g[1] >= B.ky[0] - 1e-9 && g[1] <= B.ky[B.ky.length - 1] + 1e-9,
+      'γ_y inside support'
+    );
+  }
+});
+
+test('grevillePoint matches mean of factored dual points after global splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.4, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.7, a: 0, b: 1, m: 1 });
+  // Global splits keep every B-spline's dual polynomial factored. The
+  // generalized-Greville formula must agree with the simple mean.
+  for (const B of s.bsplines) {
+    if (B.dualPoly.terms.length !== 1) continue;
+    const t = B.dualPoly.terms[0];
+    const meanX = t.xRoots.reduce((u, v) => u + v, 0) / s.p;
+    const meanY = t.yRoots.reduce((u, v) => u + v, 0) / s.q;
+    const g = grevillePoint(B, s.p, s.q);
+    assertClose(g[0], meanX, 1e-9);
+    assertClose(g[1], meanY, 1e-9);
   }
 });
 
