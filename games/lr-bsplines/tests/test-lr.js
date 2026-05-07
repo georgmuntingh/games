@@ -20,6 +20,9 @@ import {
   addDualPoly,
   simplifyDualPoly,
   renderDualPolyHTML,
+  dualFunctionalMatrix,
+  expandPolynomialInBasis,
+  evalPolyXY,
 } from '../marsden.js';
 
 const tests = [];
@@ -668,6 +671,132 @@ test('renderDualPolyHTML formats a single product with subscripted variables', (
   assertTrue(html.includes('y<sub>2</sub>'), 'has y_2');
   assertTrue(html.includes('0.25'), 'has the x-root');
   assertTrue(html.includes('0.50'), 'has the y-root');
+});
+
+// 12. Polynomial expansion via the precomputed Marsden identity ----------
+function makeFMatrix(rows, cols) {
+  const M = [];
+  for (let i = 0; i < rows; i++) M.push(new Array(cols).fill(0));
+  return M;
+}
+
+function reproduceAt(state, alphas, x1, x2) {
+  let v = 0;
+  for (let i = 0; i < state.bsplines.length; i++) {
+    v += alphas[i] * evalBSpline2D(state.bsplines[i], x1, x2);
+  }
+  return v;
+}
+
+test('dualFunctionalMatrix: λ_j(1) equals B_j.coeff (partition of unity)', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  for (const B of s.bsplines) {
+    const L = dualFunctionalMatrix(B.dualPoly, s.p, s.q);
+    assertClose(L[0][0], B.coeff, 1e-9, 'λ_j(1) must equal B.coeff');
+  }
+});
+
+test('expandPolynomialInBasis reproduces every monomial on the initial tensor product (p=q=2)', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const samples = [];
+  for (const x1 of [0.05, 0.4, 0.7, 0.95])
+    for (const x2 of [0.05, 0.4, 0.7, 0.95]) samples.push([x1, x2]);
+  for (let a = 0; a <= 2; a++) {
+    for (let b = 0; b <= 2; b++) {
+      const f = makeFMatrix(3, 3);
+      f[a][b] = 1;
+      const alphas = expandPolynomialInBasis(s, f);
+      for (const [x1, x2] of samples) {
+        assertClose(
+          reproduceAt(s, alphas, x1, x2),
+          Math.pow(x1, a) * Math.pow(x2, b),
+          1e-6,
+          `x1^${a} x2^${b} at (${x1},${x2})`
+        );
+      }
+    }
+  }
+});
+
+test('expandPolynomialInBasis reproduces every monomial on the initial tensor product (mixed bidegree p=2, q=3)', () => {
+  const s = createInitialState({
+    p: 2, q: 3, Nx: 1, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let a = 0; a <= 2; a++) {
+    for (let b = 0; b <= 3; b++) {
+      const f = makeFMatrix(3, 4);
+      f[a][b] = 1;
+      const alphas = expandPolynomialInBasis(s, f);
+      for (const x1 of [0.1, 0.45, 0.85])
+        for (const x2 of [0.1, 0.45, 0.85])
+          assertClose(
+            reproduceAt(s, alphas, x1, x2),
+            Math.pow(x1, a) * Math.pow(x2, b),
+            1e-6
+          );
+    }
+  }
+});
+
+test('expandPolynomialInBasis reproduces a generic polynomial after global splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.4, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.7, a: 0, b: 1, m: 1 });
+  // f = 1 - x1 + 2 x2 + 3 x1 x2 - x1^2 + 0.5 x2^2 + x1^2 x2^2.
+  const f = [
+    [1, 2, 0.5],
+    [-1, 3, 0],
+    [-1, 0, 1],
+  ];
+  const alphas = expandPolynomialInBasis(s, f);
+  for (const x1 of [0.05, 0.3, 0.6, 0.9])
+    for (const x2 of [0.05, 0.3, 0.6, 0.9])
+      assertClose(reproduceAt(s, alphas, x1, x2), evalPolyXY(f, x1, x2), 1e-6);
+});
+
+test('expandPolynomialInBasis reproduces a generic polynomial after partial (LR) splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  // The two partial splits produce some non-factored dual polynomials, but
+  // polynomial reproduction must still hold because the dual functional is
+  // derived directly from the (non-factored) dual polynomial.
+  const f = [
+    [0, 1, -2],
+    [3, 0, 1],
+    [-1, 2, 0],
+  ];
+  const alphas = expandPolynomialInBasis(s, f);
+  for (const x1 of [0.05, 0.3, 0.6, 0.9])
+    for (const x2 of [0.05, 0.3, 0.6, 0.9])
+      assertClose(reproduceAt(s, alphas, x1, x2), evalPolyXY(f, x1, x2), 1e-6);
+});
+
+test('expandPolynomialInBasis: bilinear (p=q=1) constant and linear monomials', () => {
+  const s = createInitialState({
+    p: 1, q: 1, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (const [a, b] of [[0,0],[1,0],[0,1],[1,1]]) {
+    const f = makeFMatrix(2, 2);
+    f[a][b] = 1;
+    const alphas = expandPolynomialInBasis(s, f);
+    for (const x1 of [0.1, 0.5, 0.9])
+      for (const x2 of [0.1, 0.5, 0.9])
+        assertClose(
+          reproduceAt(s, alphas, x1, x2),
+          Math.pow(x1, a) * Math.pow(x2, b),
+          1e-6
+        );
+  }
 });
 
 export function runAll() {

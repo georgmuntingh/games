@@ -27,7 +27,7 @@ import {
   previewSplitTargets,
   serialize,
 } from './lr-math.js';
-import { renderDualPolyHTML } from './marsden.js';
+import { expandPolynomialInBasis, renderDualPolyHTML } from './marsden.js';
 
 // --- DOM references --------------------------------------------------------
 const board = document.getElementById('board');
@@ -48,6 +48,8 @@ const btnUndo = document.getElementById('undo-btn');
 const btnRedo = document.getElementById('redo-btn');
 const btnExport = document.getElementById('export-btn');
 const inputImport = document.getElementById('import-input');
+const btnMarsdenTest = document.getElementById('marsden-test-btn');
+const marsdenTestResult = document.getElementById('marsden-test-result');
 
 const bsplineList = document.getElementById('bspline-list');
 const bsplineCount = document.getElementById('bspline-count');
@@ -394,6 +396,11 @@ function notifyChange() {
   renderBSplineList();
   renderBoard();
   renderInset();
+  // Any state change invalidates a previous Marsden reproduction result.
+  if (marsdenTestResult) {
+    marsdenTestResult.textContent = '';
+    marsdenTestResult.className = 'note';
+  }
 }
 
 function renderBSplineList() {
@@ -1073,11 +1080,80 @@ function setStatus(msg, isError = false) {
   status.style.color = isError ? '#dc2626' : '';
 }
 
+// Verify the precomputed Marsden identity numerically: for every monomial
+// x1^a x2^b with a ≤ p, b ≤ q, expand it in the current B-spline basis
+// using each B-spline's stored dual polynomial, evaluate the resulting
+// linear combination on a sample grid, and report the worst-case error
+// against the analytic monomial value.
+function runMarsdenReproductionTest() {
+  const state = store.current;
+  const { p, q, domain } = state;
+  const [xmin, xmax, ymin, ymax] = domain;
+  const xs = [];
+  const ys = [];
+  for (let i = 1; i <= 5; i++) {
+    xs.push(xmin + ((xmax - xmin) * i) / 6);
+    ys.push(ymin + ((ymax - ymin) * i) / 6);
+  }
+  let maxErr = 0;
+  let worst = null;
+  let worstMono = null;
+  let totalChecks = 0;
+  for (let a = 0; a <= p; a++) {
+    for (let b = 0; b <= q; b++) {
+      const fMatrix = [];
+      for (let i = 0; i <= p; i++) fMatrix.push(new Array(q + 1).fill(0));
+      fMatrix[a][b] = 1;
+      const alphas = expandPolynomialInBasis(state, fMatrix);
+      for (const x1 of xs) {
+        for (const x2 of ys) {
+          let sum = 0;
+          for (let i = 0; i < state.bsplines.length; i++) {
+            sum += alphas[i] * evalBSpline2D(state.bsplines[i], x1, x2);
+          }
+          const expected = Math.pow(x1, a) * Math.pow(x2, b);
+          const err = Math.abs(sum - expected);
+          totalChecks += 1;
+          if (err > maxErr) {
+            maxErr = err;
+            worst = { x1, x2, sum, expected };
+            worstMono = { a, b };
+          }
+        }
+      }
+    }
+  }
+  return { maxErr, worst, worstMono, totalChecks };
+}
+
+function showMarsdenResult() {
+  const r = runMarsdenReproductionTest();
+  const tol = 1e-6;
+  const ok = r.maxErr < tol;
+  const numMonomials = (store.current.p + 1) * (store.current.q + 1);
+  if (ok) {
+    marsdenTestResult.className = 'note passed';
+    marsdenTestResult.textContent =
+      `passed: ${numMonomials} monomials × ${r.totalChecks / numMonomials} sample points, ` +
+      `max error ${r.maxErr.toExponential(2)}`;
+  } else {
+    marsdenTestResult.className = 'note failed';
+    const m = r.worstMono;
+    const w = r.worst;
+    marsdenTestResult.textContent =
+      `FAILED at x₁^${m.a} x₂^${m.b}, ` +
+      `(${w.x1.toFixed(2)}, ${w.x2.toFixed(2)}): ` +
+      `got ${w.sum.toFixed(6)}, expected ${w.expected.toFixed(6)}, ` +
+      `max error ${r.maxErr.toExponential(2)}`;
+  }
+}
+
 // --- Event wiring ----------------------------------------------------------
 btnReset.addEventListener('click', reset);
 btnUndo.addEventListener('click', undo);
 btnRedo.addEventListener('click', redo);
 btnExport.addEventListener('click', exportJSON);
+btnMarsdenTest.addEventListener('click', showMarsdenResult);
 
 inputImport.addEventListener('change', (e) => {
   const file = e.target.files[0];

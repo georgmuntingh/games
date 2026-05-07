@@ -173,11 +173,30 @@ button#export-btn,
   border: 1px solid var(--ui-border);
 }
 
-button#reset-btn {
+button#reset-btn,
+button#marsden-test-btn {
   width: 100%;
   background: transparent;
   color: var(--ui-fg);
   border: 1px solid var(--ui-border);
+}
+
+button#marsden-test-btn {
+  margin-top: 0.4rem;
+}
+
+#marsden-test-result {
+  margin: 0.4rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+#marsden-test-result.passed {
+  color: #16a34a;
+}
+
+#marsden-test-result.failed {
+  color: #dc2626;
 }
 
 .note {

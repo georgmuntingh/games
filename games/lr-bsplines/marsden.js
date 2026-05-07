@@ -123,12 +123,17 @@ function expandLinearProduct(roots) {
 }
 
 // Sum every term into a single (p+1) × (q+1) coefficient matrix C[i][j],
-// where the polynomial is Σ C[i][j] y1^i y2^j. Both p and q are read off
-// the first term (all terms in our simplified poly have the same bidegree).
-function polyToMatrix(poly) {
-  const t0 = poly.terms[0];
-  const p = t0.xRoots.length;
-  const q = t0.yRoots.length;
+// where the polynomial is Σ C[i][j] y1^i y2^j. p and q default to the
+// bidegree read off the first term; pass them explicitly when the poly may
+// be empty after cancellation.
+export function polyToMatrix(poly, p, q) {
+  if (p === undefined || q === undefined) {
+    if (poly.terms.length === 0) {
+      throw new Error('polyToMatrix: explicit (p, q) required for an empty polynomial');
+    }
+    p = poly.terms[0].xRoots.length;
+    q = poly.terms[0].yRoots.length;
+  }
   const C = [];
   for (let i = 0; i <= p; i++) C.push(new Array(q + 1).fill(0));
   for (const t of poly.terms) {
@@ -140,7 +145,7 @@ function polyToMatrix(poly) {
       }
     }
   }
-  return { C, p, q };
+  return C;
 }
 
 // Returns a single-term poly equal to `poly`, or null if no such factoring
@@ -150,7 +155,10 @@ function polyToMatrix(poly) {
 //   3. Recover f(y1) and g(y2) as the row / column vectors.
 //   4. Find their real roots via Durand-Kerner.
 function tryFactorize(poly) {
-  const { C, p, q } = polyToMatrix(poly);
+  const t0 = poly.terms[0];
+  const p = t0.xRoots.length;
+  const q = t0.yRoots.length;
+  const C = polyToMatrix(poly, p, q);
   let pi = 0,
     pj = 0,
     pivAbs = 0;
@@ -271,6 +279,90 @@ function durandKerner(coeffs, deg) {
   }
   // Best-effort: caller will check whether the imaginary parts are tight enough.
   return roots;
+}
+
+// --- Polynomial expansion via the Marsden identity -----------------------
+//
+// The Marsden identity reads
+//
+//   (y1 - x1)^p (y2 - x2)^q = Σ_j p_j(y) · B_j(x).
+//
+// Expanding the LHS as a polynomial in x with parameters y,
+//
+//   (y1 - x1)^p (y2 - x2)^q
+//     = Σ_{a, b} (-1)^{a+b} C(p, a) C(q, b) · x1^a x2^b · y1^{p-a} y2^{q-b},
+//
+// and matching y-monomial coefficients on both sides gives the dual
+// functional λ_j defined by  λ_j(B_i) = δ_{ij},
+//
+//   λ_j(x1^a x2^b)
+//     = (-1)^{a+b} / (C(p, a) C(q, b)) · [y1^{p-a} y2^{q-b}] p_j(y).
+//
+// dualFunctionalMatrix returns the (p+1) × (q+1) table L[a][b] = λ_j(x1^a x2^b).
+// expandPolynomialInBasis applies it to a general polynomial, returning the
+// array of B-spline coefficients α_j such that  f(x) = Σ_j α_j · B_j(x).
+
+function binomial(n, k) {
+  if (k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i;
+  return r;
+}
+
+export function dualFunctionalMatrix(dualPoly, p, q) {
+  const P = polyToMatrix(dualPoly, p, q);
+  const L = [];
+  for (let a = 0; a <= p; a++) {
+    const row = [];
+    for (let b = 0; b <= q; b++) {
+      const sign = (a + b) % 2 === 0 ? 1 : -1;
+      row.push((sign * P[p - a][q - b]) / (binomial(p, a) * binomial(q, b)));
+    }
+    L.push(row);
+  }
+  return L;
+}
+
+// f is represented as an (≤ p+1) × (≤ q+1) matrix of monomial coefficients:
+// f(x1, x2) = Σ_{a, b} fMatrix[a][b] · x1^a x2^b.  Rows / columns may be
+// shorter than p+1 / q+1 — missing entries are treated as zero. Returns the
+// array of α_j coefficients in the same order as state.bsplines.
+export function expandPolynomialInBasis(state, fMatrix) {
+  const { p, q, bsplines } = state;
+  const alphas = [];
+  for (const B of bsplines) {
+    if (!B.dualPoly) {
+      alphas.push(0);
+      continue;
+    }
+    const L = dualFunctionalMatrix(B.dualPoly, p, q);
+    let alpha = 0;
+    for (let a = 0; a <= p; a++) {
+      const row = fMatrix[a];
+      if (!row) continue;
+      for (let b = 0; b <= q; b++) {
+        const c = row[b];
+        if (c) alpha += c * L[a][b];
+      }
+    }
+    alphas.push(alpha);
+  }
+  return alphas;
+}
+
+// Evaluate f(x1, x2) = Σ fMatrix[a][b] x1^a x2^b at a point.
+export function evalPolyXY(fMatrix, x1, x2) {
+  let s = 0;
+  for (let a = 0; a < fMatrix.length; a++) {
+    const row = fMatrix[a];
+    if (!row) continue;
+    const xa = a === 0 ? 1 : Math.pow(x1, a);
+    for (let b = 0; b < row.length; b++) {
+      const c = row[b];
+      if (c) s += c * xa * (b === 0 ? 1 : Math.pow(x2, b));
+    }
+  }
+  return s;
 }
 
 // --- Rendering -------------------------------------------------------------
