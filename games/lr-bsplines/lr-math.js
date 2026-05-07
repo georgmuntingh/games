@@ -510,6 +510,25 @@ export function meshlineFromAnchors(a1, a2, mult) {
   return { dir: newDir, c: a1.mid, a: lo, b: hi, m: mult };
 }
 
+// Pick a uniformly-random LR refinement that splits at least one active
+// B-spline, or return null if no such refinement exists. Candidates are
+// every (anchor, anchor) pair that yields a meshline through
+// meshlineFromAnchors(...) which still has a non-empty previewSplitTargets.
+// Pass a custom rng (returning a number in [0, 1)) for deterministic tests.
+export function generateRandomRefinement(state, mult = 1, rng = Math.random) {
+  const anchors = computeAnchors(state);
+  const candidates = [];
+  for (let i = 0; i < anchors.length; i++) {
+    for (let j = i + 1; j < anchors.length; j++) {
+      const ml = meshlineFromAnchors(anchors[i], anchors[j], mult);
+      if (!ml) continue;
+      if (previewSplitTargets(state, ml).length > 0) candidates.push(ml);
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(rng() * candidates.length)];
+}
+
 export function cloneState(state) {
   return {
     p: state.p,

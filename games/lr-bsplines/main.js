@@ -22,6 +22,7 @@ import {
   deserialize,
   distinct,
   evalBSpline2D,
+  generateRandomRefinement,
   insertMeshLine,
   meshlineFromAnchors,
   previewSplitTargets,
@@ -54,6 +55,11 @@ const btnExport = document.getElementById('export-btn');
 const inputImport = document.getElementById('import-input');
 const btnMarsdenTest = document.getElementById('marsden-test-btn');
 const marsdenTestResult = document.getElementById('marsden-test-result');
+const checkAutoUpdate = document.getElementById('auto-update-basis');
+const inputSimN = document.getElementById('sim-n');
+const labelSimN = document.getElementById('sim-n-out');
+const checkSimVerify = document.getElementById('sim-verify');
+const btnSimulate = document.getElementById('sim-btn');
 
 const bsplineList = document.getElementById('bspline-list');
 const bsplineCount = document.getElementById('bspline-count');
@@ -77,6 +83,8 @@ const store = {
   selectedBSplineIndex: null,
   hoveredBSplineIndex: null,
   insetMode: 'contour', // 'contour' | 'wireframe'
+  autoUpdateBasis: false,
+  simulationRunning: false,
 };
 
 // --- Insertion state machine ----------------------------------------------
@@ -451,11 +459,13 @@ function renderBSplineList() {
     li.addEventListener('mouseenter', () => {
       store.hoveredBSplineIndex = idx;
       renderBoard();
+      if (store.autoUpdateBasis) renderInset();
     });
     li.addEventListener('mouseleave', () => {
       if (store.hoveredBSplineIndex === idx) {
         store.hoveredBSplineIndex = null;
         renderBoard();
+        if (store.autoUpdateBasis) renderInset();
       }
     });
   }
@@ -845,6 +855,7 @@ function setHoveredBSpline(idx) {
   store.hoveredBSplineIndex = idx;
   renderBSplineList();
   renderBoard();
+  if (store.autoUpdateBasis) renderInset();
   // Scroll only the inner basis-list to the hovered entry. Avoids pulling
   // the whole page (and the canvas) out from under the user — particularly
   // problematic on mobile where the sidebar sits below the canvas.
@@ -1079,7 +1090,12 @@ function renderInset() {
   const H = inset.height;
   insetCtx.fillStyle = '#0b0d12';
   insetCtx.fillRect(0, 0, W, H);
-  const idx = store.selectedBSplineIndex;
+  // With "auto-update" on, the preview tracks the currently-hovered B-spline
+  // and falls back to the selected one when nothing is hovered.
+  let idx = store.selectedBSplineIndex;
+  if (store.autoUpdateBasis && store.hoveredBSplineIndex !== null) {
+    idx = store.hoveredBSplineIndex;
+  }
   const B = idx !== null && idx !== undefined ? store.current.bsplines[idx] : null;
   if (!B) {
     insetLabelEl.textContent = '—';
@@ -1087,7 +1103,10 @@ function renderInset() {
     insetCtx.font = '11px system-ui, sans-serif';
     insetCtx.textAlign = 'center';
     insetCtx.textBaseline = 'middle';
-    insetCtx.fillText('Click a B-spline to preview', W / 2, H / 2);
+    const msg = store.autoUpdateBasis
+      ? 'Hover a B-spline to preview'
+      : 'Click a B-spline to preview';
+    insetCtx.fillText(msg, W / 2, H / 2);
     return;
   }
   insetLabelEl.textContent = `B[${idx}]   c=${B.coeff.toFixed(3)}`;
@@ -1181,12 +1200,73 @@ function showMarsdenResult() {
   }
 }
 
+// Run N random LR refinements, one per animation frame so the user sees the
+// mesh evolve. Optionally verifies the Marsden identity after each step and
+// aborts on first failure. Disables the Simulate button for the duration to
+// prevent re-entry.
+async function runSimulation() {
+  const N = parseInt(inputSimN.value, 10) || 1;
+  const verifyMarsden = checkSimVerify.checked;
+  if (store.simulationRunning) return;
+  store.simulationRunning = true;
+  btnSimulate.disabled = true;
+  setStatus(`Simulating ${N} random refinement${N === 1 ? '' : 's'}…`);
+  let completed = 0;
+  for (let i = 0; i < N; i++) {
+    const ml = generateRandomRefinement(store.current, 1);
+    if (!ml) {
+      setStatus(`Stopped at step ${completed}: no further valid refinement available.`, true);
+      break;
+    }
+    commitInsertion(ml);
+    completed += 1;
+    if (verifyMarsden) {
+      const r = runMarsdenReproductionTest();
+      if (!Number.isFinite(r.maxErr) || r.maxErr > 1e-6) {
+        const m = r.worstMono;
+        setStatus(
+          `Marsden identity FAILED at step ${completed}: ` +
+            `max error ${r.maxErr.toExponential(2)} on x₁^${m.a} x₂^${m.b}.`,
+          true
+        );
+        store.simulationRunning = false;
+        btnSimulate.disabled = false;
+        return;
+      }
+    }
+    setStatus(
+      `Step ${completed}/${N}${verifyMarsden ? ' — Marsden ✓' : ''}: ` +
+        `${store.current.bsplines.length} B-splines, ${store.current.meshlines.length} mesh-line records.`
+    );
+    // Yield so the browser repaints before the next iteration.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  if (completed === N) {
+    setStatus(
+      `Done: ${N} random refinement${N === 1 ? '' : 's'} applied` +
+        (verifyMarsden ? ' (Marsden verified at every step).' : '.')
+    );
+  }
+  store.simulationRunning = false;
+  btnSimulate.disabled = false;
+}
+
 // --- Event wiring ----------------------------------------------------------
 btnReset.addEventListener('click', reset);
 btnUndo.addEventListener('click', undo);
 btnRedo.addEventListener('click', redo);
 btnExport.addEventListener('click', exportJSON);
 btnMarsdenTest.addEventListener('click', showMarsdenResult);
+btnSimulate.addEventListener('click', runSimulation);
+
+checkAutoUpdate.addEventListener('change', () => {
+  store.autoUpdateBasis = checkAutoUpdate.checked;
+  renderInset();
+});
+
+inputSimN.addEventListener('input', () => {
+  labelSimN.textContent = inputSimN.value;
+});
 
 inputImport.addEventListener('change', (e) => {
   const file = e.target.files[0];

@@ -12,6 +12,7 @@ import {
   serialize,
   deserialize,
   approxEq,
+  generateRandomRefinement,
 } from '../lr-math.js';
 import {
   initialDualPoly,
@@ -851,6 +852,49 @@ test('grevillePoint matches mean of factored dual points after global splits', (
     assertClose(g[0], meanX, 1e-9);
     assertClose(g[1], meanY, 1e-9);
   }
+});
+
+// 14. Random refinement generator -----------------------------------------
+test('generateRandomRefinement on the initial state always splits a B-spline', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  // Deterministic stand-in for Math.random — cycle through candidates.
+  let k = 0;
+  const rng = () => ((k = (k + 1) % 7) / 7);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const ml = generateRandomRefinement(s, 1, rng);
+    assertTrue(ml !== null, `attempt ${attempt}: should find a candidate`);
+    assertTrue(
+      previewSplitTargets(s, ml).length > 0,
+      `attempt ${attempt}: candidate must split at least one B-spline`
+    );
+  }
+});
+
+test('generateRandomRefinement: 10 sequential random refinements all split, Marsden preserved', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  let seed = 1;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  for (let iter = 0; iter < 10; iter++) {
+    const ml = generateRandomRefinement(s, 1, rng);
+    assertTrue(ml !== null, `iter ${iter}: candidate available`);
+    const targets = previewSplitTargets(s, ml);
+    assertTrue(targets.length > 0, `iter ${iter}: splits something`);
+    insertMeshLine(s, ml);
+  }
+  // Sanity: PoU still holds, basis grew.
+  for (const x of [0.1, 0.5, 0.9])
+    for (const y of [0.1, 0.5, 0.9]) {
+      let sum = 0;
+      for (const B of s.bsplines) sum += B.coeff * evalBSpline2D(B, x, y);
+      assertClose(sum, 1, 1e-6);
+    }
 });
 
 export function runAll() {

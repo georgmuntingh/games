@@ -117,7 +117,30 @@
                 <span id="inset-label" class="inset-label">—</span>
               </div>
             </div>
+            <div class="row">
+              <label class="check">
+                <input id="auto-update-basis" type="checkbox" />
+                Auto-update basis function
+              </label>
+            </div>
             <ul id="bspline-list" class="bspline-list"></ul>
+          </details>
+
+          <details class="panel">
+            <summary>Simulate</summary>
+            <div class="row">
+              <label>
+                Refinements N: <span id="sim-n-out">10</span>
+                <input id="sim-n" type="range" min="1" max="50" value="10" />
+              </label>
+            </div>
+            <div class="row">
+              <label class="check">
+                <input id="sim-verify" type="checkbox" />
+                Verify Marsden identity
+              </label>
+            </div>
+            <button id="sim-btn" type="button">Simulate</button>
           </details>
 
           <details class="panel">
