@@ -10,9 +10,17 @@
 //       { dir: 'h'|'v', c, a, b, m }   // c = constant value, [a,b] = extent, m = mult
 //     ],
 //     bsplines: [                // active LR B-splines
-//       { kx: number[p+2], ky: number[q+2], coeff: number, id }
+//       { kx: number[p+2], ky: number[q+2], coeff: number, dualPoly }
 //     ]
 //   }
+
+import {
+  addDualPoly,
+  cloneDualPoly,
+  initialDualPoly,
+  scaleDualPoly,
+  simplifyDualPoly,
+} from './marsden.js';
 
 const EPS = 1e-9;
 
@@ -128,6 +136,7 @@ export function splitBSpline(B, dir, tau) {
       kx: dir === 'h' ? [...B.kx] : part.kv,
       ky: dir === 'h' ? part.kv : [...B.ky],
       coeff: B.coeff * part.alpha,
+      dualPoly: B.dualPoly ? scaleDualPoly(B.dualPoly, part.alpha) : undefined,
     };
     children.push(child);
   }
@@ -146,6 +155,9 @@ export function mergeOrAdd(bsplines, B) {
   for (const existing of bsplines) {
     if (bsplineKey(existing) === key) {
       existing.coeff += B.coeff;
+      if (existing.dualPoly && B.dualPoly) {
+        existing.dualPoly = addDualPoly(existing.dualPoly, B.dualPoly);
+      }
       return existing;
     }
   }
@@ -216,7 +228,7 @@ export function createInitialState({ p, q, Nx, Ny, openKnots, domain }) {
       // Reject degenerate B-splines (zero-length support).
       if (kx[0] >= kx[p + 1] - EPS) continue;
       if (ky[0] >= ky[q + 1] - EPS) continue;
-      bsplines.push({ kx, ky, coeff: 1 });
+      bsplines.push({ kx, ky, coeff: 1, dualPoly: initialDualPoly(kx, ky, p, q) });
     }
   }
 
@@ -498,6 +510,25 @@ export function meshlineFromAnchors(a1, a2, mult) {
   return { dir: newDir, c: a1.mid, a: lo, b: hi, m: mult };
 }
 
+// Pick a uniformly-random LR refinement that splits at least one active
+// B-spline, or return null if no such refinement exists. Candidates are
+// every (anchor, anchor) pair that yields a meshline through
+// meshlineFromAnchors(...) which still has a non-empty previewSplitTargets.
+// Pass a custom rng (returning a number in [0, 1)) for deterministic tests.
+export function generateRandomRefinement(state, mult = 1, rng = Math.random) {
+  const anchors = computeAnchors(state);
+  const candidates = [];
+  for (let i = 0; i < anchors.length; i++) {
+    for (let j = i + 1; j < anchors.length; j++) {
+      const ml = meshlineFromAnchors(anchors[i], anchors[j], mult);
+      if (!ml) continue;
+      if (previewSplitTargets(state, ml).length > 0) candidates.push(ml);
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(rng() * candidates.length)];
+}
+
 export function cloneState(state) {
   return {
     p: state.p,
@@ -511,6 +542,7 @@ export function cloneState(state) {
       kx: [...B.kx],
       ky: [...B.ky],
       coeff: B.coeff,
+      dualPoly: B.dualPoly ? cloneDualPoly(B.dualPoly) : undefined,
     })),
   };
 }
@@ -526,7 +558,12 @@ export function serialize(state) {
       knotsX: state.knotsX,
       knotsY: state.knotsY,
       meshlines: state.meshlines,
-      bsplines: state.bsplines.map((B) => ({ kx: B.kx, ky: B.ky, coeff: B.coeff })),
+      bsplines: state.bsplines.map((B) => ({
+        kx: B.kx,
+        ky: B.ky,
+        coeff: B.coeff,
+        dualPoly: B.dualPoly ? cloneDualPoly(B.dualPoly) : undefined,
+      })),
     },
     null,
     2
@@ -536,9 +573,11 @@ export function serialize(state) {
 export function deserialize(json) {
   const obj = typeof json === 'string' ? JSON.parse(json) : json;
   if (!obj || obj.version !== 1) throw new Error('Unsupported file version');
+  const p = obj.p;
+  const q = obj.q;
   return {
-    p: obj.p,
-    q: obj.q,
+    p,
+    q,
     domain: obj.domain,
     openKnots: !!obj.openKnots,
     knotsX: obj.knotsX,
@@ -548,6 +587,12 @@ export function deserialize(json) {
       kx: [...B.kx],
       ky: [...B.ky],
       coeff: B.coeff,
+      // Older exports may not include dualPoly; fall back to the natural one
+      // built from the B-spline's interior knots. Newer exports round-trip
+      // verbatim, including non-trivial sums.
+      dualPoly: B.dualPoly
+        ? simplifyDualPoly(B.dualPoly)
+        : initialDualPoly(B.kx, B.ky, p, q),
     })),
   };
 }

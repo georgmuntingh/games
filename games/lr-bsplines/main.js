@@ -22,11 +22,17 @@ import {
   deserialize,
   distinct,
   evalBSpline2D,
+  generateRandomRefinement,
   insertMeshLine,
   meshlineFromAnchors,
   previewSplitTargets,
   serialize,
 } from './lr-math.js';
+import {
+  expandPolynomialInBasis,
+  grevillePoint,
+  renderDualPolyHTML,
+} from './marsden.js';
 
 // --- DOM references --------------------------------------------------------
 const board = document.getElementById('board');
@@ -47,6 +53,13 @@ const btnUndo = document.getElementById('undo-btn');
 const btnRedo = document.getElementById('redo-btn');
 const btnExport = document.getElementById('export-btn');
 const inputImport = document.getElementById('import-input');
+const btnMarsdenTest = document.getElementById('marsden-test-btn');
+const marsdenTestResult = document.getElementById('marsden-test-result');
+const checkAutoUpdate = document.getElementById('auto-update-basis');
+const inputSimN = document.getElementById('sim-n');
+const labelSimN = document.getElementById('sim-n-out');
+const checkSimVerify = document.getElementById('sim-verify');
+const btnSimulate = document.getElementById('sim-btn');
 
 const bsplineList = document.getElementById('bspline-list');
 const bsplineCount = document.getElementById('bspline-count');
@@ -70,6 +83,8 @@ const store = {
   selectedBSplineIndex: null,
   hoveredBSplineIndex: null,
   insetMode: 'contour', // 'contour' | 'wireframe'
+  autoUpdateBasis: false,
+  simulationRunning: false,
 };
 
 // --- Insertion state machine ----------------------------------------------
@@ -393,6 +408,11 @@ function notifyChange() {
   renderBSplineList();
   renderBoard();
   renderInset();
+  // Any state change invalidates a previous Marsden reproduction result.
+  if (marsdenTestResult) {
+    marsdenTestResult.textContent = '';
+    marsdenTestResult.className = 'note';
+  }
 }
 
 function renderBSplineList() {
@@ -412,10 +432,16 @@ function renderBSplineList() {
       const cls = [];
       if (i === store.selectedBSplineIndex) cls.push('selected');
       if (i === store.hoveredBSplineIndex) cls.push('hover');
+      const dualHTML = B.dualPoly ? renderDualPolyHTML(B.dualPoly) : '';
+      const factored =
+        B.dualPoly && B.dualPoly.terms && B.dualPoly.terms.length <= 1;
       return (
         `<li class="${cls.join(' ')}" data-index="${i}">` +
         `<span class="coeff">c=${B.coeff.toFixed(3)}</span>` +
         `<span class="kv">x: ${fmt(B.kx)}<br>y: ${fmt(B.ky)}</span>` +
+        (dualHTML
+          ? `<span class="dual${factored ? '' : ' nonfactored'}">p(y) = ${dualHTML}</span>`
+          : '') +
         `</li>`
       );
     })
@@ -433,11 +459,13 @@ function renderBSplineList() {
     li.addEventListener('mouseenter', () => {
       store.hoveredBSplineIndex = idx;
       renderBoard();
+      if (store.autoUpdateBasis) renderInset();
     });
     li.addEventListener('mouseleave', () => {
       if (store.hoveredBSplineIndex === idx) {
         store.hoveredBSplineIndex = null;
         renderBoard();
+        if (store.autoUpdateBasis) renderInset();
       }
     });
   }
@@ -718,6 +746,78 @@ function renderBoard() {
     marker.addEventListener('pointerdown', onPointerDownFor(a));
     board.appendChild(marker);
   }
+
+  // Dual points of the hovered / selected B-spline. Drawn last so they sit on
+  // top of every other layer. Only meaningful when the dual polynomial is a
+  // single product term: those roots are the "dual points" of that B-spline,
+  // x-direction roots projected onto the x-axis and y-direction roots onto
+  // the y-axis. Non-factored polynomials (sums of products) have no clean
+  // dual points and are skipped — the basis-functions panel shows the full
+  // sum in that case.
+  const drawDualPoints = (idx, extra) => {
+    if (idx === null || idx === undefined) return;
+    const B = state.bsplines[idx];
+    if (!B || !B.dualPoly || B.dualPoly.terms.length !== 1) return;
+    const term = B.dualPoly.terms[0];
+    const cls = 'dual-point' + (extra ? ' ' + extra : '');
+    for (const r of term.xRoots) {
+      const [sx] = uxToSvg(state, r, ymin);
+      const dot = svgEl('circle', {
+        class: cls,
+        cx: sx,
+        cy: by1,
+        r: 4.5,
+      });
+      dot.appendChild(svgEl('title', {}, `dual point  y₁ = ${r.toFixed(3)}`));
+      board.appendChild(dot);
+    }
+    for (const r of term.yRoots) {
+      const [, sy] = uxToSvg(state, xmin, r);
+      const dot = svgEl('circle', {
+        class: cls,
+        cx: bx0,
+        cy: sy,
+        r: 4.5,
+      });
+      dot.appendChild(svgEl('title', {}, `dual point  y₂ = ${r.toFixed(3)}`));
+      board.appendChild(dot);
+    }
+  };
+  if (
+    store.hoveredBSplineIndex !== null &&
+    store.hoveredBSplineIndex !== store.selectedBSplineIndex
+  ) {
+    drawDualPoints(store.hoveredBSplineIndex, 'hover');
+  }
+  drawDualPoints(store.selectedBSplineIndex, 'selected');
+
+  // Greville point of the highlighted / hovered B-spline. Drawn as an "×"
+  // cross over a thicker bg-coloured halo so it stays visible even when it
+  // coincides with one of the dual points (filled circles, drawn just below).
+  const drawGreville = (idx, extra) => {
+    if (idx === null || idx === undefined) return;
+    const B = state.bsplines[idx];
+    if (!B) return;
+    const g = grevillePoint(B, state.p, state.q);
+    if (!g) return;
+    const [cx, cy] = uxToSvg(state, g[0], g[1]);
+    const r = 6.5;
+    const d = `M ${cx - r} ${cy - r} L ${cx + r} ${cy + r} M ${cx + r} ${cy - r} L ${cx - r} ${cy + r}`;
+    const halo = svgEl('path', { class: 'greville-halo' + (extra ? ' ' + extra : ''), d });
+    const cross = svgEl('path', { class: 'greville-cross' + (extra ? ' ' + extra : ''), d });
+    cross.appendChild(
+      svgEl('title', {}, `Greville point  (${g[0].toFixed(3)}, ${g[1].toFixed(3)})`)
+    );
+    board.appendChild(halo);
+    board.appendChild(cross);
+  };
+  if (
+    store.hoveredBSplineIndex !== null &&
+    store.hoveredBSplineIndex !== store.selectedBSplineIndex
+  ) {
+    drawGreville(store.hoveredBSplineIndex, 'hover');
+  }
+  drawGreville(store.selectedBSplineIndex, 'selected');
 }
 
 // --- Hover detection on the main canvas -----------------------------------
@@ -730,19 +830,20 @@ function svgPointToUserCoords(svgPt) {
   return [u, v];
 }
 
+// Returns the index of the active B-spline whose Greville point — the mean
+// of its dual points — is closest to (u, v). Greville is a natural "centre"
+// for the B-spline (and in the factored case literally the mean of dual
+// points), so this picks the B-spline whose centre the cursor is nearest to,
+// regardless of overlapping supports.
 function bsplineUnderPoint(state, u, v) {
   let bestIdx = null;
-  let bestArea = Infinity;
+  let bestDist = Infinity;
   for (let i = 0; i < state.bsplines.length; i++) {
-    const B = state.bsplines[i];
-    const x0 = B.kx[0];
-    const x1 = B.kx[B.kx.length - 1];
-    const y0 = B.ky[0];
-    const y1 = B.ky[B.ky.length - 1];
-    if (u < x0 || u > x1 || v < y0 || v > y1) continue;
-    const area = (x1 - x0) * (y1 - y0);
-    if (area < bestArea) {
-      bestArea = area;
+    const g = grevillePoint(state.bsplines[i], state.p, state.q);
+    if (!g) continue;
+    const d = Math.hypot(u - g[0], v - g[1]);
+    if (d < bestDist) {
+      bestDist = d;
       bestIdx = i;
     }
   }
@@ -754,6 +855,7 @@ function setHoveredBSpline(idx) {
   store.hoveredBSplineIndex = idx;
   renderBSplineList();
   renderBoard();
+  if (store.autoUpdateBasis) renderInset();
   // Scroll only the inner basis-list to the hovered entry. Avoids pulling
   // the whole page (and the canvas) out from under the user — particularly
   // problematic on mobile where the sidebar sits below the canvas.
@@ -988,7 +1090,12 @@ function renderInset() {
   const H = inset.height;
   insetCtx.fillStyle = '#0b0d12';
   insetCtx.fillRect(0, 0, W, H);
-  const idx = store.selectedBSplineIndex;
+  // With "auto-update" on, the preview tracks the currently-hovered B-spline
+  // and falls back to the selected one when nothing is hovered.
+  let idx = store.selectedBSplineIndex;
+  if (store.autoUpdateBasis && store.hoveredBSplineIndex !== null) {
+    idx = store.hoveredBSplineIndex;
+  }
   const B = idx !== null && idx !== undefined ? store.current.bsplines[idx] : null;
   if (!B) {
     insetLabelEl.textContent = '—';
@@ -996,7 +1103,10 @@ function renderInset() {
     insetCtx.font = '11px system-ui, sans-serif';
     insetCtx.textAlign = 'center';
     insetCtx.textBaseline = 'middle';
-    insetCtx.fillText('Click a B-spline to preview', W / 2, H / 2);
+    const msg = store.autoUpdateBasis
+      ? 'Hover a B-spline to preview'
+      : 'Click a B-spline to preview';
+    insetCtx.fillText(msg, W / 2, H / 2);
     return;
   }
   insetLabelEl.textContent = `B[${idx}]   c=${B.coeff.toFixed(3)}`;
@@ -1022,11 +1132,141 @@ function setStatus(msg, isError = false) {
   status.style.color = isError ? '#dc2626' : '';
 }
 
+// Verify the precomputed Marsden identity numerically: for every monomial
+// x1^a x2^b with a ≤ p, b ≤ q, expand it in the current B-spline basis
+// using each B-spline's stored dual polynomial, evaluate the resulting
+// linear combination on a sample grid, and report the worst-case error
+// against the analytic monomial value.
+function runMarsdenReproductionTest() {
+  const state = store.current;
+  const { p, q, domain } = state;
+  const [xmin, xmax, ymin, ymax] = domain;
+  const xs = [];
+  const ys = [];
+  for (let i = 1; i <= 5; i++) {
+    xs.push(xmin + ((xmax - xmin) * i) / 6);
+    ys.push(ymin + ((ymax - ymin) * i) / 6);
+  }
+  let maxErr = 0;
+  let worst = null;
+  let worstMono = null;
+  let totalChecks = 0;
+  for (let a = 0; a <= p; a++) {
+    for (let b = 0; b <= q; b++) {
+      const fMatrix = [];
+      for (let i = 0; i <= p; i++) fMatrix.push(new Array(q + 1).fill(0));
+      fMatrix[a][b] = 1;
+      const alphas = expandPolynomialInBasis(state, fMatrix);
+      for (const x1 of xs) {
+        for (const x2 of ys) {
+          let sum = 0;
+          for (let i = 0; i < state.bsplines.length; i++) {
+            sum += alphas[i] * evalBSpline2D(state.bsplines[i], x1, x2);
+          }
+          const expected = Math.pow(x1, a) * Math.pow(x2, b);
+          const err = Math.abs(sum - expected);
+          totalChecks += 1;
+          if (err > maxErr) {
+            maxErr = err;
+            worst = { x1, x2, sum, expected };
+            worstMono = { a, b };
+          }
+        }
+      }
+    }
+  }
+  return { maxErr, worst, worstMono, totalChecks };
+}
+
+function showMarsdenResult() {
+  const r = runMarsdenReproductionTest();
+  const tol = 1e-6;
+  const ok = r.maxErr < tol;
+  const numMonomials = (store.current.p + 1) * (store.current.q + 1);
+  if (ok) {
+    marsdenTestResult.className = 'note passed';
+    marsdenTestResult.textContent =
+      `passed: ${numMonomials} monomials × ${r.totalChecks / numMonomials} sample points, ` +
+      `max error ${r.maxErr.toExponential(2)}`;
+  } else {
+    marsdenTestResult.className = 'note failed';
+    const m = r.worstMono;
+    const w = r.worst;
+    marsdenTestResult.textContent =
+      `FAILED at x₁^${m.a} x₂^${m.b}, ` +
+      `(${w.x1.toFixed(2)}, ${w.x2.toFixed(2)}): ` +
+      `got ${w.sum.toFixed(6)}, expected ${w.expected.toFixed(6)}, ` +
+      `max error ${r.maxErr.toExponential(2)}`;
+  }
+}
+
+// Run N random LR refinements, one per animation frame so the user sees the
+// mesh evolve. Optionally verifies the Marsden identity after each step and
+// aborts on first failure. Disables the Simulate button for the duration to
+// prevent re-entry.
+async function runSimulation() {
+  const N = parseInt(inputSimN.value, 10) || 1;
+  const verifyMarsden = checkSimVerify.checked;
+  if (store.simulationRunning) return;
+  store.simulationRunning = true;
+  btnSimulate.disabled = true;
+  setStatus(`Simulating ${N} random refinement${N === 1 ? '' : 's'}…`);
+  let completed = 0;
+  for (let i = 0; i < N; i++) {
+    const ml = generateRandomRefinement(store.current, 1);
+    if (!ml) {
+      setStatus(`Stopped at step ${completed}: no further valid refinement available.`, true);
+      break;
+    }
+    commitInsertion(ml);
+    completed += 1;
+    if (verifyMarsden) {
+      const r = runMarsdenReproductionTest();
+      if (!Number.isFinite(r.maxErr) || r.maxErr > 1e-6) {
+        const m = r.worstMono;
+        setStatus(
+          `Marsden identity FAILED at step ${completed}: ` +
+            `max error ${r.maxErr.toExponential(2)} on x₁^${m.a} x₂^${m.b}.`,
+          true
+        );
+        store.simulationRunning = false;
+        btnSimulate.disabled = false;
+        return;
+      }
+    }
+    setStatus(
+      `Step ${completed}/${N}${verifyMarsden ? ' — Marsden ✓' : ''}: ` +
+        `${store.current.bsplines.length} B-splines, ${store.current.meshlines.length} mesh-line records.`
+    );
+    // Yield so the browser repaints before the next iteration.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  if (completed === N) {
+    setStatus(
+      `Done: ${N} random refinement${N === 1 ? '' : 's'} applied` +
+        (verifyMarsden ? ' (Marsden verified at every step).' : '.')
+    );
+  }
+  store.simulationRunning = false;
+  btnSimulate.disabled = false;
+}
+
 // --- Event wiring ----------------------------------------------------------
 btnReset.addEventListener('click', reset);
 btnUndo.addEventListener('click', undo);
 btnRedo.addEventListener('click', redo);
 btnExport.addEventListener('click', exportJSON);
+btnMarsdenTest.addEventListener('click', showMarsdenResult);
+btnSimulate.addEventListener('click', runSimulation);
+
+checkAutoUpdate.addEventListener('change', () => {
+  store.autoUpdateBasis = checkAutoUpdate.checked;
+  renderInset();
+});
+
+inputSimN.addEventListener('input', () => {
+  labelSimN.textContent = inputSimN.value;
+});
 
 inputImport.addEventListener('change', (e) => {
   const file = e.target.files[0];

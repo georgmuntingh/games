@@ -173,11 +173,40 @@ button#export-btn,
   border: 1px solid var(--ui-border);
 }
 
-button#reset-btn {
+button#reset-btn,
+button#marsden-test-btn {
   width: 100%;
   background: transparent;
   color: var(--ui-fg);
   border: 1px solid var(--ui-border);
+}
+
+button#sim-btn {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.row input[type='range'] {
+  width: 100%;
+  padding: 0;
+}
+
+button#marsden-test-btn {
+  margin-top: 0.4rem;
+}
+
+#marsden-test-result {
+  margin: 0.4rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+#marsden-test-result.passed {
+  color: #16a34a;
+}
+
+#marsden-test-result.failed {
+  color: #dc2626;
 }
 
 .note {
@@ -241,6 +270,21 @@ button#reset-btn {
   float: right;
   color: var(--ui-accent);
   font-weight: 600;
+}
+
+/* Marsden dual polynomial of the B-spline. Rendered as a single product when
+   it factors, or a sum of products when refinement has produced a more
+   general form (.nonfactored — coloured to draw attention). */
+.bspline-list .dual {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--ui-fg);
+  font-size: 0.7rem;
+  word-break: break-word;
+}
+
+.bspline-list .dual.nonfactored {
+  color: #f59e0b;
 }
 
 .inset-wrap {
@@ -413,6 +457,48 @@ button#reset-btn {
 .knot-tick {
   fill: var(--ui-muted);
   font-size: 10px;
+}
+
+/* Dual points: roots of the (factorized) dual polynomial of the highlighted
+   B-spline. Drawn on the x- and y-axes (boundary mesh-lines) of the domain
+   so the user sees where each axis-tagged dual point lies. */
+.dual-point {
+  fill: #a855f7;
+  stroke: var(--ui-bg);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.dual-point.hover {
+  fill: rgba(168, 85, 247, 0.55);
+  stroke-opacity: 0.7;
+}
+
+/* Greville point of the highlighted B-spline: rendered as an × cross over a
+   bg-coloured halo so it stays visible against any underlying mesh-line,
+   support shading, or dual-point dot it may coincide with. */
+.greville-cross {
+  stroke: #ec4899;
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.greville-halo {
+  stroke: var(--ui-bg);
+  stroke-width: 5;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.greville-cross.hover {
+  stroke: rgba(236, 72, 153, 0.6);
+}
+
+.greville-halo.hover {
+  stroke-opacity: 0.6;
 }
 
 kbd {
