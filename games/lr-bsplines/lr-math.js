@@ -10,9 +10,17 @@
 //       { dir: 'h'|'v', c, a, b, m }   // c = constant value, [a,b] = extent, m = mult
 //     ],
 //     bsplines: [                // active LR B-splines
-//       { kx: number[p+2], ky: number[q+2], coeff: number, id }
+//       { kx: number[p+2], ky: number[q+2], coeff: number, dualPoly }
 //     ]
 //   }
+
+import {
+  addDualPoly,
+  cloneDualPoly,
+  initialDualPoly,
+  scaleDualPoly,
+  simplifyDualPoly,
+} from './marsden.js';
 
 const EPS = 1e-9;
 
@@ -128,6 +136,7 @@ export function splitBSpline(B, dir, tau) {
       kx: dir === 'h' ? [...B.kx] : part.kv,
       ky: dir === 'h' ? part.kv : [...B.ky],
       coeff: B.coeff * part.alpha,
+      dualPoly: B.dualPoly ? scaleDualPoly(B.dualPoly, part.alpha) : undefined,
     };
     children.push(child);
   }
@@ -146,6 +155,9 @@ export function mergeOrAdd(bsplines, B) {
   for (const existing of bsplines) {
     if (bsplineKey(existing) === key) {
       existing.coeff += B.coeff;
+      if (existing.dualPoly && B.dualPoly) {
+        existing.dualPoly = addDualPoly(existing.dualPoly, B.dualPoly);
+      }
       return existing;
     }
   }
@@ -216,7 +228,7 @@ export function createInitialState({ p, q, Nx, Ny, openKnots, domain }) {
       // Reject degenerate B-splines (zero-length support).
       if (kx[0] >= kx[p + 1] - EPS) continue;
       if (ky[0] >= ky[q + 1] - EPS) continue;
-      bsplines.push({ kx, ky, coeff: 1 });
+      bsplines.push({ kx, ky, coeff: 1, dualPoly: initialDualPoly(kx, ky, p, q) });
     }
   }
 
@@ -498,6 +510,185 @@ export function meshlineFromAnchors(a1, a2, mult) {
   return { dir: newDir, c: a1.mid, a: lo, b: hi, m: mult };
 }
 
+// Pick a uniformly-random LR refinement that splits at least one active
+// B-spline, or return null if no such refinement exists. Candidates are
+// every (anchor, anchor) pair that yields a meshline through
+// meshlineFromAnchors(...) which still has a non-empty previewSplitTargets.
+//
+// Options:
+//   mult              meshline multiplicity to assign (default 1)
+//   rng               () => number in [0, 1) (default Math.random)
+//   allowHorizontal   include horizontal candidates (default true)
+//   allowVertical     include vertical candidates (default true)
+//   preventMultIncrease   reject candidates whose extent strictly overlaps
+//                         any existing collinear meshline of the same `c`
+//                         (i.e., whose insertion would push the union's
+//                         multiplicity above the candidate's `mult`)
+export function generateRandomRefinement(state, multOrOpts = 1, rngArg, optsArg) {
+  let mult, rng, opts;
+  if (typeof multOrOpts === 'object' && multOrOpts !== null) {
+    opts = multOrOpts;
+    mult = opts.mult ?? 1;
+    rng = opts.rng ?? Math.random;
+  } else {
+    mult = multOrOpts;
+    rng = rngArg ?? Math.random;
+    opts = optsArg ?? {};
+  }
+  const allowHorizontal = opts.allowHorizontal !== false;
+  const allowVertical = opts.allowVertical !== false;
+  const preventMultIncrease = !!opts.preventMultIncrease;
+  const anchors = computeAnchors(state);
+  const candidates = [];
+  for (let i = 0; i < anchors.length; i++) {
+    for (let j = i + 1; j < anchors.length; j++) {
+      const ml = meshlineFromAnchors(anchors[i], anchors[j], mult);
+      if (!ml) continue;
+      if (!allowHorizontal && ml.dir === 'h') continue;
+      if (!allowVertical && ml.dir === 'v') continue;
+      if (preventMultIncrease && wouldIncreaseMultiplicity(state, ml)) continue;
+      if (previewSplitTargets(state, ml).length > 0) candidates.push(ml);
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(rng() * candidates.length)];
+}
+
+// True iff `ml` strictly overlaps any existing collinear meshline (same dir
+// and same constant `c`) along its perpendicular extent. Touching segments
+// (b ≈ a) are merged by unionMeshline without raising multiplicity, so they
+// don't count.
+function wouldIncreaseMultiplicity(state, ml) {
+  for (const r of state.meshlines) {
+    if (r.dir !== ml.dir) continue;
+    if (!approxEq(r.c, ml.c)) continue;
+    const lo = Math.max(r.a, ml.a);
+    const hi = Math.min(r.b, ml.b);
+    if (hi - lo > EPS) return true;
+  }
+  return false;
+}
+
+// Test whether the active LR B-splines are linearly independent.
+//
+// Builds the m × n evaluation matrix M[j][i] = B_i(p_j), where p_j ranges
+// over (p+1) × (q+1) interior sample points per cell of the LR mesh — so
+// every cell carries enough samples to uniquely pin its bidegree-(p, q)
+// polynomial restriction. Two B-splines coincide as functions iff their
+// columns of M coincide. Then runs column-pivoted Modified Gram-Schmidt:
+// at each step pick the residual column with the largest L2-norm,
+// orthonormalize it, and project the remaining columns. The basis is
+// linearly independent iff every selected column has residual norm above
+// the tolerance.
+//
+// Returns:
+//   ok              true iff every pivot ≥ tolerance
+//   smallestPivot   the smallest residual norm encountered
+//   tolerance       the threshold used (echo of the input)
+//   firstFailIndex  the orthogonalization step k at which the residual
+//                   norm first dropped below the tolerance (null if ok)
+//   n               number of B-splines
+//
+// Note: collocating purely at Greville points doesn't work — distinct
+// LR B-splines can share a Greville point (their dual points happen to
+// average to the same coordinate), making the n × n Greville matrix
+// singular even though the B-splines themselves are independent. The
+// cell-grid sample set has cardinality at least n on any LR mesh, so
+// rank deficiency of M is a faithful proxy for basis dependence.
+export function checkLinearIndependence(state, options = {}) {
+  const tol = options.tolerance ?? 1e-9;
+  const { bsplines, p, q } = state;
+  const n = bsplines.length;
+  if (n === 0) return { ok: true, smallestPivot: Infinity, tolerance: tol, firstFailIndex: null, n: 0 };
+
+  const samples = cellGridSamples(state, p + 1, q + 1);
+  const m = samples.length;
+
+  // residuals[i] is the current orthogonalization residual for column i.
+  const residuals = [];
+  const norms = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const col = new Float64Array(m);
+    let sq = 0;
+    const B = bsplines[i];
+    for (let j = 0; j < m; j++) {
+      const v = evalBSpline2D(B, samples[j][0], samples[j][1]);
+      col[j] = v;
+      sq += v * v;
+    }
+    residuals.push(col);
+    norms[i] = Math.sqrt(sq);
+  }
+
+  const remaining = new Set();
+  for (let i = 0; i < n; i++) remaining.add(i);
+  let smallestPivot = Infinity;
+  for (let k = 0; k < n; k++) {
+    let iStar = -1;
+    let bestNorm = -1;
+    for (const i of remaining) {
+      if (norms[i] > bestNorm) {
+        bestNorm = norms[i];
+        iStar = i;
+      }
+    }
+    if (bestNorm < tol) {
+      return { ok: false, smallestPivot: bestNorm, tolerance: tol, firstFailIndex: k, n };
+    }
+    if (bestNorm < smallestPivot) smallestPivot = bestNorm;
+    const q0 = residuals[iStar];
+    const inv = 1 / bestNorm;
+    for (let j = 0; j < m; j++) q0[j] *= inv;
+    norms[iStar] = 1;
+    remaining.delete(iStar);
+    for (const i of remaining) {
+      const r = residuals[i];
+      let proj = 0;
+      for (let j = 0; j < m; j++) proj += r[j] * q0[j];
+      let sq = 0;
+      for (let j = 0; j < m; j++) {
+        r[j] -= proj * q0[j];
+        sq += r[j] * r[j];
+      }
+      norms[i] = Math.sqrt(sq);
+    }
+  }
+  return { ok: true, smallestPivot, tolerance: tol, firstFailIndex: null, n };
+}
+
+// Build (px × py) interior sample points per cell of the LR mesh. A "cell"
+// is the rectangle between consecutive distinct mesh-line constants on
+// each axis. With px = p+1 and py = q+1, each cell carries enough samples
+// to uniquely identify any bidegree-(p, q) polynomial restriction.
+function cellGridSamples(state, px, py) {
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const xConsts = new Set([xmin, xmax]);
+  const yConsts = new Set([ymin, ymax]);
+  for (const ml of state.meshlines) {
+    if (ml.dir === 'v') xConsts.add(ml.c);
+    else yConsts.add(ml.c);
+  }
+  const xK = [...xConsts].sort((a, b) => a - b);
+  const yK = [...yConsts].sort((a, b) => a - b);
+  const points = [];
+  for (let i = 0; i < xK.length - 1; i++) {
+    const x0 = xK[i];
+    const x1 = xK[i + 1];
+    for (let a = 1; a <= px; a++) {
+      const xa = x0 + ((x1 - x0) * a) / (px + 1);
+      for (let j = 0; j < yK.length - 1; j++) {
+        const y0 = yK[j];
+        const y1 = yK[j + 1];
+        for (let b = 1; b <= py; b++) {
+          const yb = y0 + ((y1 - y0) * b) / (py + 1);
+          points.push([xa, yb]);
+        }
+      }
+    }
+  }
+  return points;
+}
+
 export function cloneState(state) {
   return {
     p: state.p,
@@ -511,6 +702,7 @@ export function cloneState(state) {
       kx: [...B.kx],
       ky: [...B.ky],
       coeff: B.coeff,
+      dualPoly: B.dualPoly ? cloneDualPoly(B.dualPoly) : undefined,
     })),
   };
 }
@@ -526,7 +718,12 @@ export function serialize(state) {
       knotsX: state.knotsX,
       knotsY: state.knotsY,
       meshlines: state.meshlines,
-      bsplines: state.bsplines.map((B) => ({ kx: B.kx, ky: B.ky, coeff: B.coeff })),
+      bsplines: state.bsplines.map((B) => ({
+        kx: B.kx,
+        ky: B.ky,
+        coeff: B.coeff,
+        dualPoly: B.dualPoly ? cloneDualPoly(B.dualPoly) : undefined,
+      })),
     },
     null,
     2
@@ -536,9 +733,11 @@ export function serialize(state) {
 export function deserialize(json) {
   const obj = typeof json === 'string' ? JSON.parse(json) : json;
   if (!obj || obj.version !== 1) throw new Error('Unsupported file version');
+  const p = obj.p;
+  const q = obj.q;
   return {
-    p: obj.p,
-    q: obj.q,
+    p,
+    q,
     domain: obj.domain,
     openKnots: !!obj.openKnots,
     knotsX: obj.knotsX,
@@ -548,6 +747,12 @@ export function deserialize(json) {
       kx: [...B.kx],
       ky: [...B.ky],
       coeff: B.coeff,
+      // Older exports may not include dualPoly; fall back to the natural one
+      // built from the B-spline's interior knots. Newer exports round-trip
+      // verbatim, including non-trivial sums.
+      dualPoly: B.dualPoly
+        ? simplifyDualPoly(B.dualPoly)
+        : initialDualPoly(B.kx, B.ky, p, q),
     })),
   };
 }

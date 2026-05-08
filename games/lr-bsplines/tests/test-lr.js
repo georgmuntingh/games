@@ -12,7 +12,22 @@ import {
   serialize,
   deserialize,
   approxEq,
+  generateRandomRefinement,
+  checkLinearIndependence,
 } from '../lr-math.js';
+import {
+  initialDualPoly,
+  evalDualPoly,
+  scaleDualPoly,
+  addDualPoly,
+  simplifyDualPoly,
+  renderDualPolyHTML,
+  dualFunctionalMatrix,
+  expandPolynomialInBasis,
+  evalPolyXY,
+  grevillePoint,
+  marsdenSamplePoints,
+} from '../marsden.js';
 
 const tests = [];
 function test(name, fn) {
@@ -440,6 +455,655 @@ test('previewSplitTargets is consistent with the cascade', () => {
     assertTrue(!stillThere, 'predicted target B-spline must have been replaced');
   }
 });
+// 10. Marsden identity ----------------------------------------------------
+function checkMarsden(state, samples) {
+  const { p, q } = state;
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  for (const [x1, x2, y1, y2] of samples) {
+    const lhs = Math.pow(y1 - x1, p) * Math.pow(y2 - x2, q);
+    let rhs = 0;
+    for (const B of state.bsplines) {
+      const Bval = evalBSpline2D(B, x1, x2);
+      if (Bval === 0) continue;
+      rhs += evalDualPoly(B.dualPoly, y1, y2) * Bval;
+    }
+    assertClose(rhs, lhs, 1e-6, `Marsden at x=(${x1},${x2}) y=(${y1},${y2})`);
+  }
+  // Reference samples not used; arguments just for tag.
+  return [xmin, xmax, ymin, ymax];
+}
+
+function gridSamples(state) {
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const xs = [];
+  for (let i = 1; i < 5; i++) xs.push(xmin + ((xmax - xmin) * i) / 5);
+  const ys = [];
+  for (let j = 1; j < 5; j++) ys.push(ymin + ((ymax - ymin) * j) / 5);
+  // y-points for the dual polynomial — Marsden is a polynomial identity in y,
+  // so any reals work. Pick a mix inside and outside the domain.
+  const Ys = [-0.3, 0.15, 0.5, 0.83, 1.4];
+  const samples = [];
+  for (const x1 of xs)
+    for (const x2 of ys)
+      for (const y1 of Ys)
+        for (const y2 of Ys) samples.push([x1, x2, y1, y2]);
+  return samples;
+}
+
+test('initial dual polynomial: bidegree (2,2) tensor product → factored form', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (const B of s.bsplines) {
+    assertEq(B.dualPoly.terms.length, 1, 'initial dual must be a single product');
+    const t = B.dualPoly.terms[0];
+    assertEq(t.xRoots.length, 2, 'two x-dual points for p=2');
+    assertEq(t.yRoots.length, 2, 'two y-dual points for q=2');
+    // Roots must equal the interior knots.
+    const xs = B.kx.slice(1, 3).slice().sort((a, b) => a - b);
+    const ys = B.ky.slice(1, 3).slice().sort((a, b) => a - b);
+    assertClose(t.xRoots[0], xs[0]);
+    assertClose(t.xRoots[1], xs[1]);
+    assertClose(t.yRoots[0], ys[0]);
+    assertClose(t.yRoots[1], ys[1]);
+    assertClose(t.coeff, 1);
+  }
+});
+
+test('Marsden identity holds on initial tensor product, biquadratic', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity holds on initial tensor product, bilinear', () => {
+  const s = createInitialState({
+    p: 1, q: 1, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  // Bilinear: 2 dual points (1 in x + 1 in y) per B-spline.
+  for (const B of s.bsplines) {
+    assertEq(B.dualPoly.terms.length, 1);
+    assertEq(B.dualPoly.terms[0].xRoots.length, 1);
+    assertEq(B.dualPoly.terms[0].yRoots.length, 1);
+  }
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity holds on initial tensor product, mixed (p=2,q=3)', () => {
+  const s = createInitialState({
+    p: 2, q: 3, Nx: 1, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity is preserved by a global horizontal split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.3, a: 0, b: 1, m: 1 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity is preserved by sequential global splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.25, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.6, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'h', c: 0.75, a: 0, b: 1, m: 1 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity is preserved by a partial (LR) split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('Marsden identity holds at full multiplicity (p+1) horizontal split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 0, Ny: 0, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.5, a: 0, b: 1, m: 2 });
+  checkMarsden(s, gridSamples(s));
+});
+
+test('global tensor-product knot insertion keeps every dual poly factored', () => {
+  // A globally inserted full-span horizontal line is a tensor-product knot
+  // insertion in the y-direction; Cox-de Boor guarantees that every new
+  // B-spline's dual polynomial has the natural factored form.
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.2, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.7, a: 0, b: 1, m: 1 });
+  for (const B of s.bsplines) {
+    assertEq(
+      B.dualPoly.terms.length,
+      1,
+      `B-spline ${JSON.stringify({ kx: B.kx, ky: B.ky })} should factor`
+    );
+    // And the factored roots must match the natural ones (interior knots).
+    const t = B.dualPoly.terms[0];
+    const natX = B.kx.slice(1, s.p + 1).slice().sort((a, b) => a - b);
+    const natY = B.ky.slice(1, s.q + 1).slice().sort((a, b) => a - b);
+    for (let k = 0; k < natX.length; k++) assertClose(t.xRoots[k], natX[k]);
+    for (let k = 0; k < natY.length; k++) assertClose(t.yRoots[k], natY[k]);
+  }
+});
+
+test('Marsden round-trips through serialize/deserialize', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  const recovered = deserialize(serialize(s));
+  // Sample a few (x, y) points; the recovered state must satisfy Marsden.
+  const samples = [];
+  for (const x1 of [0.1, 0.45, 0.8])
+    for (const x2 of [0.1, 0.45, 0.8])
+      for (const y1 of [-0.1, 0.4, 1.1])
+        for (const y2 of [-0.1, 0.4, 1.1]) samples.push([x1, x2, y1, y2]);
+  checkMarsden(recovered, samples);
+});
+
+// 11. Marsden algebra units ------------------------------------------------
+test('simplifyDualPoly factors a sum that secretly is one product', () => {
+  // (y1-1)(y2-1) + (y1-1)(y2-2) = (y1-1)(2 y2 - 3) = 2 (y1-1)(y2 - 1.5).
+  const poly = {
+    terms: [
+      { coeff: 1, xRoots: [1], yRoots: [1] },
+      { coeff: 1, xRoots: [1], yRoots: [2] },
+    ],
+  };
+  const simplified = simplifyDualPoly(poly);
+  assertEq(simplified.terms.length, 1, 'should collapse to one term');
+  const t = simplified.terms[0];
+  assertClose(t.coeff, 2);
+  assertClose(t.xRoots[0], 1);
+  assertClose(t.yRoots[0], 1.5);
+});
+
+test('simplifyDualPoly leaves a non-factorable sum as multiple terms', () => {
+  // (y1-0)(y2-0) + (y1-1)(y2-1)  is NOT separable (y1 y2 + y1 y2 - y1 - y2 + 1
+  // = 2 y1 y2 - y1 - y2 + 1; the coefficient matrix has rank 2).
+  const poly = {
+    terms: [
+      { coeff: 1, xRoots: [0], yRoots: [0] },
+      { coeff: 1, xRoots: [1], yRoots: [1] },
+    ],
+  };
+  const simplified = simplifyDualPoly(poly);
+  assertTrue(simplified.terms.length >= 2, 'should remain a sum of two terms');
+});
+
+test('simplifyDualPoly cancels opposite terms', () => {
+  const poly = {
+    terms: [
+      { coeff: 1, xRoots: [0.5], yRoots: [0.5] },
+      { coeff: -1, xRoots: [0.5], yRoots: [0.5] },
+    ],
+  };
+  const simplified = simplifyDualPoly(poly);
+  assertEq(simplified.terms.length, 0, 'opposite terms cancel');
+});
+
+test('scaleDualPoly multiplies every term coefficient', () => {
+  const p = initialDualPoly([0, 0, 0.5, 1], [0, 0, 0.5, 1], 2, 2);
+  const s = scaleDualPoly(p, 0.5);
+  assertEq(s.terms.length, 1);
+  assertClose(s.terms[0].coeff, 0.5);
+});
+
+test('addDualPoly combines and simplifies', () => {
+  const a = { terms: [{ coeff: 1, xRoots: [1], yRoots: [1] }] };
+  const b = { terms: [{ coeff: 2, xRoots: [1], yRoots: [1] }] };
+  const r = addDualPoly(a, b);
+  assertEq(r.terms.length, 1);
+  assertClose(r.terms[0].coeff, 3);
+});
+
+test('renderDualPolyHTML formats a single product with subscripted variables', () => {
+  const poly = {
+    terms: [{ coeff: 1, xRoots: [0.25], yRoots: [0.5] }],
+  };
+  const html = renderDualPolyHTML(poly);
+  assertTrue(html.includes('y<sub>1</sub>'), 'has y_1');
+  assertTrue(html.includes('y<sub>2</sub>'), 'has y_2');
+  assertTrue(html.includes('0.25'), 'has the x-root');
+  assertTrue(html.includes('0.50'), 'has the y-root');
+});
+
+// 12. Polynomial expansion via the precomputed Marsden identity ----------
+function makeFMatrix(rows, cols) {
+  const M = [];
+  for (let i = 0; i < rows; i++) M.push(new Array(cols).fill(0));
+  return M;
+}
+
+function reproduceAt(state, alphas, x1, x2) {
+  let v = 0;
+  for (let i = 0; i < state.bsplines.length; i++) {
+    v += alphas[i] * evalBSpline2D(state.bsplines[i], x1, x2);
+  }
+  return v;
+}
+
+test('dualFunctionalMatrix: λ_j(1) equals B_j.coeff (partition of unity)', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  for (const B of s.bsplines) {
+    const L = dualFunctionalMatrix(B.dualPoly, s.p, s.q);
+    assertClose(L[0][0], B.coeff, 1e-9, 'λ_j(1) must equal B.coeff');
+  }
+});
+
+test('expandPolynomialInBasis reproduces every monomial on the initial tensor product (p=q=2)', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const samples = [];
+  for (const x1 of [0.05, 0.4, 0.7, 0.95])
+    for (const x2 of [0.05, 0.4, 0.7, 0.95]) samples.push([x1, x2]);
+  for (let a = 0; a <= 2; a++) {
+    for (let b = 0; b <= 2; b++) {
+      const f = makeFMatrix(3, 3);
+      f[a][b] = 1;
+      const alphas = expandPolynomialInBasis(s, f);
+      for (const [x1, x2] of samples) {
+        assertClose(
+          reproduceAt(s, alphas, x1, x2),
+          Math.pow(x1, a) * Math.pow(x2, b),
+          1e-6,
+          `x1^${a} x2^${b} at (${x1},${x2})`
+        );
+      }
+    }
+  }
+});
+
+test('expandPolynomialInBasis reproduces every monomial on the initial tensor product (mixed bidegree p=2, q=3)', () => {
+  const s = createInitialState({
+    p: 2, q: 3, Nx: 1, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let a = 0; a <= 2; a++) {
+    for (let b = 0; b <= 3; b++) {
+      const f = makeFMatrix(3, 4);
+      f[a][b] = 1;
+      const alphas = expandPolynomialInBasis(s, f);
+      for (const x1 of [0.1, 0.45, 0.85])
+        for (const x2 of [0.1, 0.45, 0.85])
+          assertClose(
+            reproduceAt(s, alphas, x1, x2),
+            Math.pow(x1, a) * Math.pow(x2, b),
+            1e-6
+          );
+    }
+  }
+});
+
+test('expandPolynomialInBasis reproduces a generic polynomial after global splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.4, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.7, a: 0, b: 1, m: 1 });
+  // f = 1 - x1 + 2 x2 + 3 x1 x2 - x1^2 + 0.5 x2^2 + x1^2 x2^2.
+  const f = [
+    [1, 2, 0.5],
+    [-1, 3, 0],
+    [-1, 0, 1],
+  ];
+  const alphas = expandPolynomialInBasis(s, f);
+  for (const x1 of [0.05, 0.3, 0.6, 0.9])
+    for (const x2 of [0.05, 0.3, 0.6, 0.9])
+      assertClose(reproduceAt(s, alphas, x1, x2), evalPolyXY(f, x1, x2), 1e-6);
+});
+
+test('expandPolynomialInBasis reproduces a generic polynomial after partial (LR) splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  // The two partial splits produce some non-factored dual polynomials, but
+  // polynomial reproduction must still hold because the dual functional is
+  // derived directly from the (non-factored) dual polynomial.
+  const f = [
+    [0, 1, -2],
+    [3, 0, 1],
+    [-1, 2, 0],
+  ];
+  const alphas = expandPolynomialInBasis(s, f);
+  for (const x1 of [0.05, 0.3, 0.6, 0.9])
+    for (const x2 of [0.05, 0.3, 0.6, 0.9])
+      assertClose(reproduceAt(s, alphas, x1, x2), evalPolyXY(f, x1, x2), 1e-6);
+});
+
+test('expandPolynomialInBasis: bilinear (p=q=1) constant and linear monomials', () => {
+  const s = createInitialState({
+    p: 1, q: 1, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (const [a, b] of [[0,0],[1,0],[0,1],[1,1]]) {
+    const f = makeFMatrix(2, 2);
+    f[a][b] = 1;
+    const alphas = expandPolynomialInBasis(s, f);
+    for (const x1 of [0.1, 0.5, 0.9])
+      for (const x2 of [0.1, 0.5, 0.9])
+        assertClose(
+          reproduceAt(s, alphas, x1, x2),
+          Math.pow(x1, a) * Math.pow(x2, b),
+          1e-6
+        );
+  }
+});
+
+// 13. Greville points -----------------------------------------------------
+test('grevillePoint equals the mean of dual points on an initial p=q=2 tensor product', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (const B of s.bsplines) {
+    const t = B.dualPoly.terms[0];
+    const meanX = t.xRoots.reduce((u, v) => u + v, 0) / s.p;
+    const meanY = t.yRoots.reduce((u, v) => u + v, 0) / s.q;
+    const g = grevillePoint(B, s.p, s.q);
+    assertClose(g[0], meanX, 1e-9, 'x-coord');
+    assertClose(g[1], meanY, 1e-9, 'y-coord');
+  }
+});
+
+test('grevillePoint lies inside each B-spline support after refinement', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  for (const B of s.bsplines) {
+    const g = grevillePoint(B, s.p, s.q);
+    assertTrue(
+      g[0] >= B.kx[0] - 1e-9 && g[0] <= B.kx[B.kx.length - 1] + 1e-9,
+      'γ_x inside support'
+    );
+    assertTrue(
+      g[1] >= B.ky[0] - 1e-9 && g[1] <= B.ky[B.ky.length - 1] + 1e-9,
+      'γ_y inside support'
+    );
+  }
+});
+
+test('grevillePoint matches mean of factored dual points after global splits', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.4, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 0.7, a: 0, b: 1, m: 1 });
+  // Global splits keep every B-spline's dual polynomial factored. The
+  // generalized-Greville formula must agree with the simple mean.
+  for (const B of s.bsplines) {
+    if (B.dualPoly.terms.length !== 1) continue;
+    const t = B.dualPoly.terms[0];
+    const meanX = t.xRoots.reduce((u, v) => u + v, 0) / s.p;
+    const meanY = t.yRoots.reduce((u, v) => u + v, 0) / s.q;
+    const g = grevillePoint(B, s.p, s.q);
+    assertClose(g[0], meanX, 1e-9);
+    assertClose(g[1], meanY, 1e-9);
+  }
+});
+
+// 14. Random refinement generator -----------------------------------------
+test('generateRandomRefinement on the initial state always splits a B-spline', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  // Deterministic stand-in for Math.random — cycle through candidates.
+  let k = 0;
+  const rng = () => ((k = (k + 1) % 7) / 7);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const ml = generateRandomRefinement(s, 1, rng);
+    assertTrue(ml !== null, `attempt ${attempt}: should find a candidate`);
+    assertTrue(
+      previewSplitTargets(s, ml).length > 0,
+      `attempt ${attempt}: candidate must split at least one B-spline`
+    );
+  }
+});
+
+test('generateRandomRefinement: preventMultIncrease keeps every interior segment at mult 1', () => {
+  let seed = 7;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  let inserted = 0;
+  for (let i = 0; i < 30; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, preventMultIncrease: true });
+    if (!ml) break;
+    insertMeshLine(s, ml);
+    inserted += 1;
+    for (const r of s.meshlines) {
+      const interior = r.c > 1e-9 && r.c < 1 - 1e-9;
+      if (interior) {
+        assertTrue(
+          r.m === 1,
+          `interior segment mult=${r.m} at ${r.dir} c=${r.c} extent [${r.a}, ${r.b}]`
+        );
+      }
+    }
+  }
+  assertTrue(inserted > 5, `expected several refinements (got ${inserted})`);
+});
+
+test('generateRandomRefinement: allowHorizontal=false yields only vertical mesh-lines', () => {
+  let seed = 13;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let i = 0; i < 8; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, allowHorizontal: false });
+    if (!ml) break;
+    assertEq(ml.dir, 'v');
+    insertMeshLine(s, ml);
+  }
+});
+
+test('generateRandomRefinement: allowVertical=false yields only horizontal mesh-lines', () => {
+  let seed = 23;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let i = 0; i < 8; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, allowVertical: false });
+    if (!ml) break;
+    assertEq(ml.dir, 'h');
+    insertMeshLine(s, ml);
+  }
+});
+
+test('generateRandomRefinement: 10 sequential random refinements all split, Marsden preserved', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  let seed = 1;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  for (let iter = 0; iter < 10; iter++) {
+    const ml = generateRandomRefinement(s, 1, rng);
+    assertTrue(ml !== null, `iter ${iter}: candidate available`);
+    const targets = previewSplitTargets(s, ml);
+    assertTrue(targets.length > 0, `iter ${iter}: splits something`);
+    insertMeshLine(s, ml);
+  }
+  // Sanity: PoU still holds, basis grew.
+  for (const x of [0.1, 0.5, 0.9])
+    for (const y of [0.1, 0.5, 0.9]) {
+      let sum = 0;
+      for (const B of s.bsplines) sum += B.coeff * evalBSpline2D(B, x, y);
+      assertClose(sum, 1, 1e-6);
+    }
+});
+
+// 15. Marsden under accumulated multiplicity & cell-midpoint sampling -----
+test('marsdenSamplePoints sit strictly between consecutive distinct mesh-line constants', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 6, a: 0, b: 1, m: 2 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 6, a: 0, b: 1, m: 2 });
+  const { xs, ys } = marsdenSamplePoints(s);
+  // Strictly inside (0, 1) and not equal to any vertical mesh-line constant.
+  for (const x of xs) {
+    assertTrue(x > 0 + 1e-9 && x < 1 - 1e-9);
+    for (const ml of s.meshlines) {
+      if (ml.dir === 'v') assertTrue(Math.abs(x - ml.c) > 1e-9);
+    }
+  }
+  for (const y of ys) {
+    assertTrue(y > 0 + 1e-9 && y < 1 - 1e-9);
+    for (const ml of s.meshlines) {
+      if (ml.dir === 'h') assertTrue(Math.abs(y - ml.c) > 1e-9);
+    }
+  }
+});
+
+test('Marsden reproduction holds at cell midpoints across many random refinements', () => {
+  // Regression for the discontinuity false-positive: sampling on a
+  // multiplicity-(q+1) horizontal mesh-line yielded basis values summing to
+  // ~1.3–1.9 (instead of 1) for the constant monomial. Cell-midpoint sampling
+  // avoids the discontinuity. Run a moderate stress test.
+  let sawAccumulatedMult = false;
+  for (let trial = 1; trial <= 30; trial++) {
+    let seed = trial;
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x80000000;
+    };
+    const s = createInitialState({
+      p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+    });
+    for (let step = 1; step <= 12; step++) {
+      const ml = generateRandomRefinement(s, 1, rng);
+      if (!ml) break;
+      insertMeshLine(s, ml);
+      // Track whether the LR cascade ever pushed an interior mesh-line
+      // segment to ≥ q+1 multiplicity (the configuration that previously
+      // tripped the on-mesh test).
+      for (const r of s.meshlines) {
+        const interior = r.c > 1e-9 && r.c < 1 - 1e-9;
+        if (interior && r.m >= 3) sawAccumulatedMult = true;
+      }
+      const { xs, ys } = marsdenSamplePoints(s);
+      // Every monomial up to bidegree (p, q) reproduces at every midpoint.
+      for (let a = 0; a <= s.p; a++) {
+        for (let b = 0; b <= s.q; b++) {
+          const f = [];
+          for (let i = 0; i <= s.p; i++) f.push(new Array(s.q + 1).fill(0));
+          f[a][b] = 1;
+          const alphas = expandPolynomialInBasis(s, f);
+          for (const x1 of xs) {
+            for (const x2 of ys) {
+              let v = 0;
+              for (let i = 0; i < s.bsplines.length; i++) {
+                v += alphas[i] * evalBSpline2D(s.bsplines[i], x1, x2);
+              }
+              assertClose(
+                v,
+                Math.pow(x1, a) * Math.pow(x2, b),
+                1e-6,
+                `trial=${trial} step=${step} mono=x1^${a}x2^${b} at (${x1.toFixed(3)},${x2.toFixed(3)})`
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+  assertTrue(
+    sawAccumulatedMult,
+    'expected at least one trial to accumulate mesh-line multiplicity ≥ q+1; otherwise the test is not exercising the discontinuity case'
+  );
+});
+
+// 16. Linear independence -------------------------------------------------
+test('checkLinearIndependence: initial p=q=2 tensor product is linearly independent', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const r = checkLinearIndependence(s);
+  assertTrue(r.ok, `expected LI; smallest pivot=${r.smallestPivot}`);
+  assertEq(r.n, s.bsplines.length);
+});
+
+test('checkLinearIndependence: bilinear initial state is linearly independent', () => {
+  const s = createInitialState({
+    p: 1, q: 1, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  assertTrue(checkLinearIndependence(s).ok);
+});
+
+test('checkLinearIndependence: still independent after a global and a partial split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.4, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  assertTrue(checkLinearIndependence(s).ok);
+});
+
+test('checkLinearIndependence: 12 random preventMultIncrease refinements stay LI', () => {
+  let seed = 17;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let i = 0; i < 12; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, preventMultIncrease: true });
+    if (!ml) break;
+    insertMeshLine(s, ml);
+    const r = checkLinearIndependence(s);
+    assertTrue(r.ok, `iter ${i + 1}: smallest pivot=${r.smallestPivot.toExponential(3)}`);
+  }
+});
+
+test('checkLinearIndependence: detects an artificially duplicated B-spline', () => {
+  // Sanity: pasting an exact copy of an active B-spline into the basis must
+  // be flagged as linearly dependent (rank deficient by 1).
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const orig = s.bsplines[0];
+  const dup = {
+    kx: [...orig.kx],
+    ky: [...orig.ky],
+    coeff: orig.coeff,
+    dualPoly: { terms: orig.dualPoly.terms.map((t) => ({ ...t, xRoots: [...t.xRoots], yRoots: [...t.yRoots] })) },
+  };
+  s.bsplines.push(dup);
+  const r = checkLinearIndependence(s);
+  assertTrue(!r.ok, `expected dependence after duplication; got ok=${r.ok}, pivot=${r.smallestPivot}`);
+});
+
 export function runAll() {
   const out = { pass: 0, fail: 0, results: [] };
   for (const t of tests) {
