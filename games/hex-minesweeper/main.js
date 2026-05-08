@@ -58,11 +58,9 @@ const state = {
   pixelRatio: 1,
 };
 
-const longPress = {
-  timer: null,
-  triggered: false,
-  cell: null,
-};
+let touch = null;
+const LONG_PRESS_MS = 400;
+const TOUCH_MOVE_TOLERANCE = 12;
 
 function key(q, r) {
   return `${q},${r}`;
@@ -505,10 +503,7 @@ canvas.addEventListener('mouseleave', () => {
 });
 
 canvas.addEventListener('click', (event) => {
-  if (longPress.triggered) {
-    longPress.triggered = false;
-    return;
-  }
+  if (event.detail === 0) return;
   const cell = eventToCell(event);
   if (cell) handleReveal(cell);
 });
@@ -519,33 +514,73 @@ canvas.addEventListener('contextmenu', (event) => {
   if (cell) handleFlag(cell);
 });
 
-canvas.addEventListener('touchstart', (event) => {
-  if (event.touches.length !== 1) return;
-  const touch = event.touches[0];
-  const cell = eventToCell(touch);
-  longPress.cell = cell;
-  longPress.triggered = false;
-  longPress.timer = setTimeout(() => {
-    if (longPress.cell) {
-      handleFlag(longPress.cell);
-      longPress.triggered = true;
+function clearTouchTimer() {
+  if (touch && touch.timer) {
+    clearTimeout(touch.timer);
+    touch.timer = null;
+  }
+}
+
+canvas.addEventListener(
+  'touchstart',
+  (event) => {
+    if (event.touches.length !== 1) return;
+    event.preventDefault();
+    const t = event.touches[0];
+    const cell = eventToCell(t);
+    touch = {
+      cell,
+      startX: t.clientX,
+      startY: t.clientY,
+      flagged: false,
+      timer: null,
+    };
+    if (cell) {
+      touch.timer = setTimeout(() => {
+        handleFlag(cell);
+        if (touch) {
+          touch.flagged = true;
+          touch.timer = null;
+        }
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, LONG_PRESS_MS);
     }
-  }, 450);
-}, { passive: true });
+  },
+  { passive: false }
+);
 
-canvas.addEventListener('touchmove', () => {
-  if (longPress.timer) {
-    clearTimeout(longPress.timer);
-    longPress.timer = null;
-  }
-  longPress.cell = null;
-});
+canvas.addEventListener(
+  'touchmove',
+  (event) => {
+    if (!touch) return;
+    event.preventDefault();
+    const t = event.touches[0];
+    if (!t) return;
+    const dx = t.clientX - touch.startX;
+    const dy = t.clientY - touch.startY;
+    if (dx * dx + dy * dy > TOUCH_MOVE_TOLERANCE * TOUCH_MOVE_TOLERANCE) {
+      clearTouchTimer();
+      touch = null;
+    }
+  },
+  { passive: false }
+);
 
-canvas.addEventListener('touchend', () => {
-  if (longPress.timer) {
-    clearTimeout(longPress.timer);
-    longPress.timer = null;
-  }
+canvas.addEventListener(
+  'touchend',
+  (event) => {
+    if (!touch) return;
+    event.preventDefault();
+    clearTouchTimer();
+    if (!touch.flagged && touch.cell) handleReveal(touch.cell);
+    touch = null;
+  },
+  { passive: false }
+);
+
+canvas.addEventListener('touchcancel', () => {
+  clearTouchTimer();
+  touch = null;
 });
 
 restartBtn.addEventListener('click', () => startGame(state.difficulty));
