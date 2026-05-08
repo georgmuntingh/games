@@ -16,6 +16,7 @@
 
 import {
   approxEq,
+  checkLinearIndependence,
   cloneState,
   computeAnchors,
   createInitialState,
@@ -62,6 +63,7 @@ const checkAutoUpdate = document.getElementById('auto-update-basis');
 const inputSimN = document.getElementById('sim-n');
 const labelSimN = document.getElementById('sim-n-out');
 const checkSimVerify = document.getElementById('sim-verify');
+const checkSimVerifyLI = document.getElementById('sim-verify-li');
 const checkSimHoriz = document.getElementById('sim-horiz');
 const checkSimVert = document.getElementById('sim-vert');
 const btnSimulate = document.getElementById('sim-btn');
@@ -1219,6 +1221,7 @@ function showMarsdenResult() {
 async function runSimulation() {
   const N = parseInt(inputSimN.value, 10) || 1;
   const verifyMarsden = checkSimVerify.checked;
+  const verifyLI = checkSimVerifyLI.checked;
   const allowHorizontal = checkSimHoriz.checked;
   const allowVertical = checkSimVert.checked;
   if (!allowHorizontal && !allowVertical) {
@@ -1261,17 +1264,39 @@ async function runSimulation() {
         return;
       }
     }
+    if (verifyLI) {
+      const r = checkLinearIndependence(store.current);
+      if (!r.ok) {
+        setStatus(
+          `Linear independence FAILED at step ${completed}: ` +
+            `pivot ${r.smallestPivot.toExponential(2)} at column ${r.firstFailIndex} ` +
+            `(basis size ${r.n}).`,
+          true
+        );
+        store.simulationRunning = false;
+        btnSimulate.disabled = false;
+        return;
+      }
+    }
+    const annot = [];
+    if (verifyMarsden) annot.push('Marsden ✓');
+    if (verifyLI) annot.push('LI ✓');
     setStatus(
-      `Step ${completed}/${N}${verifyMarsden ? ' — Marsden ✓' : ''}: ` +
+      `Step ${completed}/${N}${annot.length ? ' — ' + annot.join(', ') : ''}: ` +
         `${store.current.bsplines.length} B-splines, ${store.current.meshlines.length} mesh-line records.`
     );
     // Yield so the browser repaints before the next iteration.
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
   if (completed === N) {
+    const annot = [];
+    if (verifyMarsden) annot.push('Marsden');
+    if (verifyLI) annot.push('linear independence');
+    const verified = annot.length
+      ? ` (${annot.join(' & ')} verified at every step).`
+      : '.';
     setStatus(
-      `Done: ${N} random refinement${N === 1 ? '' : 's'} applied` +
-        (verifyMarsden ? ' (Marsden verified at every step).' : '.')
+      `Done: ${N} random refinement${N === 1 ? '' : 's'} applied${verified}`
     );
   }
   store.simulationRunning = false;

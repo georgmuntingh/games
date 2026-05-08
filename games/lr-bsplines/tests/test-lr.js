@@ -13,6 +13,7 @@ import {
   deserialize,
   approxEq,
   generateRandomRefinement,
+  checkLinearIndependence,
 } from '../lr-math.js';
 import {
   initialDualPoly,
@@ -1039,6 +1040,68 @@ test('Marsden reproduction holds at cell midpoints across many random refinement
     sawAccumulatedMult,
     'expected at least one trial to accumulate mesh-line multiplicity ≥ q+1; otherwise the test is not exercising the discontinuity case'
   );
+});
+
+// 16. Linear independence -------------------------------------------------
+test('checkLinearIndependence: initial p=q=2 tensor product is linearly independent', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const r = checkLinearIndependence(s);
+  assertTrue(r.ok, `expected LI; smallest pivot=${r.smallestPivot}`);
+  assertEq(r.n, s.bsplines.length);
+});
+
+test('checkLinearIndependence: bilinear initial state is linearly independent', () => {
+  const s = createInitialState({
+    p: 1, q: 1, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  assertTrue(checkLinearIndependence(s).ok);
+});
+
+test('checkLinearIndependence: still independent after a global and a partial split', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 0.4, a: 0, b: 1, m: 1 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 3, a: 0, b: 2 / 3, m: 1 });
+  assertTrue(checkLinearIndependence(s).ok);
+});
+
+test('checkLinearIndependence: 12 random preventMultIncrease refinements stay LI', () => {
+  let seed = 17;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let i = 0; i < 12; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, preventMultIncrease: true });
+    if (!ml) break;
+    insertMeshLine(s, ml);
+    const r = checkLinearIndependence(s);
+    assertTrue(r.ok, `iter ${i + 1}: smallest pivot=${r.smallestPivot.toExponential(3)}`);
+  }
+});
+
+test('checkLinearIndependence: detects an artificially duplicated B-spline', () => {
+  // Sanity: pasting an exact copy of an active B-spline into the basis must
+  // be flagged as linearly dependent (rank deficient by 1).
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 1, Ny: 1, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  const orig = s.bsplines[0];
+  const dup = {
+    kx: [...orig.kx],
+    ky: [...orig.ky],
+    coeff: orig.coeff,
+    dualPoly: { terms: orig.dualPoly.terms.map((t) => ({ ...t, xRoots: [...t.xRoots], yRoots: [...t.yRoots] })) },
+  };
+  s.bsplines.push(dup);
+  const r = checkLinearIndependence(s);
+  assertTrue(!r.ok, `expected dependence after duplication; got ok=${r.ok}, pivot=${r.smallestPivot}`);
 });
 
 export function runAll() {

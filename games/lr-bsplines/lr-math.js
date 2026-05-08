@@ -569,6 +569,126 @@ function wouldIncreaseMultiplicity(state, ml) {
   return false;
 }
 
+// Test whether the active LR B-splines are linearly independent.
+//
+// Builds the m × n evaluation matrix M[j][i] = B_i(p_j), where p_j ranges
+// over (p+1) × (q+1) interior sample points per cell of the LR mesh — so
+// every cell carries enough samples to uniquely pin its bidegree-(p, q)
+// polynomial restriction. Two B-splines coincide as functions iff their
+// columns of M coincide. Then runs column-pivoted Modified Gram-Schmidt:
+// at each step pick the residual column with the largest L2-norm,
+// orthonormalize it, and project the remaining columns. The basis is
+// linearly independent iff every selected column has residual norm above
+// the tolerance.
+//
+// Returns:
+//   ok              true iff every pivot ≥ tolerance
+//   smallestPivot   the smallest residual norm encountered
+//   tolerance       the threshold used (echo of the input)
+//   firstFailIndex  the orthogonalization step k at which the residual
+//                   norm first dropped below the tolerance (null if ok)
+//   n               number of B-splines
+//
+// Note: collocating purely at Greville points doesn't work — distinct
+// LR B-splines can share a Greville point (their dual points happen to
+// average to the same coordinate), making the n × n Greville matrix
+// singular even though the B-splines themselves are independent. The
+// cell-grid sample set has cardinality at least n on any LR mesh, so
+// rank deficiency of M is a faithful proxy for basis dependence.
+export function checkLinearIndependence(state, options = {}) {
+  const tol = options.tolerance ?? 1e-9;
+  const { bsplines, p, q } = state;
+  const n = bsplines.length;
+  if (n === 0) return { ok: true, smallestPivot: Infinity, tolerance: tol, firstFailIndex: null, n: 0 };
+
+  const samples = cellGridSamples(state, p + 1, q + 1);
+  const m = samples.length;
+
+  // residuals[i] is the current orthogonalization residual for column i.
+  const residuals = [];
+  const norms = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const col = new Float64Array(m);
+    let sq = 0;
+    const B = bsplines[i];
+    for (let j = 0; j < m; j++) {
+      const v = evalBSpline2D(B, samples[j][0], samples[j][1]);
+      col[j] = v;
+      sq += v * v;
+    }
+    residuals.push(col);
+    norms[i] = Math.sqrt(sq);
+  }
+
+  const remaining = new Set();
+  for (let i = 0; i < n; i++) remaining.add(i);
+  let smallestPivot = Infinity;
+  for (let k = 0; k < n; k++) {
+    let iStar = -1;
+    let bestNorm = -1;
+    for (const i of remaining) {
+      if (norms[i] > bestNorm) {
+        bestNorm = norms[i];
+        iStar = i;
+      }
+    }
+    if (bestNorm < tol) {
+      return { ok: false, smallestPivot: bestNorm, tolerance: tol, firstFailIndex: k, n };
+    }
+    if (bestNorm < smallestPivot) smallestPivot = bestNorm;
+    const q0 = residuals[iStar];
+    const inv = 1 / bestNorm;
+    for (let j = 0; j < m; j++) q0[j] *= inv;
+    norms[iStar] = 1;
+    remaining.delete(iStar);
+    for (const i of remaining) {
+      const r = residuals[i];
+      let proj = 0;
+      for (let j = 0; j < m; j++) proj += r[j] * q0[j];
+      let sq = 0;
+      for (let j = 0; j < m; j++) {
+        r[j] -= proj * q0[j];
+        sq += r[j] * r[j];
+      }
+      norms[i] = Math.sqrt(sq);
+    }
+  }
+  return { ok: true, smallestPivot, tolerance: tol, firstFailIndex: null, n };
+}
+
+// Build (px × py) interior sample points per cell of the LR mesh. A "cell"
+// is the rectangle between consecutive distinct mesh-line constants on
+// each axis. With px = p+1 and py = q+1, each cell carries enough samples
+// to uniquely identify any bidegree-(p, q) polynomial restriction.
+function cellGridSamples(state, px, py) {
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const xConsts = new Set([xmin, xmax]);
+  const yConsts = new Set([ymin, ymax]);
+  for (const ml of state.meshlines) {
+    if (ml.dir === 'v') xConsts.add(ml.c);
+    else yConsts.add(ml.c);
+  }
+  const xK = [...xConsts].sort((a, b) => a - b);
+  const yK = [...yConsts].sort((a, b) => a - b);
+  const points = [];
+  for (let i = 0; i < xK.length - 1; i++) {
+    const x0 = xK[i];
+    const x1 = xK[i + 1];
+    for (let a = 1; a <= px; a++) {
+      const xa = x0 + ((x1 - x0) * a) / (px + 1);
+      for (let j = 0; j < yK.length - 1; j++) {
+        const y0 = yK[j];
+        const y1 = yK[j + 1];
+        for (let b = 1; b <= py; b++) {
+          const yb = y0 + ((y1 - y0) * b) / (py + 1);
+          points.push([xa, yb]);
+        }
+      }
+    }
+  }
+  return points;
+}
+
 export function cloneState(state) {
   return {
     p: state.p,
