@@ -514,19 +514,59 @@ export function meshlineFromAnchors(a1, a2, mult) {
 // B-spline, or return null if no such refinement exists. Candidates are
 // every (anchor, anchor) pair that yields a meshline through
 // meshlineFromAnchors(...) which still has a non-empty previewSplitTargets.
-// Pass a custom rng (returning a number in [0, 1)) for deterministic tests.
-export function generateRandomRefinement(state, mult = 1, rng = Math.random) {
+//
+// Options:
+//   mult              meshline multiplicity to assign (default 1)
+//   rng               () => number in [0, 1) (default Math.random)
+//   allowHorizontal   include horizontal candidates (default true)
+//   allowVertical     include vertical candidates (default true)
+//   preventMultIncrease   reject candidates whose extent strictly overlaps
+//                         any existing collinear meshline of the same `c`
+//                         (i.e., whose insertion would push the union's
+//                         multiplicity above the candidate's `mult`)
+export function generateRandomRefinement(state, multOrOpts = 1, rngArg, optsArg) {
+  let mult, rng, opts;
+  if (typeof multOrOpts === 'object' && multOrOpts !== null) {
+    opts = multOrOpts;
+    mult = opts.mult ?? 1;
+    rng = opts.rng ?? Math.random;
+  } else {
+    mult = multOrOpts;
+    rng = rngArg ?? Math.random;
+    opts = optsArg ?? {};
+  }
+  const allowHorizontal = opts.allowHorizontal !== false;
+  const allowVertical = opts.allowVertical !== false;
+  const preventMultIncrease = !!opts.preventMultIncrease;
   const anchors = computeAnchors(state);
   const candidates = [];
   for (let i = 0; i < anchors.length; i++) {
     for (let j = i + 1; j < anchors.length; j++) {
       const ml = meshlineFromAnchors(anchors[i], anchors[j], mult);
       if (!ml) continue;
+      if (!allowHorizontal && ml.dir === 'h') continue;
+      if (!allowVertical && ml.dir === 'v') continue;
+      if (preventMultIncrease && wouldIncreaseMultiplicity(state, ml)) continue;
       if (previewSplitTargets(state, ml).length > 0) candidates.push(ml);
     }
   }
   if (candidates.length === 0) return null;
   return candidates[Math.floor(rng() * candidates.length)];
+}
+
+// True iff `ml` strictly overlaps any existing collinear meshline (same dir
+// and same constant `c`) along its perpendicular extent. Touching segments
+// (b ≈ a) are merged by unionMeshline without raising multiplicity, so they
+// don't count.
+function wouldIncreaseMultiplicity(state, ml) {
+  for (const r of state.meshlines) {
+    if (r.dir !== ml.dir) continue;
+    if (!approxEq(r.c, ml.c)) continue;
+    const lo = Math.max(r.a, ml.a);
+    const hi = Math.min(r.b, ml.b);
+    if (hi - lo > EPS) return true;
+  }
+  return false;
 }
 
 export function cloneState(state) {

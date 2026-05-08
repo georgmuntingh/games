@@ -873,6 +873,68 @@ test('generateRandomRefinement on the initial state always splits a B-spline', (
   }
 });
 
+test('generateRandomRefinement: preventMultIncrease keeps every interior segment at mult 1', () => {
+  let seed = 7;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  let inserted = 0;
+  for (let i = 0; i < 30; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, preventMultIncrease: true });
+    if (!ml) break;
+    insertMeshLine(s, ml);
+    inserted += 1;
+    for (const r of s.meshlines) {
+      const interior = r.c > 1e-9 && r.c < 1 - 1e-9;
+      if (interior) {
+        assertTrue(
+          r.m === 1,
+          `interior segment mult=${r.m} at ${r.dir} c=${r.c} extent [${r.a}, ${r.b}]`
+        );
+      }
+    }
+  }
+  assertTrue(inserted > 5, `expected several refinements (got ${inserted})`);
+});
+
+test('generateRandomRefinement: allowHorizontal=false yields only vertical mesh-lines', () => {
+  let seed = 13;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let i = 0; i < 8; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, allowHorizontal: false });
+    if (!ml) break;
+    assertEq(ml.dir, 'v');
+    insertMeshLine(s, ml);
+  }
+});
+
+test('generateRandomRefinement: allowVertical=false yields only horizontal mesh-lines', () => {
+  let seed = 23;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x80000000;
+  };
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  for (let i = 0; i < 8; i++) {
+    const ml = generateRandomRefinement(s, { mult: 1, rng, allowVertical: false });
+    if (!ml) break;
+    assertEq(ml.dir, 'h');
+    insertMeshLine(s, ml);
+  }
+});
+
 test('generateRandomRefinement: 10 sequential random refinements all split, Marsden preserved', () => {
   const s = createInitialState({
     p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],

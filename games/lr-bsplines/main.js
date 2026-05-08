@@ -62,6 +62,8 @@ const checkAutoUpdate = document.getElementById('auto-update-basis');
 const inputSimN = document.getElementById('sim-n');
 const labelSimN = document.getElementById('sim-n-out');
 const checkSimVerify = document.getElementById('sim-verify');
+const checkSimHoriz = document.getElementById('sim-horiz');
+const checkSimVert = document.getElementById('sim-vert');
 const btnSimulate = document.getElementById('sim-btn');
 
 const bsplineList = document.getElementById('bspline-list');
@@ -1217,13 +1219,24 @@ function showMarsdenResult() {
 async function runSimulation() {
   const N = parseInt(inputSimN.value, 10) || 1;
   const verifyMarsden = checkSimVerify.checked;
+  const allowHorizontal = checkSimHoriz.checked;
+  const allowVertical = checkSimVert.checked;
+  if (!allowHorizontal && !allowVertical) {
+    setStatus('Enable at least one direction to simulate.', true);
+    return;
+  }
   if (store.simulationRunning) return;
   store.simulationRunning = true;
   btnSimulate.disabled = true;
   setStatus(`Simulating ${N} random refinement${N === 1 ? '' : 's'}…`);
   let completed = 0;
   for (let i = 0; i < N; i++) {
-    const ml = generateRandomRefinement(store.current, 1);
+    const ml = generateRandomRefinement(store.current, {
+      mult: 1,
+      allowHorizontal,
+      allowVertical,
+      preventMultIncrease: true,
+    });
     if (!ml) {
       setStatus(`Stopped at step ${completed}: no further valid refinement available.`, true);
       break;
