@@ -199,6 +199,12 @@ button#marsden-test-btn {
   margin: 0.4rem 0 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+#marsden-test-result strong {
+  display: block;
+  margin-bottom: 0.2rem;
 }
 
 #marsden-test-result.passed {

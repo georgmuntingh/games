@@ -365,6 +365,31 @@ export function evalPolyXY(fMatrix, x1, x2) {
   return s;
 }
 
+// Sample points for Marsden / polynomial-reproduction testing. Returns the
+// midpoints of consecutive distinct mesh-line constants on each axis, so
+// every sample sits strictly inside a smooth cell. Important: when the LR
+// refinement happens to produce a mesh-line of multiplicity p+1 (or q+1) at
+// some interior coordinate, the basis is C^{-1} (genuinely discontinuous)
+// there, and pointwise evaluation at the discontinuity is double-valued —
+// the basis can sum to up to 2 instead of 1. Those points aren't a Marsden
+// failure; they're outside the smooth domain on which Marsden is asserted.
+export function marsdenSamplePoints(state) {
+  const [xmin, xmax, ymin, ymax] = state.domain;
+  const xConsts = new Set([xmin, xmax]);
+  const yConsts = new Set([ymin, ymax]);
+  for (const ml of state.meshlines) {
+    if (ml.dir === 'v') xConsts.add(ml.c);
+    else yConsts.add(ml.c);
+  }
+  const xKnots = [...xConsts].sort((a, b) => a - b);
+  const yKnots = [...yConsts].sort((a, b) => a - b);
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i < xKnots.length - 1; i++) xs.push((xKnots[i] + xKnots[i + 1]) / 2);
+  for (let i = 0; i < yKnots.length - 1; i++) ys.push((yKnots[i] + yKnots[i + 1]) / 2);
+  return { xs, ys };
+}
+
 // Greville point of a B-spline. For a *factored* dual polynomial whose dual
 // points are kx[1..p] in x and ky[1..q] in y, this is the standard
 //   γ = (mean(xRoots), mean(yRoots)).

@@ -31,6 +31,7 @@ import {
 import {
   expandPolynomialInBasis,
   grevillePoint,
+  marsdenSamplePoints,
   renderDualPolyHTML,
 } from './marsden.js';
 
@@ -55,6 +56,8 @@ const btnExport = document.getElementById('export-btn');
 const inputImport = document.getElementById('import-input');
 const btnMarsdenTest = document.getElementById('marsden-test-btn');
 const marsdenTestResult = document.getElementById('marsden-test-result');
+const inputMarsdenTol = document.getElementById('marsden-tol-exp');
+const labelMarsdenTol = document.getElementById('marsden-tol-out');
 const checkAutoUpdate = document.getElementById('auto-update-basis');
 const inputSimN = document.getElementById('sim-n');
 const labelSimN = document.getElementById('sim-n-out');
@@ -1135,28 +1138,22 @@ function setStatus(msg, isError = false) {
 // Verify the precomputed Marsden identity numerically: for every monomial
 // x1^a x2^b with a ≤ p, b ≤ q, expand it in the current B-spline basis
 // using each B-spline's stored dual polynomial, evaluate the resulting
-// linear combination on a sample grid, and report the worst-case error
-// against the analytic monomial value.
-function runMarsdenReproductionTest() {
+// linear combination on a sample grid, and report every monomial whose
+// max-error exceeds the tolerance, plus the worst sample point per failure.
+function runMarsdenReproductionTest(tolerance) {
   const state = store.current;
-  const { p, q, domain } = state;
-  const [xmin, xmax, ymin, ymax] = domain;
-  const xs = [];
-  const ys = [];
-  for (let i = 1; i <= 5; i++) {
-    xs.push(xmin + ((xmax - xmin) * i) / 6);
-    ys.push(ymin + ((ymax - ymin) * i) / 6);
-  }
-  let maxErr = 0;
-  let worst = null;
-  let worstMono = null;
-  let totalChecks = 0;
+  const { p, q } = state;
+  const { xs, ys } = marsdenSamplePoints(state);
+  const failures = [];
+  let maxOverallErr = 0;
   for (let a = 0; a <= p; a++) {
     for (let b = 0; b <= q; b++) {
       const fMatrix = [];
       for (let i = 0; i <= p; i++) fMatrix.push(new Array(q + 1).fill(0));
       fMatrix[a][b] = 1;
       const alphas = expandPolynomialInBasis(state, fMatrix);
+      let mErr = 0;
+      let mWorst = null;
       for (const x1 of xs) {
         for (const x2 of ys) {
           let sum = 0;
@@ -1165,38 +1162,51 @@ function runMarsdenReproductionTest() {
           }
           const expected = Math.pow(x1, a) * Math.pow(x2, b);
           const err = Math.abs(sum - expected);
-          totalChecks += 1;
-          if (err > maxErr) {
-            maxErr = err;
-            worst = { x1, x2, sum, expected };
-            worstMono = { a, b };
+          if (err > mErr) {
+            mErr = err;
+            mWorst = { x1, x2, sum, expected };
           }
         }
       }
+      if (mErr > maxOverallErr) maxOverallErr = mErr;
+      if (mErr > tolerance) failures.push({ a, b, maxErr: mErr, worst: mWorst });
     }
   }
-  return { maxErr, worst, worstMono, totalChecks };
+  return {
+    ok: failures.length === 0,
+    failures,
+    maxErr: maxOverallErr,
+    samplesPerMonomial: xs.length * ys.length,
+    numMonomials: (p + 1) * (q + 1),
+  };
+}
+
+function currentMarsdenTolerance() {
+  const exp = parseInt(inputMarsdenTol.value, 10);
+  if (Number.isNaN(exp)) return 1e-6;
+  return Math.pow(10, exp);
 }
 
 function showMarsdenResult() {
-  const r = runMarsdenReproductionTest();
-  const tol = 1e-6;
-  const ok = r.maxErr < tol;
-  const numMonomials = (store.current.p + 1) * (store.current.q + 1);
-  if (ok) {
+  const tol = currentMarsdenTolerance();
+  const r = runMarsdenReproductionTest(tol);
+  if (r.ok) {
     marsdenTestResult.className = 'note passed';
     marsdenTestResult.textContent =
-      `passed: ${numMonomials} monomials × ${r.totalChecks / numMonomials} sample points, ` +
-      `max error ${r.maxErr.toExponential(2)}`;
+      `passed: ${r.numMonomials} monomials × ${r.samplesPerMonomial} sample points; ` +
+      `max error ${r.maxErr.toExponential(2)} (tol ${tol.toExponential(0)}).`;
   } else {
+    const lines = r.failures
+      .map(
+        (f) =>
+          `x₁^${f.a} x₂^${f.b}: ${f.maxErr.toExponential(2)} ` +
+          `at (${f.worst.x1.toFixed(2)}, ${f.worst.x2.toFixed(2)})`
+      )
+      .join('<br>');
     marsdenTestResult.className = 'note failed';
-    const m = r.worstMono;
-    const w = r.worst;
-    marsdenTestResult.textContent =
-      `FAILED at x₁^${m.a} x₂^${m.b}, ` +
-      `(${w.x1.toFixed(2)}, ${w.x2.toFixed(2)}): ` +
-      `got ${w.sum.toFixed(6)}, expected ${w.expected.toFixed(6)}, ` +
-      `max error ${r.maxErr.toExponential(2)}`;
+    marsdenTestResult.innerHTML =
+      `<strong>FAILED on ${r.failures.length} of ${r.numMonomials} monomials ` +
+      `(tol ${tol.toExponential(0)}):</strong><br>${lines}`;
   }
 }
 
@@ -1221,14 +1231,18 @@ async function runSimulation() {
     commitInsertion(ml);
     completed += 1;
     if (verifyMarsden) {
-      const r = runMarsdenReproductionTest();
-      if (!Number.isFinite(r.maxErr) || r.maxErr > 1e-6) {
-        const m = r.worstMono;
+      const tol = currentMarsdenTolerance();
+      const r = runMarsdenReproductionTest(tol);
+      if (!r.ok) {
+        const list = r.failures
+          .map((f) => `x₁^${f.a} x₂^${f.b}=${f.maxErr.toExponential(1)}`)
+          .join(', ');
         setStatus(
-          `Marsden identity FAILED at step ${completed}: ` +
-            `max error ${r.maxErr.toExponential(2)} on x₁^${m.a} x₂^${m.b}.`,
+          `Marsden identity FAILED at step ${completed} ` +
+            `(tol ${tol.toExponential(0)}, ${r.failures.length} monomials): ${list}`,
           true
         );
+        showMarsdenResult();
         store.simulationRunning = false;
         btnSimulate.disabled = false;
         return;
@@ -1266,6 +1280,11 @@ checkAutoUpdate.addEventListener('change', () => {
 
 inputSimN.addEventListener('input', () => {
   labelSimN.textContent = inputSimN.value;
+});
+
+inputMarsdenTol.addEventListener('input', () => {
+  // Render the exponent with a Unicode minus sign.
+  labelMarsdenTol.textContent = inputMarsdenTol.value.replace('-', '−');
 });
 
 inputImport.addEventListener('change', (e) => {

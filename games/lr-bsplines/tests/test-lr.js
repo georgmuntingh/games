@@ -25,6 +25,7 @@ import {
   expandPolynomialInBasis,
   evalPolyXY,
   grevillePoint,
+  marsdenSamplePoints,
 } from '../marsden.js';
 
 const tests = [];
@@ -895,6 +896,87 @@ test('generateRandomRefinement: 10 sequential random refinements all split, Mars
       for (const B of s.bsplines) sum += B.coeff * evalBSpline2D(B, x, y);
       assertClose(sum, 1, 1e-6);
     }
+});
+
+// 15. Marsden under accumulated multiplicity & cell-midpoint sampling -----
+test('marsdenSamplePoints sit strictly between consecutive distinct mesh-line constants', () => {
+  const s = createInitialState({
+    p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+  });
+  insertMeshLine(s, { dir: 'h', c: 1 / 6, a: 0, b: 1, m: 2 });
+  insertMeshLine(s, { dir: 'v', c: 1 / 6, a: 0, b: 1, m: 2 });
+  const { xs, ys } = marsdenSamplePoints(s);
+  // Strictly inside (0, 1) and not equal to any vertical mesh-line constant.
+  for (const x of xs) {
+    assertTrue(x > 0 + 1e-9 && x < 1 - 1e-9);
+    for (const ml of s.meshlines) {
+      if (ml.dir === 'v') assertTrue(Math.abs(x - ml.c) > 1e-9);
+    }
+  }
+  for (const y of ys) {
+    assertTrue(y > 0 + 1e-9 && y < 1 - 1e-9);
+    for (const ml of s.meshlines) {
+      if (ml.dir === 'h') assertTrue(Math.abs(y - ml.c) > 1e-9);
+    }
+  }
+});
+
+test('Marsden reproduction holds at cell midpoints across many random refinements', () => {
+  // Regression for the discontinuity false-positive: sampling on a
+  // multiplicity-(q+1) horizontal mesh-line yielded basis values summing to
+  // ~1.3–1.9 (instead of 1) for the constant monomial. Cell-midpoint sampling
+  // avoids the discontinuity. Run a moderate stress test.
+  let sawAccumulatedMult = false;
+  for (let trial = 1; trial <= 30; trial++) {
+    let seed = trial;
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x80000000;
+    };
+    const s = createInitialState({
+      p: 2, q: 2, Nx: 2, Ny: 2, openKnots: true, domain: [0, 1, 0, 1],
+    });
+    for (let step = 1; step <= 12; step++) {
+      const ml = generateRandomRefinement(s, 1, rng);
+      if (!ml) break;
+      insertMeshLine(s, ml);
+      // Track whether the LR cascade ever pushed an interior mesh-line
+      // segment to ≥ q+1 multiplicity (the configuration that previously
+      // tripped the on-mesh test).
+      for (const r of s.meshlines) {
+        const interior = r.c > 1e-9 && r.c < 1 - 1e-9;
+        if (interior && r.m >= 3) sawAccumulatedMult = true;
+      }
+      const { xs, ys } = marsdenSamplePoints(s);
+      // Every monomial up to bidegree (p, q) reproduces at every midpoint.
+      for (let a = 0; a <= s.p; a++) {
+        for (let b = 0; b <= s.q; b++) {
+          const f = [];
+          for (let i = 0; i <= s.p; i++) f.push(new Array(s.q + 1).fill(0));
+          f[a][b] = 1;
+          const alphas = expandPolynomialInBasis(s, f);
+          for (const x1 of xs) {
+            for (const x2 of ys) {
+              let v = 0;
+              for (let i = 0; i < s.bsplines.length; i++) {
+                v += alphas[i] * evalBSpline2D(s.bsplines[i], x1, x2);
+              }
+              assertClose(
+                v,
+                Math.pow(x1, a) * Math.pow(x2, b),
+                1e-6,
+                `trial=${trial} step=${step} mono=x1^${a}x2^${b} at (${x1.toFixed(3)},${x2.toFixed(3)})`
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+  assertTrue(
+    sawAccumulatedMult,
+    'expected at least one trial to accumulate mesh-line multiplicity ≥ q+1; otherwise the test is not exercising the discontinuity case'
+  );
 });
 
 export function runAll() {
