@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hex Minesweeper</title>
+    <link rel="stylesheet" href="/shared/ui.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Hex Minesweeper</h1>
+      <div class="layout">
+        <div class="board-wrap">
+          <canvas id="board" aria-label="Hexagonal minesweeper board"></canvas>
+          <div id="overlay" class="overlay" hidden>
+            <div class="overlay-card">
+              <h2 id="overlay-title">You win!</h2>
+              <p id="overlay-detail"></p>
+              <button id="overlay-restart" type="button">Play again</button>
+            </div>
+          </div>
+        </div>
+        <aside class="sidebar">
+          <div class="panel difficulty">
+            <h2>Difficulty</h2>
+            <div class="diff-buttons" role="radiogroup" aria-label="Difficulty">
+              <button type="button" data-difficulty="easy" class="diff-btn">
+                Easy
+              </button>
+              <button type="button" data-difficulty="medium" class="diff-btn">
+                Medium
+              </button>
+              <button type="button" data-difficulty="hard" class="diff-btn">
+                Hard
+              </button>
+            </div>
+          </div>
+          <div class="panel stats">
+            <div>
+              <span class="label">Mines</span><span id="mine-count">0</span>
+            </div>
+            <div>
+              <span class="label">Time</span><span id="timer">0:00</span>
+            </div>
+            <div>
+              <span class="label">Best</span><span id="best">—</span>
+            </div>
+          </div>
+          <button id="restart" type="button">New game</button>
+          <details class="controls">
+            <summary>How to play</summary>
+            <ul>
+              <li>Click a hex to reveal it.</li>
+              <li>Right-click (or long-press) to flag a suspected mine.</li>
+              <li>Numbers show how many of the 6 neighbors hide a mine.</li>
+              <li>Reveal every safe hex to win.</li>
+              <li>Your first click is always safe.</li>
+            </ul>
+          </details>
+        </aside>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

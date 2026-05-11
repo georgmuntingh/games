@@ -19,6 +19,12 @@
       "tags": ["arcade", "puzzle", "solo"]
     },
     {
+      "id": "hex-minesweeper",
+      "title": "Hex Minesweeper",
+      "description": "Minesweeper on a hexagonal grid. Six neighbors per cell — flag the mines, reveal the rest.",
+      "tags": ["puzzle", "solo"]
+    },
+    {
       "id": "lr-bsplines",
       "title": "Refinement",
       "description": "Build locally refined B-spline bases interactively.",
