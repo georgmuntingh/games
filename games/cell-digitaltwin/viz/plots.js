@@ -1,21 +1,20 @@
 // Rolling multi-trace time-series plot on a 2D canvas. Series are grouped onto
-// two y-axes by unit (left = mM, right = mV). Each series autoscales to the data
-// in the visible window. Designed for live streaming via addSample().
+// named y-axes; each axis autoscales to its visible data. Up to two axes get
+// drawn tick scales (one per side, left/right); additional axes still plot
+// (autoscaled, labelled in the legend). Designed for live streaming.
 
-export function createPlots(canvas, { windowSpan = 60, timeLabel = 'min' } = {}) {
+export function createPlots(canvas, {
+  windowSpan = 60, timeLabel = 'min',
+  axes = { mM: { label: 'mM', side: 'left' }, mV: { label: 'mV', side: 'right' } },
+} = {}) {
   const ctx = canvas.getContext('2d');
   let series = [];          // [{ key, label, color, axis, on }]
   const data = [];          // [{ t, values:{key:val} }]
   let span = windowSpan;
+  const axisCfg = axes;
 
-  function setSeries(defs) {
-    series = defs.map((d) => ({ on: true, ...d }));
-  }
-  function toggle(key) {
-    const s = series.find((x) => x.key === key);
-    if (s) s.on = !s.on;
-    draw();
-  }
+  function setSeries(defs) { series = defs.map((d) => ({ on: true, ...d })); }
+  function toggle(key) { const s = series.find((x) => x.key === key); if (s) s.on = !s.on; draw(); }
   function setWindow(s) { span = s; }
   function clear() { data.length = 0; draw(); }
 
@@ -41,8 +40,7 @@ export function createPlots(canvas, { windowSpan = 60, timeLabel = 'min' } = {})
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const w = cssW, h = cssH;
-    const padL = 46, padR = 46, padT = 10, padB = 22;
-    const fg = getComputedStyle(canvas).color || '#888';
+    const padL = 50, padR = 52, padT = 10, padB = 22;
 
     ctx.clearRect(0, 0, w, h);
     ctx.font = '11px system-ui, sans-serif';
@@ -50,6 +48,7 @@ export function createPlots(canvas, { windowSpan = 60, timeLabel = 'min' } = {})
 
     if (data.length < 2) {
       ctx.fillStyle = 'rgba(127,127,127,0.6)';
+      ctx.textAlign = 'left';
       ctx.fillText('Press Play to record the time course…', padL, h / 2);
       return;
     }
@@ -58,59 +57,65 @@ export function createPlots(canvas, { windowSpan = 60, timeLabel = 'min' } = {})
     const tStart = Math.max(data[0].t, tEnd - span);
     const xOf = (t) => padL + ((t - tStart) / Math.max(1e-9, tEnd - tStart)) * (w - padL - padR);
 
-    // axis bounds per unit, over the visible window.
-    const axes = { mM: { min: Infinity, max: -Infinity, used: false }, mV: { min: Infinity, max: -Infinity, used: false } };
+    // per-axis bounds over the visible window.
+    const bounds = {};
+    for (const id of Object.keys(axisCfg)) bounds[id] = { min: Infinity, max: -Infinity, used: false };
     for (const s of series) {
-      if (!s.on) continue;
-      const ax = axes[s.axis];
+      if (!s.on || !bounds[s.axis]) continue;
+      const b = bounds[s.axis];
       for (const d of data) {
         if (d.t < tStart) continue;
         const v = d.values[s.key];
         if (v == null || !isFinite(v)) continue;
-        ax.used = true;
-        ax.min = Math.min(ax.min, v); ax.max = Math.max(ax.max, v);
+        b.used = true; b.min = Math.min(b.min, v); b.max = Math.max(b.max, v);
       }
     }
-    for (const k of ['mM', 'mV']) {
-      const [a, b] = niceBounds(axes[k].min, axes[k].max);
-      axes[k].lo = a; axes[k].hi = b;
+    for (const id of Object.keys(bounds)) {
+      const [lo, hi] = niceBounds(bounds[id].min, bounds[id].max);
+      bounds[id].lo = lo; bounds[id].hi = hi;
     }
     const yOf = (v, axis) => {
-      const ax = axes[axis];
-      return padT + (1 - (v - ax.lo) / Math.max(1e-9, ax.hi - ax.lo)) * (h - padT - padB);
+      const b = bounds[axis] || { lo: 0, hi: 1 };
+      return padT + (1 - (v - b.lo) / Math.max(1e-9, b.hi - b.lo)) * (h - padT - padB);
     };
 
-    // grid + axis labels
+    // choose one drawn axis per side (first used, in config order).
+    let leftAxis = null, rightAxis = null;
+    for (const [id, cfg] of Object.entries(axisCfg)) {
+      if (!bounds[id].used) continue;
+      if (cfg.side === 'left' && !leftAxis) leftAxis = id;
+      if (cfg.side === 'right' && !rightAxis) rightAxis = id;
+    }
+
     ctx.strokeStyle = 'rgba(127,127,127,0.18)';
     ctx.fillStyle = 'rgba(127,127,127,0.85)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
       const y = padT + (i / 4) * (h - padT - padB);
       ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
-      if (axes.mM.used) {
-        const v = axes.mM.hi - (i / 4) * (axes.mM.hi - axes.mM.lo);
+      if (leftAxis) {
+        const b = bounds[leftAxis];
+        const v = b.hi - (i / 4) * (b.hi - b.lo);
         ctx.textAlign = 'right'; ctx.fillText(fmt(v), padL - 4, y);
       }
-      if (axes.mV.used) {
-        const v = axes.mV.hi - (i / 4) * (axes.mV.hi - axes.mV.lo);
+      if (rightAxis) {
+        const b = bounds[rightAxis];
+        const v = b.hi - (i / 4) * (b.hi - b.lo);
         ctx.textAlign = 'left'; ctx.fillText(fmt(v), w - padR + 4, y);
       }
     }
     ctx.textAlign = 'center';
     ctx.fillText(`t (${timeLabel})`, (padL + w - padR) / 2, h - 8);
-    if (axes.mM.used) { ctx.save(); ctx.translate(12, h / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('mM', 0, 0); ctx.restore(); }
-    if (axes.mV.used) { ctx.save(); ctx.translate(w - 10, h / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('mV', 0, 0); ctx.restore(); }
+    if (leftAxis) { ctx.save(); ctx.translate(13, h / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(axisCfg[leftAxis].label, 0, 0); ctx.restore(); }
+    if (rightAxis) { ctx.save(); ctx.translate(w - 9, h / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(axisCfg[rightAxis].label, 0, 0); ctx.restore(); }
 
-    // x ticks
-    ctx.textAlign = 'center';
     for (let i = 0; i <= 4; i++) {
       const t = tStart + (i / 4) * (tEnd - tStart);
-      ctx.fillText(fmt(t), xOf(t), h - 8);
+      ctx.textAlign = 'center'; ctx.fillText(fmt(t), xOf(t), h - 8);
     }
 
-    // traces
     for (const s of series) {
-      if (!s.on) continue;
+      if (!s.on || !bounds[s.axis]) continue;
       ctx.strokeStyle = s.color; ctx.lineWidth = 1.6; ctx.beginPath();
       let started = false;
       for (const d of data) {

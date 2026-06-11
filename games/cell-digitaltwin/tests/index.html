@@ -28,9 +28,10 @@
       <div id="results"></div>
     </main>
     <script type="module">
-      import params from '../data/erythrocyte.params.json';
+      import erythrocyte from '../data/erythrocyte.params.json';
+      import cardiomyocyte from '../data/cardiomyocyte.params.json';
       import { runAll } from './suite.js';
-      const results = runAll(params);
+      const results = runAll({ erythrocyte, cardiomyocyte });
       const box = document.getElementById('results');
       let failed = 0;
       for (const r of results) {

@@ -104,6 +104,10 @@ button.primary {
 .speed input {
   width: 120px;
 }
+.cell-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+}
 .clock {
   margin-left: auto;
   font-variant-numeric: tabular-nums;

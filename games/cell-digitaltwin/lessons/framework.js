@@ -2,9 +2,17 @@
 // the provided DOM nodes. `apply(step)` is supplied by the host (main.js) and is
 // responsible for actually mutating the simulation/visualisation for a step.
 
-export function createLessonController({ lessons, dom, apply }) {
+export function createLessonController({ lessons: initialLessons, dom, apply }) {
+  let lessons = initialLessons;
   let lessonIdx = -1;
   let stepIdx = 0;
+
+  function setLessons(next) {
+    lessons = next;
+    lessonIdx = -1;
+    dom.active.hidden = true;
+    renderList();
+  }
 
   function renderList() {
     dom.list.innerHTML = '';
@@ -74,7 +82,7 @@ export function createLessonController({ lessons, dom, apply }) {
   dom.exit.addEventListener('click', exit);
   renderList();
 
-  return { start, exit, isActive: () => lessonIdx >= 0 };
+  return { start, exit, setLessons, isActive: () => lessonIdx >= 0 };
 }
 
 function escapeHtml(s) {
