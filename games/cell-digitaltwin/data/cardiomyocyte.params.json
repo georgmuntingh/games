@@ -1,0 +1,48 @@
+{
+  "_note": "Luo-Rudy phase I (1991) guinea-pig ventricular action-potential model. All values from Luo & Rudy, Circ Res 1991;68:1501-1526 (ref luo_rudy_1991); gating uses the Hodgkin-Huxley x-infinity/tau formalism (hodgkin_huxley_1952), integrated by Rush-Larsen (rush_larsen_1978). Units: V in mV, t in ms, currents in uA/cm^2, conductances in mS/cm^2, concentrations in mM, Cm in uF/cm^2.",
+
+  "physical": {
+    "T": { "value": 310, "units": "K", "symbol": "T", "ref": "luo_rudy_1991", "note": "Temperature (37 C)." },
+    "F": { "value": 96485, "units": "C/mol", "symbol": "F", "ref": "luo_rudy_1991", "note": "Faraday constant." },
+    "R": { "value": 8.314, "units": "J/mol/K", "symbol": "R", "ref": "luo_rudy_1991", "note": "Gas constant." },
+    "Cm": { "value": 1.0, "units": "uF/cm^2", "symbol": "Cm", "ref": "luo_rudy_1991", "note": "Membrane capacitance; dV/dt = -(I_ion + I_stim)/Cm." }
+  },
+
+  "concentrations": {
+    "Nao": { "value": 140, "units": "mM", "symbol": "[Na]o", "ref": "luo_rudy_1991", "note": "Extracellular Na+ (fixed)." },
+    "Nai": { "value": 18, "units": "mM", "symbol": "[Na]i", "ref": "luo_rudy_1991", "note": "Intracellular Na+ (fixed in LR91)." },
+    "Ko": { "value": 5.4, "units": "mM", "symbol": "[K]o", "ref": "luo_rudy_1991", "note": "Extracellular K+ (fixed); conductances scale with sqrt([K]o/5.4)." },
+    "Ki": { "value": 145, "units": "mM", "symbol": "[K]i", "ref": "luo_rudy_1991", "note": "Intracellular K+ (fixed in LR91)." },
+    "Cai0": { "value": 2.0e-4, "units": "mM", "symbol": "[Ca]i", "ref": "luo_rudy_1991", "note": "Resting intracellular Ca2+ (0.2 uM); the only dynamic concentration." }
+  },
+
+  "INa": {
+    "G_Na": { "value": 23.0, "units": "mS/cm^2", "symbol": "G_Na", "ref": "luo_rudy_1991", "note": "Fast Na+ current max conductance. I_Na = G_Na·m^3·h·j·(V−E_Na)." }
+  },
+  "Isi": {
+    "G_si": { "value": 0.09, "units": "mS/cm^2", "symbol": "G_si", "ref": "luo_rudy_1991", "note": "Slow inward (L-type-like Ca2+) current conductance. E_si = 7.7 − 13.0287·ln([Ca]i)." },
+    "ca_influx_k": { "value": 1.0e-4, "units": "mM·cm^2/uA/ms", "symbol": "k_Ca", "ref": "luo_rudy_1991", "note": "Conversion of I_si to Ca2+ uptake: d[Ca]i/dt = −1e-4·I_si + 0.07·(1e-4 − [Ca]i)." },
+    "ca_relax": { "value": 0.07, "units": "1/ms", "symbol": "k_relax", "ref": "luo_rudy_1991", "note": "Lumped Ca2+ buffering/uptake relaxation rate." },
+    "ca_rest": { "value": 1.0e-4, "units": "mM", "symbol": "Ca_rest", "ref": "luo_rudy_1991", "note": "Ca2+ relaxation target." }
+  },
+  "IK": {
+    "G_K": { "value": 0.282, "units": "mS/cm^2", "symbol": "G_K", "ref": "luo_rudy_1991", "note": "Time-dependent (delayed rectifier) K+ conductance at [K]o=5.4; scaled by sqrt([K]o/5.4). I_K = G_K·X·Xi·(V−E_K)." },
+    "PRNaK": { "value": 0.01833, "units": "", "symbol": "P_NaK", "ref": "luo_rudy_1991", "note": "Na/K permeability ratio in E_K." }
+  },
+  "IK1": {
+    "G_K1": { "value": 0.6047, "units": "mS/cm^2", "symbol": "G_K1", "ref": "luo_rudy_1991", "note": "Time-independent (inward rectifier) K+ conductance at [K]o=5.4; scaled by sqrt([K]o/5.4)." }
+  },
+  "IKp": {
+    "G_Kp": { "value": 0.0183, "units": "mS/cm^2", "symbol": "G_Kp", "ref": "luo_rudy_1991", "note": "Plateau K+ current conductance. I_Kp = G_Kp·Kp·(V−E_K1), Kp = 1/(1+exp((7.488−V)/5.98))." }
+  },
+  "Ib": {
+    "G_b": { "value": 0.03921, "units": "mS/cm^2", "symbol": "G_b", "ref": "luo_rudy_1991", "note": "Background (leak) current. I_b = G_b·(V + 59.87)." },
+    "E_b": { "value": -59.87, "units": "mV", "symbol": "E_b", "ref": "luo_rudy_1991", "note": "Background current reversal potential." }
+  },
+
+  "stim": {
+    "amplitude": { "value": 80, "units": "uA/cm^2", "symbol": "I_stim", "ref": "luo_rudy_1991", "note": "Stimulus amplitude (applied as inward, i.e. −80). Above threshold for an all-or-none AP." },
+    "duration": { "value": 0.5, "units": "ms", "symbol": "t_stim", "ref": "luo_rudy_1991", "note": "Stimulus pulse width (suprathreshold)." },
+    "bcl": { "value": 500, "units": "ms", "symbol": "BCL", "ref": "luo_rudy_1991", "note": "Default basic cycle length for periodic pacing (2 Hz)." }
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "_note": "Bibliography for the Cell Digital Twin. Each entry is referenced by key from data/*.params.json and from transporter/flux definitions. DOIs are included only where known with confidence; where omitted, the full citation text is given so the source can be located. 'search' provides a fallback lookup URL.",
+  "references": {
+    "lew_bookchin_1986": {
+      "authors": "Lew VL, Bookchin RM",
+      "year": 1986,
+      "title": "Volume, pH, and ion-content regulation in human red cells: analysis of transient behavior with an integrated model",
+      "journal": "Journal of Membrane Biology",
+      "volume": "92",
+      "pages": "57-74",
+      "doi": "10.1007/BF01869016",
+      "note": "The integrated Lew-Bookchin red-cell homeostasis model: pump-leak balance, Donnan equilibrium, osmotic volume regulation."
+    },
+    "lew_bookchin_2005": {
+      "authors": "Lew VL, Bookchin RM",
+      "year": 2005,
+      "title": "Ion transport pathology in the mechanism of sickle cell dehydration",
+      "journal": "Physiological Reviews",
+      "volume": "85",
+      "pages": "179-200",
+      "doi": "10.1152/physrev.00052.2003",
+      "note": "Review of red-cell ion transport, the Gardos channel, and the Reference (RCM) red-cell model."
+    },
+    "tiffert_lew_2001": {
+      "authors": "Tiffert T, Lew VL",
+      "year": 2001,
+      "title": "Kinetics of calcium pumping in intact human red blood cells",
+      "journal": "Journal of Physiology",
+      "search": "Tiffert Lew calcium pump human red blood cells Journal of Physiology",
+      "note": "Plasma-membrane Ca2+-ATPase (PMCA) kinetics and the very low resting free [Ca2+]i in erythrocytes (~20-60 nM)."
+    },
+    "mulquiney_kuchel_1999": {
+      "authors": "Mulquiney PJ, Kuchel PW",
+      "year": 1999,
+      "title": "Model of 2,3-bisphosphoglycerate metabolism in the human erythrocyte based on detailed enzyme kinetic equations: equations and parameter refinement",
+      "journal": "Biochemical Journal",
+      "volume": "342",
+      "pages": "581-596",
+      "doi": "10.1042/bj3420581",
+      "note": "Detailed kinetic model of human erythrocyte glycolysis and the 2,3-BPG (Rapoport-Luebering) shunt."
+    },
+    "joshi_palsson_1989": {
+      "authors": "Joshi A, Palsson BO",
+      "year": 1989,
+      "title": "Metabolic dynamics in the human red cell. Part I-A comprehensive kinetic model",
+      "journal": "Journal of Theoretical Biology",
+      "volume": "141",
+      "pages": "515-528",
+      "doi": "10.1016/S0022-5193(89)80233-4",
+      "note": "Whole-cell kinetic model of erythrocyte energy metabolism (glycolysis, ATP turnover)."
+    },
+    "lowe_walmsley_1986": {
+      "authors": "Lowe AG, Walmsley AR",
+      "year": 1986,
+      "title": "The kinetics of glucose transport in human red blood cells",
+      "journal": "Biochimica et Biophysica Acta",
+      "volume": "857",
+      "pages": "146-154",
+      "doi": "10.1016/0005-2736(86)90342-1",
+      "note": "GLUT1 facilitated-diffusion kinetics in human erythrocytes; zero-trans Km ~1-2 mM."
+    },
+    "gardos_1958": {
+      "authors": "Gárdos G",
+      "year": 1958,
+      "title": "The function of calcium in the potassium permeability of human erythrocytes",
+      "journal": "Biochimica et Biophysica Acta",
+      "volume": "30",
+      "pages": "653-654",
+      "doi": "10.1016/0006-3002(58)90124-0",
+      "note": "Original description of the Ca2+-activated K+ (Gardos) channel, KCNN4/KCa3.1."
+    },
+    "hoffman_2003": {
+      "authors": "Hoffman JF, Joiner W, Nehrke K, Potapova O, Foye K, Wickrema A",
+      "year": 2003,
+      "title": "The hSK4 (KCNN4) isoform is the Ca2+-activated K+ channel (Gardos channel) in human red blood cells",
+      "journal": "Proceedings of the National Academy of Sciences USA",
+      "volume": "100",
+      "pages": "7366-7371",
+      "doi": "10.1073/pnas.1232342100",
+      "note": "Molecular identity and Ca2+ sensitivity (K0.5 ~ sub-micromolar) of the Gardos channel."
+    },
+    "jennings_1989": {
+      "authors": "Jennings ML",
+      "year": 1989,
+      "title": "Structure and function of the red blood cell anion transport protein (Band 3 / AE1)",
+      "journal": "Annual Review of Biophysics and Biophysical Chemistry",
+      "volume": "18",
+      "pages": "397-430",
+      "doi": "10.1146/annurev.bb.18.060189.002145",
+      "note": "Band 3 (AE1, SLC4A1) electroneutral Cl-/HCO3- exchange; very high turnover sustaining the chloride shift."
+    },
+    "garrahan_glynn_1967": {
+      "authors": "Garrahan PJ, Glynn IM",
+      "year": 1967,
+      "title": "The stoichiometry of the sodium pump",
+      "journal": "Journal of Physiology",
+      "volume": "192",
+      "pages": "217-235",
+      "doi": "10.1113/jphysiol.1967.sp008296",
+      "note": "Na+/K+-ATPase stoichiometry: 3 Na+ extruded / 2 K+ imported per ATP hydrolyzed."
+    },
+    "post_1972": {
+      "authors": "Post RL, Hegyvary C, Kume S",
+      "year": 1972,
+      "title": "Activation by adenosine triphosphate in the phosphorylation kinetics of sodium and potassium ion transport adenosine triphosphatase",
+      "journal": "Journal of Biological Chemistry",
+      "volume": "247",
+      "pages": "6530-6540",
+      "doi": "10.1016/S0021-9258(19)44725-X",
+      "note": "Na+/K+-ATPase kinetics; basis for Hill dependence on internal Na+ and external K+."
+    },
+    "luo_rudy_1991": {
+      "authors": "Luo CH, Rudy Y",
+      "year": 1991,
+      "title": "A model of the ventricular cardiac action potential. Depolarization, repolarization, and their interaction",
+      "journal": "Circulation Research",
+      "volume": "68",
+      "pages": "1501-1526",
+      "doi": "10.1161/01.RES.68.6.1501",
+      "note": "The Luo-Rudy phase I (LR91) guinea-pig ventricular action-potential model."
+    },
+    "ten_tusscher_2006": {
+      "authors": "ten Tusscher KHWJ, Panfilov AV",
+      "year": 2006,
+      "title": "Alternans and spiral breakup in a human ventricular tissue model",
+      "journal": "American Journal of Physiology - Heart and Circulatory Physiology",
+      "volume": "291",
+      "pages": "H1088-H1100",
+      "doi": "10.1152/ajpheart.00109.2006",
+      "note": "Human ventricular myocyte model (TT06); planned extension target for the cardiomyocyte."
+    },
+    "hodgkin_huxley_1952": {
+      "authors": "Hodgkin AL, Huxley AF",
+      "year": 1952,
+      "title": "A quantitative description of membrane current and its application to conduction and excitation in nerve",
+      "journal": "Journal of Physiology",
+      "volume": "117",
+      "pages": "500-544",
+      "doi": "10.1113/jphysiol.1952.sp004764",
+      "note": "Voltage-gated channel gating kinetics (the x-infinity / tau formalism used throughout)."
+    },
+    "goldman_1943": {
+      "authors": "Goldman DE",
+      "year": 1943,
+      "title": "Potential, impedance, and rectification in membranes",
+      "journal": "Journal of General Physiology",
+      "volume": "27",
+      "pages": "37-60",
+      "doi": "10.1085/jgp.27.1.37",
+      "note": "Goldman-Hodgkin-Katz constant-field flux/voltage equations."
+    },
+    "rush_larsen_1978": {
+      "authors": "Rush S, Larsen H",
+      "year": 1978,
+      "title": "A practical algorithm for solving dynamic membrane equations",
+      "journal": "IEEE Transactions on Biomedical Engineering",
+      "volume": "BME-25",
+      "pages": "389-392",
+      "doi": "10.1109/TBME.1978.326270",
+      "note": "Exponential integrator for Hodgkin-Huxley gating variables; unconditionally stable for gating."
+    },
+    "alberts_mboc": {
+      "authors": "Alberts B, Heald R, Johnson A, Morgan D, Raff M, Roberts K, Walter P",
+      "year": 2022,
+      "title": "Molecular Biology of the Cell, 7th edition",
+      "journal": "W. W. Norton (Garland Science)",
+      "note": "Standard textbook reference for membrane transport mechanisms and physiological concentration ranges."
+    },
+    "lodish_molcell": {
+      "authors": "Lodish H, Berk A, Kaiser CA, et al.",
+      "year": 2021,
+      "title": "Molecular Cell Biology, 9th edition",
+      "journal": "W. H. Freeman (Macmillan Learning)",
+      "note": "Textbook reference for transporter classes (uniport, symport, antiport, pumps) and ion gradients."
+    }
+  }
+}
