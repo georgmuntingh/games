@@ -29,6 +29,12 @@
       "title": "Refinement",
       "description": "Build locally refined B-spline bases interactively.",
       "tags": ["math", "visualization", "interactive"]
+    },
+    {
+      "id": "cell-digitaltwin",
+      "title": "Cell Digital Twin",
+      "description": "A quantitative, literature-grounded model of a living cell: ion and metabolite concentrations and the membrane transporters that move them. Starts with the erythrocyte.",
+      "tags": ["biology", "simulation", "visualization", "interactive", "education"]
     }
   ]
 }

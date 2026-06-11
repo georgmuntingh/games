@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cell Digital Twin</title>
+    <link rel="stylesheet" href="/shared/ui.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Cell Digital Twin</h1>
+      <p class="subtitle">
+        A quantitative, literature-grounded model of a living cell: the
+        concentrations of ions and metabolites across the membrane, and the
+        transport proteins that move them. Erythrocyte homeostasis after
+        Lew &amp; Bookchin (<em>J. Membr. Biol.</em> 1986) and the glycolytic /
+        2,3-BPG model of Mulquiney &amp; Kuchel (<em>Biochem. J.</em> 1999).
+        <span class="hint">Toggle <strong>Show equations &amp; sources</strong> to reveal the maths and citations.</span>
+      </p>
+
+      <div class="layout">
+        <section class="stage">
+          <div class="cellbar">
+            <label class="cellselect">
+              Cell
+              <select id="cell-select">
+                <option value="erythrocyte" selected>Erythrocyte (red blood cell)</option>
+              </select>
+            </label>
+            <div class="transport-controls">
+              <button id="play-btn" type="button" class="primary">▶ Play</button>
+              <button id="step-btn" type="button" title="Advance one interval">Step</button>
+              <button id="reset-btn" type="button">Reset</button>
+              <label class="speed">
+                Speed <span id="speed-out">30</span> <small id="speed-unit">min/s</small>
+                <input id="speed" type="range" min="0" max="100" value="55" />
+              </label>
+            </div>
+            <div class="clock">
+              t = <span id="clock">0.0</span> <span id="clock-unit">min</span>
+            </div>
+          </div>
+
+          <div class="schematic-wrap">
+            <svg id="schematic" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg"
+                 aria-label="Cell cross-section schematic"></svg>
+          </div>
+
+          <div id="transporter-info" class="transporter-info" hidden></div>
+
+          <div class="readouts" id="readouts"></div>
+
+          <div class="plots-wrap">
+            <div class="plots-head">
+              <strong>Time course</strong>
+              <span class="muted">click a series in the legend to toggle</span>
+            </div>
+            <canvas id="plots" width="900" height="260"></canvas>
+            <div id="plot-legend" class="plot-legend"></div>
+          </div>
+        </section>
+
+        <aside class="sidebar">
+          <details class="panel" open>
+            <summary>Guided lessons</summary>
+            <p class="note" id="lesson-intro">
+              Pick a lesson to set up a scenario and walk through a mechanism.
+              Sandbox controls below stay live throughout.
+            </p>
+            <ul id="lesson-list" class="lesson-list"></ul>
+            <div id="lesson-active" class="lesson-active" hidden>
+              <div class="lesson-step-head">
+                <span id="lesson-title" class="lesson-title"></span>
+                <button id="lesson-exit" type="button" class="link-btn">exit</button>
+              </div>
+              <div id="lesson-body" class="lesson-body"></div>
+              <div class="lesson-nav">
+                <button id="lesson-prev" type="button">← Prev</button>
+                <span id="lesson-progress" class="muted"></span>
+                <button id="lesson-next" type="button">Next →</button>
+              </div>
+            </div>
+          </details>
+
+          <details class="panel" open>
+            <summary>Perturbations (sandbox)</summary>
+            <div class="control-group" id="controls"></div>
+            <button id="controls-reset" type="button">Reset perturbations</button>
+          </details>
+
+          <details class="panel">
+            <summary>Display</summary>
+            <label class="check">
+              <input id="show-math" type="checkbox" />
+              Show equations &amp; sources
+            </label>
+            <p class="note">Choose which series to plot:</p>
+            <div id="series-picker" class="series-picker"></div>
+            <p class="note">Tint the cell by concentration of:</p>
+            <select id="tint-select"></select>
+          </details>
+
+          <details class="panel">
+            <summary>State readout</summary>
+            <div id="state-table" class="state-table"></div>
+          </details>
+
+          <details class="panel">
+            <summary>Parameters &amp; sources</summary>
+            <p class="note">
+              Every value below is used by the model and is cited. Hover (or with
+              <em>Show equations &amp; sources</em> on) for the reference.
+            </p>
+            <div id="param-table" class="param-table"></div>
+          </details>
+
+          <details class="panel">
+            <summary>References</summary>
+            <ol id="reference-list" class="reference-list"></ol>
+          </details>
+
+          <details class="panel">
+            <summary>About this model</summary>
+            <div class="note about">
+              <p>
+                A learning tool, not a clinical model. State is integrated as
+                conserved amounts so total ion content and charge are preserved
+                (verified in the <a href="./tests/">test suite →</a>). The
+                membrane potential is solved at quasi-steady state each step;
+                the red cell sits near its Donnan/Goldman equilibrium, set by the
+                dominant Cl⁻ permeability of Band 3.
+              </p>
+              <p>
+                Erythrocyte transporters modelled: Na⁺/K⁺-ATPase, PMCA Ca²⁺ pump,
+                Band 3 (Cl⁻/HCO₃⁻ antiport), GLUT1, the Gardos K⁺ channel, and
+                passive Na⁺/K⁺ leaks, coupled to anaerobic glycolysis and the
+                2,3-BPG shunt. The cardiomyocyte (Luo–Rudy) is planned next.
+              </p>
+            </div>
+          </details>
+        </aside>
+      </div>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
