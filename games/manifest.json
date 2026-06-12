@@ -29,6 +29,12 @@
       "title": "Refinement",
       "description": "Build locally refined B-spline bases interactively.",
       "tags": ["math", "visualization", "interactive"]
+    },
+    {
+      "id": "sokoban",
+      "title": "Sokoban",
+      "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
+      "tags": ["puzzle", "solo"]
     }
   ]
 }
