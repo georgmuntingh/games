@@ -5,6 +5,8 @@
 
 import { SPECIES as ERY_SPECIES } from './erythrocyte.js';
 import { SPECIES as CARDIO_SPECIES } from './cardiomyocyte.js';
+import { SPECIES as NEURON_SPECIES } from './neuron.js';
+import { createNeuronSchematic } from '../viz/neuron-schematic.js';
 
 const colorOf = (species, id) => (species.find((s) => s.id === id) || {}).color || '#888';
 const symOf = (species, id) => (species.find((s) => s.id === id) || {}).symbol || id;
@@ -237,6 +239,131 @@ export const cardiomyocyteView = {
       IK1: { dir: -1, rate: Math.abs(F.IK1) },
       IKp: { dir: -1, rate: Math.abs(F.IKp) },
       Ib: { dir: F.Ib < 0 ? 1 : -1, rate: Math.abs(F.Ib) },
+    };
+  },
+};
+
+// ===========================================================================
+// Neuron (myelinated, multi-compartment Hodgkin–Huxley cable)
+// ===========================================================================
+export const neuronView = {
+  timeLabel: 'ms',
+  dtMax: 0.001,
+  speed: { min: 0.5, max: 12, unit: 'ms/s', default: 3 },
+  sampleEvery: 0.1,
+  plotWindow: 60,
+  fluxScale: 0.012,
+  defaultControls: { tempC: 37 },
+  createSchematic: createNeuronSchematic,
+  intro: 'At rest the neuron is silent. Press ⚡ Stimulate (or pace) to fire an action potential and watch it jump node-to-node down the myelinated axon. Click any compartment to move the injection site.',
+
+  plotAxes: {
+    mV: { label: 'mV', side: 'left' },
+    uA: { label: 'µA', side: 'right' },
+    mM: { label: 'mM', side: 'right' },
+    uM: { label: 'µM', side: 'right' },
+  },
+  series: [
+    { key: 'Vsoma', label: 'Vm soma', color: '#ef4444', axis: 'mV', on: true },
+    { key: 'Vfirst', label: 'Vm node 1', color: '#f97316', axis: 'mV', on: true },
+    { key: 'Vlast', label: 'Vm last node', color: '#a855f7', axis: 'mV', on: true },
+    { key: 'INa', label: 'I_Na', color: '#f59e0b', axis: 'uA', on: false },
+    { key: 'IKd', label: 'I_Kd', color: '#8b5cf6', axis: 'uA', on: false },
+    { key: 'ISK', label: 'I_SK', color: '#06b6d4', axis: 'uA', on: false },
+    { key: 'Ih', label: 'I_h', color: '#10b981', axis: 'uA', on: false },
+    { key: 'Cai', label: '[Ca²⁺]i soma (µM)', color: '#db2777', axis: 'uM', on: false },
+    { key: 'Nai', label: '[Na⁺]i soma', color: '#eab308', axis: 'mM', on: false },
+    { key: 'Ki', label: '[K⁺]i soma', color: '#3b82f6', axis: 'mM', on: false },
+  ],
+
+  sample(model, y, ctx) {
+    const F = model.computeFluxes(y, ctx);
+    const s = model.somaIndex;
+    return {
+      Vsoma: y[`V${s}`], Vfirst: y[`V${model.firstNode}`], Vlast: y[`V${model.lastNode}`],
+      INa: F.INa[model.firstNode], IKd: F.IKd[model.firstNode], ISK: F.ISK[s], Ih: F.Ih[s],
+      Cai: Math.max(1e-7, y[`Cai${s}`]) * 1000, Nai: y[`Nai${s}`], Ki: y[`Ki${s}`],
+    };
+  },
+
+  readouts(model, y, ctx) {
+    const O = model.observables(y, ctx);
+    const inj = ctx && ctx.controls && ctx.controls.injectComp != null ? ctx.controls.injectComp : model.somaIndex;
+    return [
+      ['Soma Vm', O.Vsoma.toFixed(1), 'mV'],
+      ['Peak Vm (axon)', O.Vmax.toFixed(0), 'mV'],
+      ['[Na⁺]i soma', O.Nai.toFixed(2), 'mM'],
+      ['[Ca²⁺]i soma', O.Cai_uM.toFixed(2), 'µM'],
+      ['E_Na / E_K', `${O.ENa.toFixed(0)} / ${O.EK.toFixed(0)}`, 'mV'],
+      ['Injection site', `#${inj} (${model.comps[inj].kind})`, ''],
+    ];
+  },
+
+  stateRows(model, y, ctx) {
+    const s = model.somaIndex, fn = model.firstNode, ln = model.lastNode, h = model.hillockIndex;
+    const O = model.observables(y, ctx);
+    const g = (k, i) => y[`${k}${i}`].toFixed(2);
+    return {
+      header: ['variable', 'value', '', ''],
+      rows: [
+        ['Vm dendrite/soma', `${y['V0'].toFixed(0)} / ${y[`V${s}`].toFixed(0)}`, null, 'mV'],
+        ['Vm hillock/node1/last', `${y[`V${h}`].toFixed(0)} / ${y[`V${fn}`].toFixed(0)} / ${y[`V${ln}`].toFixed(0)}`, null, 'mV'],
+        ['Na gates m/h (node1)', `${g('m', fn)} / ${g('h', fn)}`, null, ''],
+        ['Kd gate n (node1)', g('n', fn), null, ''],
+        ['[Na⁺]i / [K⁺]i soma', `${y[`Nai${s}`].toFixed(1)} / ${y[`Ki${s}`].toFixed(0)}`, null, 'mM'],
+        ['[Ca²⁺]i soma', O.Cai_uM, null, 'µM'],
+      ],
+      footer: `E_Na / E_K = ${O.ENa.toFixed(0)} / ${O.EK.toFixed(0)} mV  ·  ${model.N} compartments`,
+    };
+  },
+
+  chips(model, y) {
+    const C = model.concentrations(y);
+    const mk = (side, ids) => ids.map((id) => {
+      const val = C[side][id];
+      const text = id === 'Ca' ? `${(val * 1e6).toFixed(0)} nM` : `${val.toFixed(0)}`;
+      return { label: symOf(NEURON_SPECIES, id), color: colorOf(NEURON_SPECIES, id), text };
+    });
+    return { plasma: mk('plasma', ['Na', 'K', 'Ca']), cyto: mk('cyto', ['Na', 'K', 'Ca']) };
+  },
+
+  tint: {
+    options: [{ id: 'Vm', name: 'Membrane potential (heat map)' }],
+    ranges: { Vm: [-85, 45] },
+    default: 'Vm',
+  },
+
+  controls: [
+    { key: 'stimAmp', label: 'Stimulus amplitude', type: 'range', min: 0.1, max: 3, step: 0.1, def: 1.5, unit: ' nA', eq: 'current-clamp pulse injected at the chosen site' },
+    { key: 'stimDur', label: 'Stimulus duration', type: 'range', min: 0.2, max: 4, step: 0.1, def: 1, unit: ' ms', eq: 'pulse width' },
+    { key: 'tonic', label: 'Tonic (holding) current', type: 'range', min: 0, max: 1.5, step: 0.05, def: 0, zeroLabel: 'off', unit: ' nA', eq: 'steady current → repetitive firing' },
+    { key: 'paced', label: 'Pace continuously', type: 'check', def: false, eq: 'stimulate every BCL ms' },
+    { key: 'bcl', label: 'Pacing interval (BCL)', type: 'range', min: 8, max: 100, step: 2, def: 30, unit: ' ms', eq: 'pacing period' },
+    { key: 'tempC', label: 'Temperature', type: 'range', min: 20, max: 40, step: 0.5, def: 37, unit: ' °C', eq: 'φ = Q10^((T−36)/10) scales all gating rates' },
+    { key: 'ttx', label: 'TTX (Na⁺ block)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales g_Na by (1 − TTX)' },
+    { key: 'tea', label: 'TEA (Kdr block)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales g_Kd by (1 − TEA)' },
+    { key: 'fourAP', label: '4-AP (A-type block)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales g_A by (1 − 4-AP)' },
+    { key: 'caBlock', label: 'Ca²⁺ channel block', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales g_CaL by (1 − block)' },
+    { key: 'ouabain', label: 'Ouabain (Na⁺/K⁺-ATPase block)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales the pump current by (1 − ouabain)' },
+    { key: 'demyelin', label: 'Demyelination', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'raises internode leak → continuous/slowed (or blocked) conduction' },
+    { key: 'Ko', label: 'Extracellular [K⁺]o', type: 'range', min: 2, max: 12, step: 0.5, def: 4, unit: ' mM', eq: 'shifts E_K (raise → hyperkalemia, depolarised)' },
+    { key: 'Nao', label: 'Extracellular [Na⁺]o', type: 'range', min: 100, max: 160, step: 5, def: 145, unit: ' mM', eq: 'shifts E_Na' },
+  ],
+
+  actions: [
+    { id: 'stim', label: '⚡ Stimulate', autoplay: true, fn: (ctx, sim) => { ctx.controls._stimUntil = sim.t + (ctx.controls.stimDur != null ? ctx.controls.stimDur : 1); } },
+    { id: 'epsp', label: '＋ EPSP', autoplay: true, fn: (ctx, sim) => { ctx.controls._epspT0 = sim.t; } },
+    { id: 'ipsp', label: '－ IPSP', autoplay: true, fn: (ctx, sim) => { ctx.controls._ipspT0 = sim.t; } },
+  ],
+
+  activity(model, F) {
+    const s = model.somaIndex, node = model.firstNode;
+    const ch = (I) => ({ dir: I < 0 ? 1 : -1, rate: Math.abs(I) });
+    return {
+      INa: ch(F.INa[node]), IKd: { dir: -1, rate: Math.abs(F.IKd[node]) },
+      IA: { dir: -1, rate: Math.abs(F.IA[s]) }, ICaL: ch(F.ICaL[s]),
+      ISK: { dir: -1, rate: Math.abs(F.ISK[s]) }, Ih: ch(F.Ih[s]),
+      INaK: { dir: -1, rate: Math.abs(F.iPump[s]) }, Ileak: ch(F.Ileak[s]),
     };
   },
 };

@@ -60,8 +60,15 @@ function loadCell(id) {
   S.sim = new Simulator(S.model, S.ctx);
   S.tintSpecies = cell.view.tint.default;
 
-  // schematic
-  S.schematic = createSchematic($('schematic'), S.model, { onTransporterClick: showTransporter });
+  // schematic — a cell's view may supply its own (e.g. the neuron morphology);
+  // otherwise use the generic membrane cross-section. The optional position
+  // canvas (Vm-vs-axon) is only used by the neuron; hide it for other cells.
+  const axonPlot = $('axon-plot');
+  if (axonPlot) axonPlot.hidden = true;
+  const makeSchematic = cell.view.createSchematic || createSchematic;
+  S.schematic = makeSchematic($('schematic'), S.model, {
+    onTransporterClick: showTransporter, posCanvas: axonPlot, ctx: S.ctx,
+  });
 
   // plots
   S.plots = createPlots($('plots'), {

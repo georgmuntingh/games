@@ -18,7 +18,9 @@
         simulation, and work through the guided lessons. Erythrocyte homeostasis
         after Lew &amp; Bookchin (1986) with glycolysis from Mulquiney &amp;
         Kuchel (1999); the cardiomyocyte action potential after Luo &amp; Rudy
-        (1991).
+        (1991); and a myelinated neuron — a multi-compartment Hodgkin–Huxley
+        cable (Pospischil 2008; McIntyre–Richardson–Grill 2002) with saltatory
+        conduction.
         <span class="hint">Toggle <strong>Show equations &amp; sources</strong> to reveal the maths and citations.</span>
       </p>
 
@@ -49,6 +51,8 @@
           <div class="schematic-wrap">
             <svg id="schematic" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg"
                  aria-label="Cell cross-section schematic"></svg>
+            <canvas id="axon-plot" width="900" height="120"
+                    aria-label="Membrane potential along the axon" hidden></canvas>
           </div>
 
           <div id="transporter-info" class="transporter-info" hidden></div>
@@ -150,6 +154,24 @@
                 [Ca²⁺]i. Press ⚡ Stimulate (or pace) to fire an action potential.
                 Extending toward ten Tusscher 2006 (explicit SR Ca²⁺ handling) is
                 the planned next step.
+              </p>
+              <p>
+                The neuron is a multi-compartment Hodgkin–Huxley cable: dendrites,
+                soma, axon hillock and a myelinated axon of alternating nodes of
+                Ranvier and internodes. Each compartment carries fast Na⁺ (m³h),
+                delayed-rectifier K⁺ (n⁴), leak, L-type Ca²⁺, Ca²⁺-activated K⁺
+                (SK), transient A-type K⁺ and the H-current, plus an electrogenic
+                Na⁺/K⁺-ATPase, with its own dynamic [Na⁺]/[K⁺]/[Ca²⁺] and
+                neighbours coupled by axial resistance (cable theory). Voltage and
+                concentrations are advanced by RK4, the gates by Rush–Larsen.
+                Kinetics follow Pospischil et al. (2008) at 37 °C (Q10-scaled);
+                node/internode properties follow McIntyre–Richardson–Grill (2002).
+                The membrane is colour-mapped by local Vm so the action potential
+                is visible jumping node to node; the lower trace shows Vm along the
+                axon. Press ⚡ Stimulate, inject a tonic current, add EPSP/IPSP
+                input, or click a compartment to move the injection site. The node
+                compartments are coarsened above their ~1 µm anatomy so the
+                explicit cable stays numerically stable.
               </p>
             </div>
           </details>

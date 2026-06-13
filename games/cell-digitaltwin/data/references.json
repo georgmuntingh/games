@@ -172,6 +172,56 @@
       "title": "Molecular Cell Biology, 9th edition",
       "journal": "W. H. Freeman (Macmillan Learning)",
       "note": "Textbook reference for transporter classes (uniport, symport, antiport, pumps) and ion gradients."
+    },
+    "pospischil_2008": {
+      "authors": "Pospischil M, Toledo-Rodriguez M, Monier C, Piwkowska Z, Bal T, Frégnac Y, Markram H, Destexhe A",
+      "year": 2008,
+      "title": "Minimal Hodgkin-Huxley type models for different classes of cortical and thalamic neurons",
+      "journal": "Biological Cybernetics",
+      "volume": "99",
+      "pages": "427-441",
+      "doi": "10.1007/s00422-008-0263-8",
+      "note": "Self-consistent mammalian Hodgkin-Huxley channel kinetics at ~36 C: fast I_Na, delayed-rectifier I_Kd, slow I_M, high-threshold I_L (Ca), with a voltage-threshold parameter V_T. Basis for the neuron's Na/Kd/Ca rate equations."
+    },
+    "mcintyre_richardson_grill_2002": {
+      "authors": "McIntyre CC, Richardson AG, Grill WM",
+      "year": 2002,
+      "title": "Modeling the excitability of mammalian nerve fibers: influence of afterpotentials on the recovery cycle",
+      "journal": "Journal of Neurophysiology",
+      "volume": "87",
+      "pages": "995-1006",
+      "doi": "10.1152/jn.00353.2001",
+      "note": "Double-cable model of a mammalian myelinated axon: node-of-Ranvier ion-channel densities, internodal myelin properties, axoplasmic resistivity (~70 ohm-cm), and the ~100x-diameter internode spacing rule underlying saltatory conduction."
+    },
+    "connor_stevens_1971": {
+      "authors": "Connor JA, Stevens CF",
+      "year": 1971,
+      "title": "Voltage clamp studies of a transient outward membrane current in gastropod neural somata",
+      "journal": "Journal of Physiology",
+      "volume": "213",
+      "pages": "21-30",
+      "doi": "10.1113/jphysiol.1971.sp009365",
+      "note": "Original description and kinetics of the transient (A-type) K+ current I_A (fast activation a, slow inactivation b) that delays firing and sets inter-spike interval."
+    },
+    "destexhe_babloyantz_1993": {
+      "authors": "Destexhe A, Babloyantz A, Sejnowski TJ",
+      "year": 1993,
+      "title": "Ionic mechanisms for intrinsic slow oscillations in thalamic relay neurons",
+      "journal": "Biophysical Journal",
+      "volume": "65",
+      "pages": "1538-1552",
+      "doi": "10.1016/S0006-3495(93)81190-1",
+      "note": "Kinetics of the hyperpolarization-activated cation current I_h (mixed Na+/K+, reversal ~ -43 mV) responsible for voltage 'sag' and rebound firing."
+    },
+    "rall_1962": {
+      "authors": "Rall W",
+      "year": 1962,
+      "title": "Theory of physiological properties of dendrites",
+      "journal": "Annals of the New York Academy of Sciences",
+      "volume": "96",
+      "pages": "1071-1092",
+      "doi": "10.1111/j.1749-6632.1962.tb54120.x",
+      "note": "Compartmental cable theory: axial coupling of membrane compartments through cytoplasmic resistance, the basis for multi-compartment propagation."
     }
   }
 }

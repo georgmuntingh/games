@@ -9,6 +9,7 @@ import { resolveParams, totalAmount } from '../engine/model.js';
 import { Simulator } from '../engine/integrator.js';
 import { buildModel as buildErythrocyte } from '../cells/erythrocyte.js';
 import { buildModel as buildCardiomyocyte } from '../cells/cardiomyocyte.js';
+import { buildModel as buildNeuron } from '../cells/neuron.js';
 
 const tests = [];
 const test = (name, cell, fn) => tests.push({ name, cell, fn });
@@ -224,6 +225,145 @@ test('Pacing stays numerically stable over several beats', 'cardiomyocyte', (par
     vlo = Math.min(vlo, sim.y.V); vhi = Math.max(vhi, sim.y.V);
   }
   return { pass: okFinite && vhi > 20 && vlo > -95 && vlo < -80, detail: `4 beats: V ∈ [${vlo.toFixed(0)}, ${vhi.toFixed(0)}] mV, all finite=${okFinite}` };
+});
+
+// ===========================================================================
+// Neuron (myelinated multi-compartment Hodgkin-Huxley cable)
+// ===========================================================================
+const NDT = 0.001;
+function buildNeuronModel(params) {
+  const { values: P } = resolveParams(params);
+  const m = buildNeuron(P); m.dtMax = NDT;
+  return m;
+}
+// Run `T` ms with the given controls; returns the simulator and per-compartment
+// peak voltage + first threshold-crossing time (for a chosen index).
+function runNeuron(model, controls, T, watch = []) {
+  const ctx = { controls: { ...controls }, t: 0 };
+  const sim = new Simulator(model, ctx);
+  const peak = {}, cross = {};
+  watch.forEach((i) => { peak[i] = -1e9; cross[i] = null; });
+  const n = Math.round(T / NDT);
+  for (let s = 0; s < n; s++) {
+    sim.advance(NDT, NDT); ctx.t = sim.t;
+    for (const i of watch) {
+      const v = sim.y[`V${i}`];
+      if (v > peak[i]) peak[i] = v;
+      if (cross[i] == null && v > -10) cross[i] = sim.t;
+    }
+  }
+  return { sim, ctx, peak, cross };
+}
+
+test('Resting potential is in the physiological range at every compartment', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const { sim } = runNeuron(m, {}, 40);
+  let lo = 1e9, hi = -1e9, finite = true;
+  for (let i = 0; i < m.N; i++) { const v = sim.y[`V${i}`]; if (!isFinite(v)) finite = false; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  return { pass: finite && lo > -75 && hi < -60, detail: `V ∈ [${lo.toFixed(1)}, ${hi.toFixed(1)}] mV across ${m.N} compartments, finite=${finite}` };
+});
+
+test('Action potential is all-or-none (threshold)', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const H = m.hillockIndex, FN = m.firstNode;
+  const sub = runNeuron(m, { injectComp: H, stimAmp: 0.3, stimDur: 1, _stimUntil: 1.5 }, 14, [FN]).peak[FN];
+  const sup = runNeuron(m, { injectComp: H, stimAmp: 1.5, stimDur: 1, _stimUntil: 1.5 }, 14, [FN]).peak[FN];
+  return { pass: sub < -20 && sup > 20, detail: `peak node Vm: sub-threshold ${sub.toFixed(0)} mV (no spike), supra-threshold ${sup.toFixed(0)} mV` };
+});
+
+test('Action potential propagates distally down the axon', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const H = m.hillockIndex, FN = m.firstNode, LN = m.lastNode;
+  const { cross } = runNeuron(m, { injectComp: H, stimAmp: 1.5, stimDur: 1, _stimUntil: 1.5 }, 16, [FN, LN]);
+  const ok = cross[FN] != null && cross[LN] != null && cross[LN] > cross[FN];
+  let len = 0; for (let i = FN; i < LN; i++) len += (m.comps[i].L + m.comps[i + 1].L) / 2;
+  const cv = ok ? (len / 1000) / (cross[LN] - cross[FN]) : 0;
+  return { pass: ok && cv > 0.3 && cv < 50, detail: `node1 at ${cross[FN]?.toFixed(2)} ms, last node at ${cross[LN]?.toFixed(2)} ms → CV ≈ ${cv.toFixed(1)} m/s` };
+});
+
+test('Demyelination slows conduction', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const H = m.hillockIndex, FN = m.firstNode, LN = m.lastNode;
+  const a = runNeuron(m, { injectComp: H, stimAmp: 1.5, stimDur: 1, _stimUntil: 1.5 }, 18, [FN, LN]).cross;
+  const b = runNeuron(m, { injectComp: H, stimAmp: 1.5, stimDur: 1, _stimUntil: 1.5, demyelin: 1 }, 18, [FN, LN]).cross;
+  const dA = a[FN] != null && a[LN] != null ? a[LN] - a[FN] : null;
+  const dB = b[FN] != null && b[LN] != null ? b[LN] - b[FN] : null;
+  const pass = dA != null && dB != null && dB > dA * 1.5;
+  return { pass, detail: `node1→last delay: myelinated ${dA?.toFixed(2)} ms, demyelinated ${dB?.toFixed(2)} ms` };
+});
+
+test('Refractory period limits the maximum firing rate', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const H = m.hillockIndex, FN = m.firstNode;
+  // Pace at a high vs low rate; a refractory axon cannot follow too-fast input.
+  const followRatio = (bcl, T) => {
+    const ctx = { controls: { injectComp: H, stimAmp: 2.5, stimDur: 0.8, paced: true, bcl }, t: 0 };
+    const sim = new Simulator(m, ctx); let c = 0, w = false;
+    const n = Math.round(T / NDT);
+    for (let s = 0; s < n; s++) {
+      sim.advance(NDT, NDT); ctx.t = sim.t;
+      const v = sim.y[`V${FN}`]; if (v > 10 && !w) { c++; w = true; } if (v < -30) w = false;
+    }
+    return c / Math.floor(T / bcl);
+  };
+  const fast = followRatio(2, 60), slow = followRatio(15, 60);
+  return { pass: fast < 0.6 && slow > 0.9, detail: `spikes per stimulus: 500 Hz pacing ${fast.toFixed(2)} (drops spikes — refractory), 67 Hz pacing ${slow.toFixed(2)} (follows 1:1)` };
+});
+
+test('Lower temperature broadens the spike (Q10)', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const H = m.hillockIndex, FN = m.firstNode;
+  const width = (tc) => {
+    const ctx = { controls: { injectComp: H, stimAmp: 1.5, stimDur: 1, _stimUntil: 1.5, tempC: tc }, t: 0 };
+    const sim = new Simulator(m, ctx); let w = 0;
+    const n = Math.round(16 / NDT);
+    for (let s = 0; s < n; s++) { sim.advance(NDT, NDT); ctx.t = sim.t; if (sim.y[`V${FN}`] > -20) w += NDT; }
+    return w;
+  };
+  const cold = width(25), warm = width(37);
+  return { pass: cold > warm * 1.3, detail: `spike width >−20 mV: 25 °C ${cold.toFixed(2)} ms vs 37 °C ${warm.toFixed(2)} ms` };
+});
+
+test('Intracellular ion concentrations stay bounded at rest', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const ctx = { controls: {}, t: 0 };
+  const sim = new Simulator(m, ctx);
+  const Na0 = sim.y[`Nai${m.somaIndex}`], K0 = sim.y[`Ki${m.somaIndex}`];
+  const n = Math.round(60 / NDT);
+  for (let s = 0; s < n; s++) { sim.advance(NDT, NDT); ctx.t = sim.t; }
+  let dNa = 0, dK = 0;
+  for (let i = 0; i < m.N; i++) { dNa = Math.max(dNa, Math.abs(sim.y[`Nai${i}`] - Na0)); dK = Math.max(dK, Math.abs(sim.y[`Ki${i}`] - K0)); }
+  return { pass: dNa < 1 && dK < 1, detail: `max drift over 60 ms: Δ[Na]i ${dNa.toFixed(3)} mM, Δ[K]i ${dK.toFixed(3)} mM` };
+});
+
+test('Blocking Na⁺ (TTX) abolishes the propagating spike', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const H = m.hillockIndex, LN = m.lastNode;
+  // With Na+ blocked the distal node sees no action potential (a real spike
+  // would bring it to ~+60 mV); only weak electrotonic spread remains nearby.
+  const peak = runNeuron(m, { injectComp: H, stimAmp: 1.5, stimDur: 1, _stimUntil: 1.5, ttx: 1 }, 14, [LN]).peak[LN];
+  return { pass: peak < -10, detail: `peak at the distal node with TTX = ${peak.toFixed(0)} mV (no propagating action potential)` };
+});
+
+test('Ouabain (pump block) depolarises the cell', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const S = m.somaIndex;
+  const ctrl = runNeuron(m, { injectComp: S, tonic: 0.7 }, 80).sim.y[`V${S}`];
+  const oua = runNeuron(m, { injectComp: S, tonic: 0.7, ouabain: 1 }, 80).sim.y[`V${S}`];
+  return { pass: oua > ctrl + 1.5, detail: `soma Vm after firing: pump on ${ctrl.toFixed(1)} mV, ouabain ${oua.toFixed(1)} mV (depolarised)` };
+});
+
+test('Pacing stays numerically stable over many spikes', 'neuron', (params) => {
+  const m = buildNeuronModel(params);
+  const ctx = { controls: { injectComp: m.hillockIndex, stimAmp: 2, stimDur: 0.6, paced: true, bcl: 12 }, t: 0 };
+  const sim = new Simulator(m, ctx);
+  let finite = true, vlo = 1e9, vhi = -1e9;
+  const n = Math.round(120 / NDT);
+  for (let s = 0; s < n; s++) {
+    sim.advance(NDT, NDT); ctx.t = sim.t;
+    for (let i = 0; i < m.N; i++) { const v = sim.y[`V${i}`]; if (!isFinite(v)) finite = false; vlo = Math.min(vlo, v); vhi = Math.max(vhi, v); }
+  }
+  return { pass: finite && vhi > 20 && vhi < 80 && vlo > -95, detail: `V ∈ [${vlo.toFixed(0)}, ${vhi.toFixed(0)}] mV over 120 ms of pacing, all finite=${finite}` };
 });
 
 export function runAll(paramsMap) {

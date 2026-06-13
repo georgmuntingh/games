@@ -8,7 +8,8 @@ import { resolveParams } from '../engine/model.js';
 import { Simulator } from '../engine/integrator.js';
 import { buildModel as buildErythrocyte } from '../cells/erythrocyte.js';
 import { buildModel as buildCardiomyocyte } from '../cells/cardiomyocyte.js';
-import { erythrocyteView, cardiomyocyteView } from '../cells/views.js';
+import { buildModel as buildNeuron } from '../cells/neuron.js';
+import { erythrocyteView, cardiomyocyteView, neuronView } from '../cells/views.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (f) => JSON.parse(readFileSync(resolve(__dirname, f), 'utf8'));
@@ -36,6 +37,7 @@ const { createPlots } = await import('../viz/plots.js');
 const cells = {
   erythrocyte: { build: buildErythrocyte, view: erythrocyteView, params: read('../data/erythrocyte.params.json'), ctrl: {} },
   cardiomyocyte: { build: buildCardiomyocyte, view: cardiomyocyteView, params: read('../data/cardiomyocyte.params.json'), ctrl: { paced: true, bcl: 500 } },
+  neuron: { build: buildNeuron, view: neuronView, params: read('../data/neuron.params.json'), ctrl: { injectComp: 3, stimAmp: 1.5, stimDur: 1, _stimUntil: 1 } },
 };
 
 let ok = true;
@@ -47,7 +49,9 @@ for (const [id, cell] of Object.entries(cells)) {
     const sim = new Simulator(model, ctx);
 
     const svg = fakeNode('svg');
-    const schem = createSchematic(svg, model, { onTransporterClick: () => {} });
+    const posCanvas = { getContext: () => ctx2d, width: 0, height: 0, clientWidth: 900, clientHeight: 120, hidden: true };
+    const makeSchematic = cell.view.createSchematic || createSchematic;
+    const schem = makeSchematic(svg, model, { onTransporterClick: () => {}, posCanvas, ctx });
     const canvas = { getContext: () => ctx2d, width: 0, height: 0, clientWidth: 900, clientHeight: 260, style: {} };
     const plots = createPlots(canvas, { windowSpan: cell.view.plotWindow, timeLabel: cell.view.timeLabel, axes: cell.view.plotAxes });
     plots.setSeries(cell.view.series.map((s) => ({ ...s })));

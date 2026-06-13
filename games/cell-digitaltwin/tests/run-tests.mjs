@@ -9,6 +9,7 @@ const read = (f) => JSON.parse(readFileSync(resolve(__dirname, f), 'utf8'));
 const paramsMap = {
   erythrocyte: read('../data/erythrocyte.params.json'),
   cardiomyocyte: read('../data/cardiomyocyte.params.json'),
+  neuron: read('../data/neuron.params.json'),
 };
 
 const results = runAll(paramsMap);
