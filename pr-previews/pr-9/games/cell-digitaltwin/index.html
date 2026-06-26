@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cell Digital Twin</title>
-    <script type="module" crossorigin src="/games/pr-previews/pr-9/assets/games/cell-digitaltwin-CiSPP_Ly.js"></script>
+    <script type="module" crossorigin src="/games/pr-previews/pr-9/assets/games/cell-digitaltwin-DhxFH9Gc.js"></script>
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-9/assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-9/assets/neuron-DiKgIFDP.js">
-    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-9/assets/cell-digitaltwin-DO4gi5MH.css">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-9/assets/mitochondrion-BUC5tlgi.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-9/assets/cell-digitaltwin-BOpVusKX.css">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-9/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -175,6 +175,27 @@
                 input, or click a compartment to move the injection site. The node
                 compartments are coarsened above their ~1 µm anatomy so the
                 explicit cable stays numerically stable.
+              </p>
+              <p>
+                The mitochondrion is the Cortassa–Aon–Marbán–Winslow–O'Rourke
+                (2003) integrated model: the full TCA cycle (citrate synthase
+                through malate dehydrogenase, with Ca²⁺-sensitive isocitrate and
+                α-ketoglutarate dehydrogenases) feeds NADH/FADH₂ to the
+                electron-transport chain, which pumps protons to charge the
+                inner-membrane potential ΔΨm; the F₁F₀-ATP synthase, adenine
+                nucleotide translocase and proton leak discharge it, and the Ca²⁺
+                uniporter and Na⁺/Ca²⁺ exchanger set matrix Ca²⁺. Every TCA,
+                oxidative-phosphorylation and Ca²⁺ equation and parameter is taken
+                from the model's CellML encoding; two documented curation fixes are
+                applied (the Na⁺/Ca²⁺ exchanger direction and a consistent
+                3 H⁺:ATP coupling of the synthase). A reactive-oxygen-species
+                module (after Cortassa 2004 / Zhou 2009) and a Ca²⁺/ROS-gated
+                permeability transition pore (after Pokhilko 2006 / Bernardi 2015)
+                use the published functional forms with parameters calibrated for
+                stable, visible behaviour. Add ADP to drive state-3 respiration,
+                block a complex (rotenone, cyanide, oligomycin), uncouple with
+                FCCP, or overload with Ca²⁺ to open the pore. State variables are
+                bounded to their conserved pools each step.
               </p>
             </div>
           </details>
