@@ -1,0 +1,100 @@
+{
+  "_note": "Myelinated mammalian neuron: a multi-compartment Hodgkin-Huxley cable. Channel kinetics follow Pospischil et al. 2008 (I_Na, I_Kd, I_L Ca) at a reference 36 C with a voltage-threshold V_T; the transient A-type K+ current uses Connor-Stevens 1971 kinetics; the hyperpolarization-activated I_h follows Destexhe et al. 1993; the Ca2+-activated K+ current (SK) is an instantaneous Hill function of [Ca2+]i. Morphology (node/internode densities, ~100x-diameter internode spacing, ~70 ohm-cm axoplasm) follows McIntyre-Richardson-Grill 2002; axial coupling is cable theory (Rall 1962). Gating is advanced by Rush-Larsen, V and concentrations by RK4. Units: V in mV, t in ms, length in um, currents in uA, conductances in mS, capacitance in uF, concentrations in mM; densities are per cm^2 and multiplied by each compartment's membrane area.",
+
+  "physical": {
+    "T": { "value": 310.15, "units": "K", "symbol": "T", "ref": "pospischil_2008", "note": "Body temperature (37 C); used for Nernst potentials." },
+    "Tref": { "value": 309.15, "units": "K", "symbol": "T_ref", "ref": "pospischil_2008", "note": "Reference temperature (36 C) at which the gating rate equations are defined; Q10 scales kinetics away from this." },
+    "F": { "value": 96485, "units": "C/mol", "symbol": "F", "ref": "hodgkin_huxley_1952", "note": "Faraday constant." },
+    "R": { "value": 8.314, "units": "J/mol/K", "symbol": "R", "ref": "hodgkin_huxley_1952", "note": "Gas constant." },
+    "Q10": { "value": 3.0, "units": "", "symbol": "Q10", "ref": "hodgkin_huxley_1952", "note": "Temperature coefficient for gating kinetics; phi = Q10^((T-Tref)/10) divides every gating time constant." },
+    "cm": { "value": 1.0, "units": "uF/cm^2", "symbol": "C_m", "ref": "mcintyre_richardson_grill_2002", "note": "Specific membrane capacitance of unmyelinated membrane (node/soma/dendrite). Internodes use cm_myelin." },
+    "cm_myelin": { "value": 0.1, "units": "uF/cm^2", "symbol": "C_myelin", "ref": "mcintyre_richardson_grill_2002", "note": "Effective specific capacitance of a myelinated internode (myelin layers in series); ~25x lower than bare membrane." },
+    "Ri": { "value": 70, "units": "ohm*cm", "symbol": "R_i", "ref": "mcintyre_richardson_grill_2002", "note": "Axoplasmic (cytoplasmic) resistivity; sets axial coupling conductance g_ax = (cross-sectional area)/(R_i * length)." }
+  },
+
+  "bath": {
+    "Nao": { "value": 145, "units": "mM", "symbol": "[Na]o", "ref": "pospischil_2008", "note": "Extracellular Na+ (adjustable in sandbox)." },
+    "Ko": { "value": 4.0, "units": "mM", "symbol": "[K]o", "ref": "pospischil_2008", "note": "Extracellular K+ (adjustable; raising it depolarizes E_K -> hyperkalemia)." },
+    "Cao": { "value": 2.0, "units": "mM", "symbol": "[Ca]o", "ref": "pospischil_2008", "note": "Extracellular Ca2+." }
+  },
+
+  "rest": {
+    "Vrest": { "value": -68, "units": "mV", "symbol": "V_rest", "ref": "pospischil_2008", "note": "Target resting potential; the leak reversal E_leak is solved at build so total current is zero here." },
+    "Nai": { "value": 12, "units": "mM", "symbol": "[Na]i", "ref": "pospischil_2008", "note": "Resting intracellular Na+." },
+    "Ki": { "value": 140, "units": "mM", "symbol": "[K]i", "ref": "pospischil_2008", "note": "Resting intracellular K+." },
+    "Cai": { "value": 5.0e-5, "units": "mM", "symbol": "[Ca]i", "ref": "destexhe_babloyantz_1993", "note": "Resting free intracellular Ca2+ (50 nM)." }
+  },
+
+  "gates": {
+    "VT": { "value": -58, "units": "mV", "symbol": "V_T", "ref": "pospischil_2008", "note": "Spike-threshold shift parameter in the Na+/Kd rate equations; more negative lowers threshold." }
+  },
+
+  "channels": {
+    "ENa_note": { "value": 0, "units": "", "symbol": "", "ref": "pospischil_2008", "note": "Na+/K+/Ca2+ reversal potentials are computed from the Nernst equation each step from the dynamic concentrations." },
+    "E_K": { "value": -90, "units": "mV", "symbol": "E_K", "ref": "pospischil_2008", "note": "Nominal K+ reversal (recomputed from concentrations); used for I_Kd, I_A, SK." },
+    "E_Ca": { "value": 120, "units": "mV", "symbol": "E_Ca", "ref": "pospischil_2008", "note": "Nominal Ca2+ reversal (recomputed from concentrations)." },
+    "E_h": { "value": -43, "units": "mV", "symbol": "E_h", "ref": "destexhe_babloyantz_1993", "note": "Reversal potential of the mixed-cation H-current." },
+    "E_leak": { "value": -74, "units": "mV", "symbol": "E_leak", "ref": "pospischil_2008", "note": "Passive leak reversal potential; together with the K+ channels it sets the resting potential near -68 mV." },
+    "SK_Kd": { "value": 4.0e-4, "units": "mM", "symbol": "K_Ca", "ref": "hoffman_2003", "note": "Half-activation [Ca2+]i of the Ca2+-activated K+ (SK) current (0.4 uM)." },
+    "SK_n": { "value": 4, "units": "", "symbol": "n_SK", "ref": "hoffman_2003", "note": "Hill coefficient of SK Ca2+ activation." }
+  },
+
+  "density": {
+    "_note": "Maximal conductance densities (mS/cm^2) per channel and region. Nodes/soma/hillock carry the active spiking conductances; internodes are nearly passive (myelin), with small shunt conductances. Dendrites carry sub-threshold channels (Ca, SK, A, h).",
+    "gNa_node": { "value": 350, "units": "mS/cm^2", "symbol": "g_Na(node)", "ref": "mcintyre_richardson_grill_2002", "note": "Fast Na+ density at nodes of Ranvier and the axon hillock (spike initiation/regeneration)." },
+    "gNa_soma": { "value": 80, "units": "mS/cm^2", "symbol": "g_Na(soma)", "ref": "pospischil_2008", "note": "Fast Na+ density at the soma." },
+    "gNa_dend": { "value": 12, "units": "mS/cm^2", "symbol": "g_Na(dend)", "ref": "pospischil_2008", "note": "Fast Na+ density in dendrites (low; mostly passive/integrative)." },
+    "gNa_inter": { "value": 1.0, "units": "mS/cm^2", "symbol": "g_Na(intern)", "ref": "mcintyre_richardson_grill_2002", "note": "Residual Na+ under myelin (internode); ~0." },
+    "gKd_node": { "value": 100, "units": "mS/cm^2", "symbol": "g_Kd(node)", "ref": "mcintyre_richardson_grill_2002", "note": "Delayed-rectifier K+ density at nodes/hillock." },
+    "gKd_soma": { "value": 7, "units": "mS/cm^2", "symbol": "g_Kd(soma)", "ref": "pospischil_2008", "note": "Delayed-rectifier K+ density at the soma." },
+    "gKd_dend": { "value": 3, "units": "mS/cm^2", "symbol": "g_Kd(dend)", "ref": "pospischil_2008", "note": "Delayed-rectifier K+ density in dendrites." },
+    "gA": { "value": 1.0, "units": "mS/cm^2", "symbol": "g_A", "ref": "connor_stevens_1971", "note": "Transient A-type K+ density (soma + dendrites); delays firing and lengthens the inter-spike interval." },
+    "gCaL": { "value": 0.8, "units": "mS/cm^2", "symbol": "g_CaL", "ref": "pospischil_2008", "note": "High-threshold L-type Ca2+ density (soma + dendrites); raises [Ca2+]i during spikes to recruit SK." },
+    "gSK": { "value": 6, "units": "mS/cm^2", "symbol": "g_SK", "ref": "hoffman_2003", "note": "Ca2+-activated K+ (SK) density (soma + dendrites); the source of spike-frequency adaptation." },
+    "gH": { "value": 2.0, "units": "mS/cm^2", "symbol": "g_h", "ref": "destexhe_babloyantz_1993", "note": "Hyperpolarization-activated cation (I_h) density (soma + dendrites); produces sag and rebound." },
+    "gLeak": { "value": 0.5, "units": "mS/cm^2", "symbol": "g_leak", "ref": "mcintyre_richardson_grill_2002", "note": "Passive leak density of bare membrane; E_leak is solved so rest is a fixed point." },
+    "gLeak_inter": { "value": 0.006, "units": "mS/cm^2", "symbol": "g_leak(intern)", "ref": "mcintyre_richardson_grill_2002", "note": "Leak density under myelin (high membrane resistance)." }
+  },
+
+  "pump": {
+    "iMax": { "value": 2.0, "units": "uA/cm^2", "symbol": "i_NaK", "ref": "mcintyre_richardson_grill_2002", "note": "Maximal electrogenic Na+/K+-ATPase current density. Net outward (3 Na+ out / 2 K+ in per cycle = +1 charge out). Activated by [Na]i and [K]o." },
+    "Km_Nai": { "value": 10, "units": "mM", "symbol": "K_mNa", "ref": "post_1972", "note": "Half-activation internal Na+ for the pump." },
+    "n_Na": { "value": 1.5, "units": "", "symbol": "n_Na", "ref": "post_1972", "note": "Hill coefficient for internal Na+ activation." },
+    "Km_Ko": { "value": 1.5, "units": "mM", "symbol": "K_mK", "ref": "post_1972", "note": "Half-activation external K+ for the pump." }
+  },
+
+  "conc": {
+    "buffer": { "value": 20, "units": "", "symbol": "beta", "ref": "destexhe_babloyantz_1993", "note": "Effective ionic buffering / submembrane-shell factor: per-compartment ion changes are scaled by 1/beta, representing buffering and the thin sub-membrane shell that actually equilibrates on the spike timescale." },
+    "kRelax": { "value": 0.0015, "units": "1/ms", "symbol": "k_homeo", "ref": "mcintyre_richardson_grill_2002", "note": "Slow homeostatic relaxation of [Na]i/[K]i back to rest (tau ~ 0.7 s), representing longer-timescale regulation; small enough that single spikes still move ions." },
+    "caRelax": { "value": 0.02, "units": "1/ms", "symbol": "k_Ca", "ref": "luo_rudy_1991", "note": "Lumped Ca2+ buffering/uptake relaxation rate toward resting [Ca2+]i." },
+    "dLong": { "value": 0.002, "units": "1/ms", "symbol": "D_axial", "ref": "rall_1962", "note": "Longitudinal diffusion coupling of intracellular ions between neighbouring compartments (smooths local depletion)." }
+  },
+
+  "geometry": {
+    "_note": "Lengths and diameters in micrometres; counts are integers. Compartment order: dendrite x n_dend, soma, hillock, then (node, internode) repeated with a node at both ends of the myelinated axon.",
+    "dend_L": { "value": 150, "units": "um", "symbol": "L_dend", "ref": "rall_1962", "note": "Dendrite compartment length." },
+    "dend_d": { "value": 2.0, "units": "um", "symbol": "d_dend", "ref": "rall_1962", "note": "Dendrite diameter." },
+    "n_dend": { "value": 2, "units": "", "symbol": "N_dend", "ref": "rall_1962", "note": "Number of dendrite compartments (synapse target)." },
+    "soma_d": { "value": 20, "units": "um", "symbol": "d_soma", "ref": "pospischil_2008", "note": "Soma diameter (modelled as a sphere)." },
+    "hillock_L": { "value": 15, "units": "um", "symbol": "L_hill", "ref": "mcintyre_richardson_grill_2002", "note": "Axon-hillock / initial-segment length (spike initiation zone)." },
+    "hillock_d": { "value": 2.0, "units": "um", "symbol": "d_hill", "ref": "mcintyre_richardson_grill_2002", "note": "Axon-hillock diameter." },
+    "node_L": { "value": 10, "units": "um", "symbol": "L_node", "ref": "mcintyre_richardson_grill_2002", "note": "Node-of-Ranvier compartment length. Coarsened above the ~1 um anatomical node so the explicit cable integrator stays stable (node and internode capacitances are comparable); the node/internode membrane distinction that produces saltatory conduction is preserved." },
+    "axon_d": { "value": 1.4, "units": "um", "symbol": "d_axon", "ref": "mcintyre_richardson_grill_2002", "note": "Axon diameter (node and internode)." },
+    "internode_L": { "value": 45, "units": "um", "symbol": "L_inter", "ref": "mcintyre_richardson_grill_2002", "note": "Myelinated internode compartment length (coarsened from the ~100 um anatomical internode to keep the explicit cable stable)." },
+    "n_nodes": { "value": 6, "units": "", "symbol": "N_nodes", "ref": "mcintyre_richardson_grill_2002", "note": "Number of nodes of Ranvier; internodes = n_nodes - 1." }
+  },
+
+  "stim": {
+    "amplitude": { "value": 0.8, "units": "nA", "symbol": "I_stim", "ref": "pospischil_2008", "note": "Default current-clamp stimulus amplitude (injected, inward-positive) at the chosen compartment." },
+    "duration": { "value": 1.0, "units": "ms", "symbol": "t_stim", "ref": "pospischil_2008", "note": "Stimulus pulse width." },
+    "bcl": { "value": 60, "units": "ms", "symbol": "BCL", "ref": "pospischil_2008", "note": "Default basic cycle length for periodic pacing." }
+  },
+
+  "synapse": {
+    "gE": { "value": 4.0, "units": "nS", "symbol": "g_E", "ref": "destexhe_babloyantz_1993", "note": "Peak excitatory (AMPA-like) synaptic conductance on the dendrite; reversal 0 mV." },
+    "gI": { "value": 6.0, "units": "nS", "symbol": "g_I", "ref": "destexhe_babloyantz_1993", "note": "Peak inhibitory (GABA-like) synaptic conductance on the dendrite; reversal -75 mV." },
+    "E_E": { "value": 0, "units": "mV", "symbol": "E_exc", "ref": "destexhe_babloyantz_1993", "note": "Excitatory synaptic reversal potential." },
+    "E_I": { "value": -75, "units": "mV", "symbol": "E_inh", "ref": "destexhe_babloyantz_1993", "note": "Inhibitory synaptic reversal potential." },
+    "tau": { "value": 3.0, "units": "ms", "symbol": "tau_syn", "ref": "destexhe_babloyantz_1993", "note": "Synaptic conductance decay time constant." }
+  }
+}

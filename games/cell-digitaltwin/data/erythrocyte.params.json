@@ -1,0 +1,102 @@
+{
+  "_note": "Every numeric value used by the erythrocyte model. Each carries units, the symbol used in code, a reference key (see references.json), and a short justification. Values are physiologically representative human-RBC values at 37 C; some kinetic constants are rounded/illustrative and are flagged as such. ref keys map into references.json.",
+
+  "physical": {
+    "T":  { "value": 310,    "units": "K",        "symbol": "T",  "ref": "alberts_mboc", "note": "Body temperature, 37 C." },
+    "F":  { "value": 96485,  "units": "C/mol",    "symbol": "F",  "ref": "goldman_1943", "note": "Faraday constant." },
+    "R":  { "value": 8.314,  "units": "J/mol/K",  "symbol": "R",  "ref": "goldman_1943", "note": "Gas constant." }
+  },
+
+  "geometry": {
+    "V_cyto0":   { "value": 9.0e-14, "units": "L",       "symbol": "Vc0", "ref": "lew_bookchin_1986", "note": "Resting red-cell water volume ~90 fL (mean cell volume; water fraction ~0.7 of 130 fL total handled as effective osmotic water)." },
+    "V_plasma":  { "value": 9.0e-13, "units": "L",       "symbol": "Vp",  "ref": "lew_bookchin_1986", "note": "Finite extracellular bath per cell (10x cell volume) so totals are conserved; large enough that bulk plasma is nearly clamped." },
+    "area":      { "value": 1.4e-6,  "units": "cm^2",    "symbol": "A",   "ref": "alberts_mboc",      "note": "Red-cell surface area ~140 um^2 (biconcave disc)." },
+    "Cm":        { "value": 1.0,     "units": "uF/cm^2", "symbol": "Cm",  "ref": "hodgkin_huxley_1952","note": "Specific membrane capacitance, ~1 uF/cm^2 (used only for Vm dynamics; RBC Vm is solved at quasi-steady state)." }
+  },
+
+  "plasma": {
+    "Na":  { "value": 140,   "units": "mM",  "symbol": "Nao",  "ref": "alberts_mboc", "note": "Plasma [Na+]." },
+    "K":   { "value": 5.0,   "units": "mM",  "symbol": "Ko",   "ref": "alberts_mboc", "note": "Plasma [K+]." },
+    "Cl":  { "value": 116,   "units": "mM",  "symbol": "Clo",  "ref": "alberts_mboc", "note": "Plasma [Cl-]." },
+    "Ca":  { "value": 1.2,   "units": "mM",  "symbol": "Cao",  "ref": "alberts_mboc", "note": "Plasma free [Ca2+]." },
+    "HCO3":{ "value": 24,    "units": "mM",  "symbol": "HCO3o","ref": "alberts_mboc", "note": "Plasma [HCO3-]." },
+    "glucose": { "value": 5.0, "units": "mM","symbol": "Glco", "ref": "alberts_mboc", "note": "Plasma glucose." },
+    "pH":  { "value": 7.4,   "units": "",    "symbol": "pHo",  "ref": "alberts_mboc", "note": "Plasma pH." }
+  },
+
+  "cyto_init": {
+    "Na":  { "value": 10,    "units": "mM",  "symbol": "Nai",  "ref": "lew_bookchin_1986", "note": "Resting intracellular [Na+]." },
+    "K":   { "value": 140,   "units": "mM",  "symbol": "Ki",   "ref": "lew_bookchin_1986", "note": "Resting intracellular [K+]." },
+    "Cl":  { "value": 75,    "units": "mM",  "symbol": "Cli",  "ref": "lew_bookchin_1986", "note": "Resting intracellular [Cl-] (Donnan-distributed below plasma)." },
+    "Ca":  { "value": 5.0e-5,"units": "mM",  "symbol": "Cai",  "ref": "tiffert_lew_2001",  "note": "Resting free [Ca2+]i ~ 50 nM, kept low by PMCA." },
+    "HCO3":{ "value": 16,    "units": "mM",  "symbol": "HCO3i","ref": "alberts_mboc",       "note": "Intracellular [HCO3-] (chloride-shift partner)." },
+    "glucose": { "value": 5.0, "units": "mM","symbol": "Glci", "ref": "lowe_walmsley_1986", "note": "Intracellular glucose (near plasma at rest; GLUT1 near-equilibrative)." },
+    "X":   { "value": 0,     "units": "mM",  "symbol": "Xi",   "ref": "lew_bookchin_1986", "note": "Impermeant intracellular anion (mostly hemoglobin + organic phosphates); amount fixed, concentration computed for electroneutrality at init." },
+    "zX":  { "value": -1.6,  "units": "",    "symbol": "zX",   "ref": "lew_bookchin_1986", "note": "Mean valence of the impermeant anion pool at pH 7.2 (effective)." }
+  },
+
+  "metabolites_init": {
+    "ATP":  { "value": 1.8,  "units": "mM", "symbol": "ATP",  "ref": "mulquiney_kuchel_1999", "note": "Resting [ATP] ~1.5-2.3 mM." },
+    "ADP":  { "value": 0.20, "units": "mM", "symbol": "ADP",  "ref": "mulquiney_kuchel_1999", "note": "Resting [ADP] ~0.15-0.25 mM." },
+    "Pi":   { "value": 1.0,  "units": "mM", "symbol": "Pi",   "ref": "mulquiney_kuchel_1999", "note": "Inorganic phosphate." },
+    "BPG23":{ "value": 5.0,  "units": "mM", "symbol": "BPG",  "ref": "mulquiney_kuchel_1999", "note": "2,3-bisphosphoglycerate (Rapoport-Luebering shunt), ~4-5 mM." },
+    "lactate": { "value": 1.0, "units": "mM", "symbol": "Lac", "ref": "joshi_palsson_1989", "note": "Intracellular lactate." },
+    "NADH": { "value": 0.03, "units": "mM", "symbol": "NADH", "ref": "joshi_palsson_1989", "note": "Free NADH (small; most NAD is oxidized)." },
+    "NAD":  { "value": 0.06, "units": "mM", "symbol": "NAD",  "ref": "joshi_palsson_1989", "note": "Free NAD+." }
+  },
+
+  "nakatpase": {
+    "Imax":   { "value": 0.052, "units": "mmol/L_cell/min", "symbol": "Jpump_max", "ref": "lew_bookchin_1986", "note": "Max Na+/K+-ATPase turnover (max Na+ efflux; K+ influx = 2/3 of this). ~2-3 mmol Na/L_cell/h, balancing the passive Na+ leak at the resting [Na+]i=10 mM (pump-leak steady state)." },
+    "Km_Nai": { "value": 12,   "units": "mM",  "symbol": "Km_Nai", "ref": "post_1972", "note": "Half-activating internal [Na+]." },
+    "Km_Ko":  { "value": 1.5,  "units": "mM",  "symbol": "Km_Ko",  "ref": "post_1972", "note": "Half-activating external [K+]." },
+    "Km_ATP": { "value": 0.1,  "units": "mM",  "symbol": "Km_ATP", "ref": "post_1972", "note": "Half-activating [ATP]." },
+    "n_Na":   { "value": 3,    "units": "",    "symbol": "nNa", "ref": "garrahan_glynn_1967", "note": "Hill coefficient (3 Na+ sites)." },
+    "n_K":    { "value": 2,    "units": "",    "symbol": "nK",  "ref": "garrahan_glynn_1967", "note": "Hill coefficient (2 K+ sites)." },
+    "stoich_Na": { "value": 3, "units": "",    "symbol": "sNa", "ref": "garrahan_glynn_1967", "note": "3 Na+ out per cycle." },
+    "stoich_K":  { "value": 2, "units": "",    "symbol": "sK",  "ref": "garrahan_glynn_1967", "note": "2 K+ in per cycle." }
+  },
+
+  "leaks": {
+    "P_Na": { "value": 1.1e-10, "units": "cm/s", "symbol": "PNa", "ref": "lew_bookchin_1986", "note": "Passive Na+ permeability (GHK). Tuned with pump for resting [Na+]i." },
+    "P_K":  { "value": 1.1e-10, "units": "cm/s", "symbol": "PK",  "ref": "lew_bookchin_1986", "note": "Passive (background) K+ permeability (GHK). Matched to P_Na so the 3:2 pump stoichiometry balances both leaks simultaneously at rest." },
+    "P_Cl": { "value": 1.5e-6,  "units": "cm/s", "symbol": "PCl", "ref": "jennings_1989",      "note": "Very high effective Cl- permeability via Band 3; keeps Cl- near electrochemical equilibrium and sets Vm." },
+    "P_Ca": { "value": 6.0e-10, "units": "cm/s", "symbol": "PCa", "ref": "tiffert_lew_2001",    "note": "Tiny passive Ca2+ leak into the cell, balanced at rest by PMCA; together they set resting [Ca2+]i ~ 50 nM. Both Ca2+ fluxes are small (~uM/L_cell/min) in the RBC." }
+  },
+
+  "gardos": {
+    "g_max": { "value": 2.0e-8, "units": "cm/s", "symbol": "gGardos", "ref": "hoffman_2003", "note": "Max Gardos (KCa3.1) K+ permeability when fully Ca2+-activated." },
+    "K0p5_Ca": { "value": 4.0e-4, "units": "mM", "symbol": "KdCa", "ref": "hoffman_2003", "note": "Half-activating [Ca2+]i ~0.4 uM (Hill activation). Sub-micromolar; illustrative." },
+    "n_Ca":  { "value": 2,      "units": "",     "symbol": "nCaGardos", "ref": "hoffman_2003", "note": "Hill coefficient for Ca2+ activation." }
+  },
+
+  "pmca": {
+    "Imax":  { "value": 0.02,  "units": "mmol/L_cell/min", "symbol": "JpmcaMax", "ref": "tiffert_lew_2001", "note": "Max PMCA Ca2+ extrusion rate. Small in absolute terms because RBC Ca2+ turnover is low; high affinity keeps free [Ca2+]i ~ 50 nM. Balanced at rest against the passive Ca2+ leak." },
+    "Km_Cai":{ "value": 2.0e-4,"units": "mM", "symbol": "Km_Cai", "ref": "tiffert_lew_2001", "note": "Half-activating internal [Ca2+] ~0.2 uM." },
+    "n_Ca":  { "value": 2,     "units": "",   "symbol": "nCaPmca", "ref": "tiffert_lew_2001", "note": "Hill coefficient." }
+  },
+
+  "glut1": {
+    "Vmax": { "value": 30.0, "units": "mmol/L_cell/min", "symbol": "VmaxGlut", "ref": "lowe_walmsley_1986", "note": "Max GLUT1 facilitated-diffusion rate (high; transport is near-equilibrative)." },
+    "Km":   { "value": 1.5,  "units": "mM", "symbol": "KmGlut", "ref": "lowe_walmsley_1986", "note": "Zero-trans Km ~1-2 mM for glucose." }
+  },
+
+  "band3": {
+    "k_exchange": { "value": 40.0, "units": "1/min", "symbol": "kB3", "ref": "jennings_1989", "note": "Effective (normalised) Cl-/HCO3- exchange rate; fast relative to pump-leak so the two anions stay near their equilibrium ratio (electroneutral antiport). Lumped from the very high Band 3 turnover." }
+  },
+
+  "water": {
+    "Lp": { "value": 1.0e-3, "units": "L/L_cell/min/mosM", "symbol": "Lp", "ref": "lew_bookchin_1986", "note": "Effective osmotic water permeability lumped constant; volume relaxes to osmotic balance fast vs ion changes." }
+  },
+
+  "glycolysis": {
+    "Vmax_HK": { "value": 1.2,  "units": "mmol/L_cell/min", "symbol": "VmaxHK", "ref": "joshi_palsson_1989", "note": "Lumped upper-glycolysis (hexokinase-limited) flux Vmax; sets overall glucose consumption ~1-2 mmol/L_cell/h scaled." },
+    "Km_Glc":  { "value": 0.1,  "units": "mM", "symbol": "KmGlcHK", "ref": "joshi_palsson_1989", "note": "Hexokinase Km for glucose (~0.05-0.1 mM)." },
+    "Km_ATP_gly": { "value": 0.5, "units": "mM", "symbol": "KmATPgly", "ref": "joshi_palsson_1989", "note": "ATP requirement for upper glycolysis (hexokinase/PFK use ATP)." },
+    "Km_ADP_gly": { "value": 0.1, "units": "mM", "symbol": "KmADPgly", "ref": "joshi_palsson_1989", "note": "ADP requirement for the ATP-generating (lower glycolysis) steps; couples flux to ADP supply and bounds the adenine pool." },
+    "k_lactate_efflux": { "value": 1.5, "units": "1/min", "symbol": "kLac", "ref": "joshi_palsson_1989", "note": "Lumped lactate clearance (MCT1 export + downstream removal), keeping intracellular lactate near steady state." },
+    "f_BPG":   { "value": 0.15, "units": "", "symbol": "fBPG", "ref": "mulquiney_kuchel_1999", "note": "Fraction of flux diverted through the 2,3-BPG (Rapoport-Luebering) shunt at rest." },
+    "k_BPG_deg": { "value": 0.03, "units": "1/min", "symbol": "kBPGdeg", "ref": "mulquiney_kuchel_1999", "note": "2,3-BPG phosphatase turnover returning BPG to the main pathway." },
+    "ATP_yield": { "value": 2, "units": "ATP/glucose", "symbol": "yATP", "ref": "joshi_palsson_1989", "note": "Net ATP per glucose via anaerobic glycolysis (RBC has no mitochondria); BPG shunt bypasses one ATP-generating step." },
+    "k_ATPase_load": { "value": 0.6, "units": "1/min", "symbol": "kLoad", "ref": "joshi_palsson_1989", "note": "Basal (non-pump) ATP consumption load." }
+  }
+}

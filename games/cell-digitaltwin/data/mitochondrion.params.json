@@ -1,0 +1,928 @@
+{
+  "_note": "Mitochondrion: the Cortassa-Aon-Marban-Winslow-O'Rourke (2003) integrated model of cardiac mitochondrial energy metabolism and Ca2+ dynamics (Biophys J 84:2734). The TCA cycle, oxidative phosphorylation (ETC proton pumping, F1F0-ATPase, ANT, proton leak) and Ca2+ handling (uniporter, Na+/Ca2+ exchanger) are coupled through the inner-membrane potential delta-psi. Every value below is taken verbatim from the authoritative Physiome/CellML encoding of the model. Two documented curation fixes are applied in the code: the Na+/Ca2+ exchanger uses the [Ca]m/[Ca]i ratio (matrix efflux), and the F1F0 fluxes are signed for net ATP synthesis. A reactive-oxygen-species module (after Cortassa 2004 / Zhou 2009: shunt production, SOD scavenging, ROS-activated inner-membrane anion channel) and a permeability transition pore (Ca/ROS-gated, after Bernardi 2015 / Pokhilko 2006) use the published functional forms with calibrated parameters. Units: concentrations mM (Ca and its affinity constants uM), fluxes mM/s, potentials V, time s.",
+  "physical": {
+    "R": {
+      "value": 8.315,
+      "units": "J/mol/K",
+      "symbol": "R",
+      "ref": "cortassa_2003",
+      "note": "Gas constant (RT/F gives volts)."
+    },
+    "T": {
+      "value": 310.16,
+      "units": "K",
+      "symbol": "T",
+      "ref": "cortassa_2003",
+      "note": "Temperature (37 C)."
+    },
+    "F": {
+      "value": 96480,
+      "units": "C/mol",
+      "symbol": "F",
+      "ref": "cortassa_2003",
+      "note": "Faraday constant."
+    },
+    "C_mito": {
+      "value": 1.812,
+      "units": "mM/V",
+      "symbol": "C_mito",
+      "ref": "cortassa_2003",
+      "note": "Inner-membrane capacitance: d(delta-psi)/dt = (sum of charge fluxes)/C_mito."
+    }
+  },
+  "pools": {
+    "Cm": {
+      "value": 15.0,
+      "units": "mM",
+      "symbol": "C_A",
+      "ref": "cortassa_2003",
+      "note": "Total matrix adenine pool; ATP_m = Cm - ADP_m."
+    },
+    "C_PN": {
+      "value": 10.0,
+      "units": "mM",
+      "symbol": "C_PN",
+      "ref": "cortassa_2003",
+      "note": "Total pyridine-nucleotide pool; NAD = C_PN - NADH."
+    },
+    "C_Kint": {
+      "value": 1.0,
+      "units": "mM",
+      "symbol": "C_Kint",
+      "ref": "cortassa_2003",
+      "note": "Total Krebs-cycle intermediate pool; citrate = C_Kint - (ISOC+aKG+SCoA+Suc+FUM+MAL+OAA)."
+    }
+  },
+  "fixed": {
+    "H": {
+      "value": 2.5e-05,
+      "units": "mM",
+      "symbol": "[H+]m",
+      "ref": "cortassa_2003",
+      "note": "Matrix proton concentration (~pH 7.6)."
+    },
+    "Pi": {
+      "value": 20.0,
+      "units": "mM",
+      "symbol": "[Pi]",
+      "ref": "cortassa_2003",
+      "note": "Inorganic phosphate."
+    },
+    "Mg": {
+      "value": 0.4,
+      "units": "mM",
+      "symbol": "[Mg]",
+      "ref": "cortassa_2003",
+      "note": "Free matrix Mg2+."
+    },
+    "CoA": {
+      "value": 0.02,
+      "units": "mM",
+      "symbol": "[CoA]",
+      "ref": "cortassa_2003",
+      "note": "Coenzyme A."
+    },
+    "GLU": {
+      "value": 20,
+      "units": "mM",
+      "symbol": "[GLU]",
+      "ref": "cortassa_2003",
+      "note": "Glutamate (for aspartate aminotransferase)."
+    },
+    "FAD": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[FAD]",
+      "ref": "cortassa_2003",
+      "note": "Oxidised flavin (complex-II arm)."
+    },
+    "FADH2": {
+      "value": 1.24,
+      "units": "mM",
+      "symbol": "[FADH2]",
+      "ref": "cortassa_2003",
+      "note": "Reduced flavin (clamped FADH2/FAD redox driving V_He_F)."
+    },
+    "Na_i": {
+      "value": 10.0,
+      "units": "mM",
+      "symbol": "[Na]i",
+      "ref": "cortassa_2003",
+      "note": "Cytosolic Na+ (for the Na+/Ca2+ exchanger)."
+    },
+    "ATP_i": {
+      "value": 6.5,
+      "units": "mM",
+      "symbol": "[ATP]i",
+      "ref": "cortassa_2003",
+      "note": "Cytosolic ATP (for the ANT)."
+    },
+    "delta_pH": {
+      "value": -0.6,
+      "units": "",
+      "symbol": "ΔpH",
+      "ref": "cortassa_2003",
+      "note": "pH difference across the inner membrane (enters delta-mu-H)."
+    }
+  },
+  "cyto": {
+    "AcCoA": {
+      "value": 0.0002,
+      "units": "mM",
+      "symbol": "[AcCoA]",
+      "ref": "cortassa_2003",
+      "note": "Acetyl-CoA — the carbon substrate fed to citrate synthase (the 'substrate supply')."
+    },
+    "ADP_i": {
+      "value": 0.05,
+      "units": "mM",
+      "symbol": "[ADP]i",
+      "ref": "cortassa_2003",
+      "note": "Cytosolic ADP. Low (~0.05) = state 4 (resting); a pulse to ~0.15+ drives state-3 respiration."
+    },
+    "Ca_i": {
+      "value": 0.1,
+      "units": "uM",
+      "symbol": "[Ca]i",
+      "ref": "cortassa_2003",
+      "note": "Cytosolic Ca2+. Resting ~0.1 uM; pulses drive matrix Ca2+ uptake and (under overload) the permeability transition."
+    }
+  },
+  "CS": {
+    "Kcat_CS": {
+      "value": 3.2,
+      "units": "1/s",
+      "symbol": "kcat_CS",
+      "ref": "cortassa_2003",
+      "note": "Citrate synthase turnover."
+    },
+    "ET_CS": {
+      "value": 0.4,
+      "units": "mM",
+      "symbol": "ET_CS",
+      "ref": "cortassa_2003",
+      "note": "Citrate synthase concentration."
+    },
+    "Km_AcCoA": {
+      "value": 0.0126,
+      "units": "mM",
+      "symbol": "Km_AcCoA",
+      "ref": "cortassa_2003",
+      "note": "Km for acetyl-CoA."
+    },
+    "Km_OAA": {
+      "value": 0.00064,
+      "units": "mM",
+      "symbol": "Km_OAA",
+      "ref": "cortassa_2003",
+      "note": "Km for oxaloacetate."
+    }
+  },
+  "ACO": {
+    "Kf_ACO": {
+      "value": 12.5,
+      "units": "1/s",
+      "symbol": "kf_ACO",
+      "ref": "cortassa_2003",
+      "note": "Aconitase forward rate (citrate <-> isocitrate)."
+    },
+    "KE_ACO": {
+      "value": 2.22,
+      "units": "",
+      "symbol": "Keq_ACO",
+      "ref": "cortassa_2003",
+      "note": "Aconitase equilibrium constant."
+    }
+  },
+  "IDH": {
+    "Kcat_IDH": {
+      "value": 1.94,
+      "units": "1/s",
+      "symbol": "kcat_IDH",
+      "ref": "cortassa_2003",
+      "note": "Isocitrate dehydrogenase turnover (NADH-producing, Ca/ADP-activated)."
+    },
+    "ET_IDH": {
+      "value": 0.109,
+      "units": "mM",
+      "symbol": "ET_IDH",
+      "ref": "cortassa_2003",
+      "note": "IDH concentration."
+    },
+    "Kh_1": {
+      "value": 8.1e-05,
+      "units": "mM",
+      "symbol": "Kh1",
+      "ref": "cortassa_2003",
+      "note": "pH activation constant."
+    },
+    "Kh_2": {
+      "value": 5.98e-05,
+      "units": "mM",
+      "symbol": "Kh2",
+      "ref": "cortassa_2003",
+      "note": "pH activation constant."
+    },
+    "Km_ISOC": {
+      "value": 1.52,
+      "units": "mM",
+      "symbol": "Km_ISOC",
+      "ref": "cortassa_2003",
+      "note": "Km for isocitrate."
+    },
+    "Ka_ADP": {
+      "value": 0.062,
+      "units": "mM",
+      "symbol": "Ka_ADP",
+      "ref": "cortassa_2003",
+      "note": "ADP activation constant."
+    },
+    "Ka_Ca": {
+      "value": 1.41,
+      "units": "uM",
+      "symbol": "Ka_Ca",
+      "ref": "cortassa_2003",
+      "note": "Ca2+ activation constant (links matrix Ca2+ to NADH production)."
+    },
+    "Km_NAD": {
+      "value": 0.923,
+      "units": "mM",
+      "symbol": "Km_NAD",
+      "ref": "cortassa_2003",
+      "note": "Km for NAD+."
+    },
+    "Ki_NADH": {
+      "value": 0.19,
+      "units": "mM",
+      "symbol": "Ki_NADH",
+      "ref": "cortassa_2003",
+      "note": "NADH product inhibition."
+    },
+    "ni": {
+      "value": 1,
+      "units": "",
+      "symbol": "ni",
+      "ref": "cortassa_2003",
+      "note": "Isocitrate cooperativity."
+    }
+  },
+  "KGDH": {
+    "Kcat_KGDH": {
+      "value": 0.15,
+      "units": "1/s",
+      "symbol": "kcat_KGDH",
+      "ref": "cortassa_2003",
+      "note": "alpha-ketoglutarate dehydrogenase turnover (Ca-activated)."
+    },
+    "ET_KGDH": {
+      "value": 0.5,
+      "units": "mM",
+      "symbol": "ET_KGDH",
+      "ref": "cortassa_2003",
+      "note": "KGDH concentration."
+    },
+    "Km_alpha_KG": {
+      "value": 1.94,
+      "units": "mM",
+      "symbol": "Km_aKG",
+      "ref": "cortassa_2003",
+      "note": "Km for alpha-ketoglutarate."
+    },
+    "Km_NAD": {
+      "value": 38.7,
+      "units": "mM",
+      "symbol": "Km_NAD",
+      "ref": "cortassa_2003",
+      "note": "Km for NAD+."
+    },
+    "Kd_Mg": {
+      "value": 0.0308,
+      "units": "mM",
+      "symbol": "Kd_Mg",
+      "ref": "cortassa_2003",
+      "note": "Mg2+ activation constant."
+    },
+    "Kd_Ca": {
+      "value": 1.27,
+      "units": "uM",
+      "symbol": "Kd_Ca",
+      "ref": "cortassa_2003",
+      "note": "Ca2+ activation constant."
+    },
+    "n_alpha_KG": {
+      "value": 1.2,
+      "units": "",
+      "symbol": "n_aKG",
+      "ref": "cortassa_2003",
+      "note": "alpha-KG cooperativity."
+    }
+  },
+  "SL": {
+    "kf_SL": {
+      "value": 0.127,
+      "units": "1/mM/s",
+      "symbol": "kf_SL",
+      "ref": "cortassa_2003",
+      "note": "Succinyl-CoA lyase (substrate-level phosphorylation)."
+    },
+    "Ke_SL": {
+      "value": 3.115,
+      "units": "mM",
+      "symbol": "Keq_SL",
+      "ref": "cortassa_2003",
+      "note": "Equilibrium constant."
+    }
+  },
+  "SDH": {
+    "Kcat_SDH": {
+      "value": 1.0,
+      "units": "1/s",
+      "symbol": "kcat_SDH",
+      "ref": "cortassa_2003",
+      "note": "Succinate dehydrogenase turnover (FADH2-producing, complex II)."
+    },
+    "ET_SDH": {
+      "value": 0.5,
+      "units": "mM",
+      "symbol": "ET_SDH",
+      "ref": "cortassa_2003",
+      "note": "SDH concentration."
+    },
+    "Km_Suc": {
+      "value": 0.03,
+      "units": "mM",
+      "symbol": "Km_Suc",
+      "ref": "cortassa_2003",
+      "note": "Km for succinate."
+    },
+    "Kisdh_OAA": {
+      "value": 0.15,
+      "units": "mM",
+      "symbol": "Ki_OAA",
+      "ref": "cortassa_2003",
+      "note": "OAA inhibition."
+    },
+    "Ki_FUM": {
+      "value": 1.3,
+      "units": "mM",
+      "symbol": "Ki_FUM",
+      "ref": "cortassa_2003",
+      "note": "Fumarate inhibition."
+    }
+  },
+  "MDH": {
+    "Kcat_MDH": {
+      "value": 27.75,
+      "units": "1/s",
+      "symbol": "kcat_MDH",
+      "ref": "cortassa_2003",
+      "note": "Malate dehydrogenase turnover (NADH-producing)."
+    },
+    "ET_MDH": {
+      "value": 0.154,
+      "units": "mM",
+      "symbol": "ET_MDH",
+      "ref": "cortassa_2003",
+      "note": "MDH concentration."
+    },
+    "Km_MAL": {
+      "value": 1.493,
+      "units": "mM",
+      "symbol": "Km_MAL",
+      "ref": "cortassa_2003",
+      "note": "Km for malate."
+    },
+    "Ki_OAA": {
+      "value": 0.0031,
+      "units": "mM",
+      "symbol": "Ki_OAA",
+      "ref": "cortassa_2003",
+      "note": "OAA inhibition."
+    },
+    "Km_NAD": {
+      "value": 0.2244,
+      "units": "mM",
+      "symbol": "Km_NAD",
+      "ref": "cortassa_2003",
+      "note": "Km for NAD+."
+    },
+    "kh1": {
+      "value": 1.13e-05,
+      "units": "mM",
+      "symbol": "kh1",
+      "ref": "cortassa_2003",
+      "note": "pH activation constant fh_a."
+    },
+    "kh2": {
+      "value": 26.7,
+      "units": "mM",
+      "symbol": "kh2",
+      "ref": "cortassa_2003",
+      "note": "pH activation constant fh_a."
+    },
+    "kh3": {
+      "value": 6.68e-09,
+      "units": "mM",
+      "symbol": "kh3",
+      "ref": "cortassa_2003",
+      "note": "pH inhibition constant fh_i."
+    },
+    "kh4": {
+      "value": 5.62e-06,
+      "units": "mM",
+      "symbol": "kh4",
+      "ref": "cortassa_2003",
+      "note": "pH inhibition constant fh_i."
+    },
+    "k_offset": {
+      "value": 0.0399,
+      "units": "",
+      "symbol": "k_off",
+      "ref": "cortassa_2003",
+      "note": "pH activation offset."
+    }
+  },
+  "FH": {
+    "kf_FH": {
+      "value": 0.83,
+      "units": "1/s",
+      "symbol": "kf_FH",
+      "ref": "cortassa_2003",
+      "note": "Fumarase (fumarate -> malate)."
+    },
+    "Ke_FH": {
+      "value": 1.0,
+      "units": "",
+      "symbol": "Keq_FH",
+      "ref": "cortassa_2003",
+      "note": "Equilibrium constant."
+    }
+  },
+  "AAT": {
+    "kf_AAT": {
+      "value": 0.644,
+      "units": "1/mM/s",
+      "symbol": "kf_AAT",
+      "ref": "cortassa_2003",
+      "note": "Aspartate aminotransferase (OAA + GLU <-> aKG + ASP)."
+    },
+    "Ke_AAT": {
+      "value": 6.6,
+      "units": "",
+      "symbol": "Keq_AAT",
+      "ref": "cortassa_2003",
+      "note": "Equilibrium constant."
+    },
+    "k_C_ASP": {
+      "value": 0.01,
+      "units": "1/s",
+      "symbol": "k_ASP",
+      "ref": "cortassa_2003",
+      "note": "Aspartate consumption/efflux."
+    }
+  },
+  "oxphos": {
+    "rho_res": {
+      "value": 0.0006,
+      "units": "mM",
+      "symbol": "ρ_res",
+      "ref": "cortassa_2003",
+      "note": "Concentration of NADH-linked respiratory chain (complexes I-III-IV). Scaled by rotenone/cyanide."
+    },
+    "rho_res_F": {
+      "value": 0.0045,
+      "units": "mM",
+      "symbol": "ρ_res,F",
+      "ref": "cortassa_2003",
+      "note": "Concentration of the FADH2-linked (complex II) arm."
+    },
+    "rho_F1": {
+      "value": 0.06,
+      "units": "mM",
+      "symbol": "ρ_F1",
+      "ref": "cortassa_2003",
+      "note": "F1F0-ATP synthase concentration. Scaled by oligomycin."
+    },
+    "ra": {
+      "value": 6.394e-10,
+      "units": "1/s",
+      "symbol": "ra",
+      "ref": "cortassa_2003",
+      "note": "Respiration 6-state rate constant."
+    },
+    "rb": {
+      "value": 1.762e-13,
+      "units": "1/s",
+      "symbol": "rb",
+      "ref": "cortassa_2003",
+      "note": "Respiration rate constant."
+    },
+    "rc1": {
+      "value": 2.656e-19,
+      "units": "1/s",
+      "symbol": "rc1",
+      "ref": "cortassa_2003",
+      "note": "Respiration rate constant."
+    },
+    "rc2": {
+      "value": 8.632e-27,
+      "units": "1/s",
+      "symbol": "rc2",
+      "ref": "cortassa_2003",
+      "note": "Respiration rate constant."
+    },
+    "r1": {
+      "value": 2.077e-18,
+      "units": "",
+      "symbol": "r1",
+      "ref": "cortassa_2003",
+      "note": "Respiration dimensionless ratio."
+    },
+    "r2": {
+      "value": 1.728e-09,
+      "units": "",
+      "symbol": "r2",
+      "ref": "cortassa_2003",
+      "note": "Respiration dimensionless ratio."
+    },
+    "r3": {
+      "value": 1.059e-26,
+      "units": "",
+      "symbol": "r3",
+      "ref": "cortassa_2003",
+      "note": "Respiration dimensionless ratio."
+    },
+    "Kres": {
+      "value": 1.35e+18,
+      "units": "",
+      "symbol": "Kres",
+      "ref": "cortassa_2003",
+      "note": "NADH redox equilibrium constant."
+    },
+    "Kres_F": {
+      "value": 57650000000000.0,
+      "units": "",
+      "symbol": "Kres,F",
+      "ref": "cortassa_2003",
+      "note": "FADH2 redox equilibrium constant."
+    },
+    "gH": {
+      "value": 0.01,
+      "units": "mM/s/V",
+      "symbol": "g_H",
+      "ref": "cortassa_2003",
+      "note": "Inner-membrane proton-leak conductance. Increased by uncouplers (FCCP/DNP)."
+    },
+    "delta_psi_B": {
+      "value": 0.05,
+      "units": "V",
+      "symbol": "ΔΨ_B",
+      "ref": "cortassa_2003",
+      "note": "Phase boundary potential."
+    },
+    "g": {
+      "value": 0.85,
+      "units": "",
+      "symbol": "g",
+      "ref": "cortassa_2003",
+      "note": "Proton-pump correction factor."
+    },
+    "pa": {
+      "value": 1.656e-05,
+      "units": "1/s",
+      "symbol": "pa",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase 6-state rate constant."
+    },
+    "pb": {
+      "value": 3.373e-07,
+      "units": "1/s",
+      "symbol": "pb",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase rate constant."
+    },
+    "pc1": {
+      "value": 9.651e-14,
+      "units": "1/s",
+      "symbol": "pc1",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase rate constant."
+    },
+    "pc2": {
+      "value": 4.585e-14,
+      "units": "1/s",
+      "symbol": "pc2",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase rate constant."
+    },
+    "p1": {
+      "value": 1.346e-08,
+      "units": "",
+      "symbol": "p1",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase dimensionless ratio."
+    },
+    "p2": {
+      "value": 7.739e-07,
+      "units": "",
+      "symbol": "p2",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase dimensionless ratio."
+    },
+    "p3": {
+      "value": 6.65e-15,
+      "units": "",
+      "symbol": "p3",
+      "ref": "cortassa_2003",
+      "note": "ATP synthase dimensionless ratio."
+    },
+    "KF1": {
+      "value": 1710000.0,
+      "units": "mM",
+      "symbol": "KF1",
+      "ref": "cortassa_2003",
+      "note": "ATP/ADP·Pi equilibrium constant of the ATPase."
+    }
+  },
+  "ca": {
+    "h": {
+      "value": 0.5,
+      "units": "",
+      "symbol": "h_ANT",
+      "ref": "cortassa_2003",
+      "note": "ANT voltage-dependence fraction."
+    },
+    "delta_psi_0": {
+      "value": 0.091,
+      "units": "V",
+      "symbol": "ΔΨ_0",
+      "ref": "cortassa_2003",
+      "note": "Offset potential in the ANT/uniporter/exchanger driving terms."
+    },
+    "Vmax_ANT": {
+      "value": 0.05,
+      "units": "mM/s",
+      "symbol": "Vmax_ANT",
+      "ref": "cortassa_2003",
+      "note": "Adenine nucleotide translocase maximal rate (ATP out / ADP in)."
+    },
+    "Vmax_uni": {
+      "value": 0.0125,
+      "units": "mM/s",
+      "symbol": "Vmax_uni",
+      "ref": "cortassa_2003",
+      "note": "Ca2+ uniporter maximal rate (scaled x20 above the Cortassa value so matrix Ca2+ uptake is visible on the simulation timescale and can reach the permeability-transition threshold)."
+    },
+    "K_act": {
+      "value": 0.38,
+      "units": "uM",
+      "symbol": "K_act",
+      "ref": "cortassa_2003",
+      "note": "Uniporter activation constant."
+    },
+    "K_trans": {
+      "value": 19.0,
+      "units": "uM",
+      "symbol": "K_trans",
+      "ref": "cortassa_2003",
+      "note": "Uniporter transport constant."
+    },
+    "L": {
+      "value": 110.0,
+      "units": "",
+      "symbol": "L",
+      "ref": "cortassa_2003",
+      "note": "Uniporter allosteric equilibrium."
+    },
+    "na": {
+      "value": 2.8,
+      "units": "",
+      "symbol": "n_a",
+      "ref": "cortassa_2003",
+      "note": "Uniporter activation cooperativity."
+    },
+    "Vmax_NaCa": {
+      "value": 0.005,
+      "units": "mM/s",
+      "symbol": "Vmax_NaCa",
+      "ref": "cortassa_2003",
+      "note": "Mitochondrial Na+/Ca2+ exchanger maximal rate (matrix Ca2+ efflux)."
+    },
+    "KNa": {
+      "value": 9.4,
+      "units": "mM",
+      "symbol": "K_Na",
+      "ref": "cortassa_2003",
+      "note": "Na+ half-saturation."
+    },
+    "KCa": {
+      "value": 0.375,
+      "units": "uM",
+      "symbol": "K_Ca",
+      "ref": "cortassa_2003",
+      "note": "Ca2+ half-saturation."
+    },
+    "b": {
+      "value": 0.5,
+      "units": "",
+      "symbol": "b",
+      "ref": "cortassa_2003",
+      "note": "Exchanger voltage-dependence fraction."
+    },
+    "n": {
+      "value": 3.0,
+      "units": "",
+      "symbol": "n_Na",
+      "ref": "cortassa_2003",
+      "note": "Na+ cooperativity."
+    },
+    "f_Ca": {
+      "value": 0.0003,
+      "units": "",
+      "symbol": "f",
+      "ref": "cortassa_2003",
+      "note": "Fraction of free (unbuffered) matrix Ca2+; d[Ca]m/dt = f·δ·(V_uni - V_NaCa)."
+    },
+    "ca_conv": {
+      "value": 1000,
+      "units": "uM/mM",
+      "symbol": "δ",
+      "ref": "cortassa_2003",
+      "note": "Unit-conversion constant turning the mM/s uniporter/exchanger fluxes into the µM matrix-Ca2+ space."
+    }
+  },
+  "ros": {
+    "shunt": {
+      "value": 0.02,
+      "units": "",
+      "symbol": "shunt",
+      "ref": "cortassa_2004",
+      "note": "Fraction of electron transport diverted to superoxide (O2.-). ~0.02 at baseline; raising toward 0.1 drives oxidative stress and ΔΨ instability (Zhou 2009)."
+    },
+    "k_SOD": {
+      "value": 3.0,
+      "units": "1/s",
+      "symbol": "k_SOD",
+      "ref": "cortassa_2004",
+      "note": "Lumped superoxide-dismutase scavenging of matrix superoxide (calibrated)."
+    },
+    "k_IMAC": {
+      "value": 0.04,
+      "units": "mM/s/V",
+      "symbol": "G_IMAC",
+      "ref": "zhou_2009",
+      "note": "Inner-membrane anion channel conductance carrying superoxide out of the matrix; ΔΨ-driven, activated by IMS superoxide (calibrated functional form after Cortassa 2004)."
+    },
+    "kappa_IMAC": {
+      "value": 0.07,
+      "units": "uM",
+      "symbol": "κ",
+      "ref": "zhou_2009",
+      "note": "Half-activation IMS superoxide for IMAC opening (calibrated)."
+    },
+    "k_scav_i": {
+      "value": 1.5,
+      "units": "1/s",
+      "symbol": "k_scav",
+      "ref": "cortassa_2004",
+      "note": "Scavenging of intermembrane-space superoxide (calibrated)."
+    },
+    "ros_conv": {
+      "value": 1000,
+      "units": "uM/mM",
+      "symbol": "—",
+      "ref": "cortassa_2004",
+      "note": "Converts the mM/s production flux into the uM superoxide space."
+    }
+  },
+  "ptp": {
+    "K_Ca_ptp": {
+      "value": 3.5,
+      "units": "uM",
+      "symbol": "K_Ca,PTP",
+      "ref": "bernardi_2015",
+      "note": "Matrix Ca2+ for half-maximal permeability-transition-pore opening (calibrated low-uM threshold)."
+    },
+    "n_Ca_ptp": {
+      "value": 3,
+      "units": "",
+      "symbol": "n_Ca",
+      "ref": "bernardi_2015",
+      "note": "Hill coefficient for Ca2+ gating of the PTP."
+    },
+    "K_ROS_ptp": {
+      "value": 0.4,
+      "units": "uM",
+      "symbol": "K_ROS,PTP",
+      "ref": "zhou_2009",
+      "note": "Superoxide for half-maximal PTP sensitisation (calibrated)."
+    },
+    "tau_ptp": {
+      "value": 1.0,
+      "units": "s",
+      "symbol": "τ_PTP",
+      "ref": "pokhilko_2006",
+      "note": "PTP gating time constant (calibrated)."
+    },
+    "g_ptp_psi": {
+      "value": 80.0,
+      "units": "mM/s/V",
+      "symbol": "g_PTP",
+      "ref": "pokhilko_2006",
+      "note": "Open-pore proton/ion conductance collapsing ΔΨ (calibrated large so an open pore visibly depolarises the membrane against the respiratory chain's homeostatic pumping)."
+    },
+    "k_ptp_Ca": {
+      "value": 2.0,
+      "units": "1/s",
+      "symbol": "k_PTP,Ca",
+      "ref": "pokhilko_2006",
+      "note": "Open-pore matrix Ca2+ release rate (calibrated)."
+    }
+  },
+  "init": {
+    "ADP_m": {
+      "value": 0.1,
+      "units": "mM",
+      "symbol": "[ADP]m",
+      "ref": "cortassa_2003",
+      "note": "Initial matrix ADP."
+    },
+    "NADH": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[NADH]",
+      "ref": "cortassa_2003",
+      "note": "Initial matrix NADH (will settle at its respiratory steady state)."
+    },
+    "ISOC": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[ISOC]",
+      "ref": "cortassa_2003",
+      "note": "Initial isocitrate."
+    },
+    "alpha_KG": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[αKG]",
+      "ref": "cortassa_2003",
+      "note": "Initial alpha-ketoglutarate."
+    },
+    "SCoA": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[SCoA]",
+      "ref": "cortassa_2003",
+      "note": "Initial succinyl-CoA."
+    },
+    "Suc": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[Suc]",
+      "ref": "cortassa_2003",
+      "note": "Initial succinate."
+    },
+    "FUM": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[FUM]",
+      "ref": "cortassa_2003",
+      "note": "Initial fumarate."
+    },
+    "MAL": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[MAL]",
+      "ref": "cortassa_2003",
+      "note": "Initial malate."
+    },
+    "OAA": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[OAA]",
+      "ref": "cortassa_2003",
+      "note": "Initial oxaloacetate."
+    },
+    "ASP": {
+      "value": 0.01,
+      "units": "mM",
+      "symbol": "[ASP]",
+      "ref": "cortassa_2003",
+      "note": "Initial aspartate."
+    },
+    "Ca_m": {
+      "value": 0.01,
+      "units": "uM",
+      "symbol": "[Ca]m",
+      "ref": "cortassa_2003",
+      "note": "Initial matrix free Ca2+."
+    },
+    "delta_psi_m": {
+      "value": 0.01,
+      "units": "V",
+      "symbol": "ΔΨm",
+      "ref": "cortassa_2003",
+      "note": "Initial inner-membrane potential (magnitude; matrix-negative)."
+    }
+  }
+}

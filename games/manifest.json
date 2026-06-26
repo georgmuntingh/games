@@ -35,6 +35,12 @@
       "title": "Sokoban",
       "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
       "tags": ["puzzle", "solo"]
+    },
+    {
+      "id": "cell-digitaltwin",
+      "title": "Cell Digital Twin",
+      "description": "A quantitative, literature-grounded model of a living cell: ion and metabolite concentrations and the membrane transporters that move them. Includes the erythrocyte (homeostasis + glycolysis), the cardiomyocyte action potential (Luo–Rudy), a myelinated neuron, and a mitochondrion (TCA cycle + oxidative phosphorylation).",
+      "tags": ["biology", "simulation", "visualization", "interactive", "education"]
     }
   ]
 }

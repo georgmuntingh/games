@@ -1,0 +1,307 @@
+{
+  "_note": "Bibliography for the Cell Digital Twin. Each entry is referenced by key from data/*.params.json and from transporter/flux definitions. DOIs are included only where known with confidence; where omitted, the full citation text is given so the source can be located. 'search' provides a fallback lookup URL.",
+  "references": {
+    "lew_bookchin_1986": {
+      "authors": "Lew VL, Bookchin RM",
+      "year": 1986,
+      "title": "Volume, pH, and ion-content regulation in human red cells: analysis of transient behavior with an integrated model",
+      "journal": "Journal of Membrane Biology",
+      "volume": "92",
+      "pages": "57-74",
+      "doi": "10.1007/BF01869016",
+      "note": "The integrated Lew-Bookchin red-cell homeostasis model: pump-leak balance, Donnan equilibrium, osmotic volume regulation."
+    },
+    "lew_bookchin_2005": {
+      "authors": "Lew VL, Bookchin RM",
+      "year": 2005,
+      "title": "Ion transport pathology in the mechanism of sickle cell dehydration",
+      "journal": "Physiological Reviews",
+      "volume": "85",
+      "pages": "179-200",
+      "doi": "10.1152/physrev.00052.2003",
+      "note": "Review of red-cell ion transport, the Gardos channel, and the Reference (RCM) red-cell model."
+    },
+    "tiffert_lew_2001": {
+      "authors": "Tiffert T, Lew VL",
+      "year": 2001,
+      "title": "Kinetics of calcium pumping in intact human red blood cells",
+      "journal": "Journal of Physiology",
+      "search": "Tiffert Lew calcium pump human red blood cells Journal of Physiology",
+      "note": "Plasma-membrane Ca2+-ATPase (PMCA) kinetics and the very low resting free [Ca2+]i in erythrocytes (~20-60 nM)."
+    },
+    "mulquiney_kuchel_1999": {
+      "authors": "Mulquiney PJ, Kuchel PW",
+      "year": 1999,
+      "title": "Model of 2,3-bisphosphoglycerate metabolism in the human erythrocyte based on detailed enzyme kinetic equations: equations and parameter refinement",
+      "journal": "Biochemical Journal",
+      "volume": "342",
+      "pages": "581-596",
+      "doi": "10.1042/bj3420581",
+      "note": "Detailed kinetic model of human erythrocyte glycolysis and the 2,3-BPG (Rapoport-Luebering) shunt."
+    },
+    "joshi_palsson_1989": {
+      "authors": "Joshi A, Palsson BO",
+      "year": 1989,
+      "title": "Metabolic dynamics in the human red cell. Part I-A comprehensive kinetic model",
+      "journal": "Journal of Theoretical Biology",
+      "volume": "141",
+      "pages": "515-528",
+      "doi": "10.1016/S0022-5193(89)80233-4",
+      "note": "Whole-cell kinetic model of erythrocyte energy metabolism (glycolysis, ATP turnover)."
+    },
+    "lowe_walmsley_1986": {
+      "authors": "Lowe AG, Walmsley AR",
+      "year": 1986,
+      "title": "The kinetics of glucose transport in human red blood cells",
+      "journal": "Biochimica et Biophysica Acta",
+      "volume": "857",
+      "pages": "146-154",
+      "doi": "10.1016/0005-2736(86)90342-1",
+      "note": "GLUT1 facilitated-diffusion kinetics in human erythrocytes; zero-trans Km ~1-2 mM."
+    },
+    "gardos_1958": {
+      "authors": "Gárdos G",
+      "year": 1958,
+      "title": "The function of calcium in the potassium permeability of human erythrocytes",
+      "journal": "Biochimica et Biophysica Acta",
+      "volume": "30",
+      "pages": "653-654",
+      "doi": "10.1016/0006-3002(58)90124-0",
+      "note": "Original description of the Ca2+-activated K+ (Gardos) channel, KCNN4/KCa3.1."
+    },
+    "hoffman_2003": {
+      "authors": "Hoffman JF, Joiner W, Nehrke K, Potapova O, Foye K, Wickrema A",
+      "year": 2003,
+      "title": "The hSK4 (KCNN4) isoform is the Ca2+-activated K+ channel (Gardos channel) in human red blood cells",
+      "journal": "Proceedings of the National Academy of Sciences USA",
+      "volume": "100",
+      "pages": "7366-7371",
+      "doi": "10.1073/pnas.1232342100",
+      "note": "Molecular identity and Ca2+ sensitivity (K0.5 ~ sub-micromolar) of the Gardos channel."
+    },
+    "jennings_1989": {
+      "authors": "Jennings ML",
+      "year": 1989,
+      "title": "Structure and function of the red blood cell anion transport protein (Band 3 / AE1)",
+      "journal": "Annual Review of Biophysics and Biophysical Chemistry",
+      "volume": "18",
+      "pages": "397-430",
+      "doi": "10.1146/annurev.bb.18.060189.002145",
+      "note": "Band 3 (AE1, SLC4A1) electroneutral Cl-/HCO3- exchange; very high turnover sustaining the chloride shift."
+    },
+    "garrahan_glynn_1967": {
+      "authors": "Garrahan PJ, Glynn IM",
+      "year": 1967,
+      "title": "The stoichiometry of the sodium pump",
+      "journal": "Journal of Physiology",
+      "volume": "192",
+      "pages": "217-235",
+      "doi": "10.1113/jphysiol.1967.sp008296",
+      "note": "Na+/K+-ATPase stoichiometry: 3 Na+ extruded / 2 K+ imported per ATP hydrolyzed."
+    },
+    "post_1972": {
+      "authors": "Post RL, Hegyvary C, Kume S",
+      "year": 1972,
+      "title": "Activation by adenosine triphosphate in the phosphorylation kinetics of sodium and potassium ion transport adenosine triphosphatase",
+      "journal": "Journal of Biological Chemistry",
+      "volume": "247",
+      "pages": "6530-6540",
+      "doi": "10.1016/S0021-9258(19)44725-X",
+      "note": "Na+/K+-ATPase kinetics; basis for Hill dependence on internal Na+ and external K+."
+    },
+    "luo_rudy_1991": {
+      "authors": "Luo CH, Rudy Y",
+      "year": 1991,
+      "title": "A model of the ventricular cardiac action potential. Depolarization, repolarization, and their interaction",
+      "journal": "Circulation Research",
+      "volume": "68",
+      "pages": "1501-1526",
+      "doi": "10.1161/01.RES.68.6.1501",
+      "note": "The Luo-Rudy phase I (LR91) guinea-pig ventricular action-potential model."
+    },
+    "ten_tusscher_2006": {
+      "authors": "ten Tusscher KHWJ, Panfilov AV",
+      "year": 2006,
+      "title": "Alternans and spiral breakup in a human ventricular tissue model",
+      "journal": "American Journal of Physiology - Heart and Circulatory Physiology",
+      "volume": "291",
+      "pages": "H1088-H1100",
+      "doi": "10.1152/ajpheart.00109.2006",
+      "note": "Human ventricular myocyte model (TT06); planned extension target for the cardiomyocyte."
+    },
+    "hodgkin_huxley_1952": {
+      "authors": "Hodgkin AL, Huxley AF",
+      "year": 1952,
+      "title": "A quantitative description of membrane current and its application to conduction and excitation in nerve",
+      "journal": "Journal of Physiology",
+      "volume": "117",
+      "pages": "500-544",
+      "doi": "10.1113/jphysiol.1952.sp004764",
+      "note": "Voltage-gated channel gating kinetics (the x-infinity / tau formalism used throughout)."
+    },
+    "goldman_1943": {
+      "authors": "Goldman DE",
+      "year": 1943,
+      "title": "Potential, impedance, and rectification in membranes",
+      "journal": "Journal of General Physiology",
+      "volume": "27",
+      "pages": "37-60",
+      "doi": "10.1085/jgp.27.1.37",
+      "note": "Goldman-Hodgkin-Katz constant-field flux/voltage equations."
+    },
+    "rush_larsen_1978": {
+      "authors": "Rush S, Larsen H",
+      "year": 1978,
+      "title": "A practical algorithm for solving dynamic membrane equations",
+      "journal": "IEEE Transactions on Biomedical Engineering",
+      "volume": "BME-25",
+      "pages": "389-392",
+      "doi": "10.1109/TBME.1978.326270",
+      "note": "Exponential integrator for Hodgkin-Huxley gating variables; unconditionally stable for gating."
+    },
+    "alberts_mboc": {
+      "authors": "Alberts B, Heald R, Johnson A, Morgan D, Raff M, Roberts K, Walter P",
+      "year": 2022,
+      "title": "Molecular Biology of the Cell, 7th edition",
+      "journal": "W. W. Norton (Garland Science)",
+      "note": "Standard textbook reference for membrane transport mechanisms and physiological concentration ranges."
+    },
+    "lodish_molcell": {
+      "authors": "Lodish H, Berk A, Kaiser CA, et al.",
+      "year": 2021,
+      "title": "Molecular Cell Biology, 9th edition",
+      "journal": "W. H. Freeman (Macmillan Learning)",
+      "note": "Textbook reference for transporter classes (uniport, symport, antiport, pumps) and ion gradients."
+    },
+    "pospischil_2008": {
+      "authors": "Pospischil M, Toledo-Rodriguez M, Monier C, Piwkowska Z, Bal T, Frégnac Y, Markram H, Destexhe A",
+      "year": 2008,
+      "title": "Minimal Hodgkin-Huxley type models for different classes of cortical and thalamic neurons",
+      "journal": "Biological Cybernetics",
+      "volume": "99",
+      "pages": "427-441",
+      "doi": "10.1007/s00422-008-0263-8",
+      "note": "Self-consistent mammalian Hodgkin-Huxley channel kinetics at ~36 C: fast I_Na, delayed-rectifier I_Kd, slow I_M, high-threshold I_L (Ca), with a voltage-threshold parameter V_T. Basis for the neuron's Na/Kd/Ca rate equations."
+    },
+    "mcintyre_richardson_grill_2002": {
+      "authors": "McIntyre CC, Richardson AG, Grill WM",
+      "year": 2002,
+      "title": "Modeling the excitability of mammalian nerve fibers: influence of afterpotentials on the recovery cycle",
+      "journal": "Journal of Neurophysiology",
+      "volume": "87",
+      "pages": "995-1006",
+      "doi": "10.1152/jn.00353.2001",
+      "note": "Double-cable model of a mammalian myelinated axon: node-of-Ranvier ion-channel densities, internodal myelin properties, axoplasmic resistivity (~70 ohm-cm), and the ~100x-diameter internode spacing rule underlying saltatory conduction."
+    },
+    "connor_stevens_1971": {
+      "authors": "Connor JA, Stevens CF",
+      "year": 1971,
+      "title": "Voltage clamp studies of a transient outward membrane current in gastropod neural somata",
+      "journal": "Journal of Physiology",
+      "volume": "213",
+      "pages": "21-30",
+      "doi": "10.1113/jphysiol.1971.sp009365",
+      "note": "Original description and kinetics of the transient (A-type) K+ current I_A (fast activation a, slow inactivation b) that delays firing and sets inter-spike interval."
+    },
+    "destexhe_babloyantz_1993": {
+      "authors": "Destexhe A, Babloyantz A, Sejnowski TJ",
+      "year": 1993,
+      "title": "Ionic mechanisms for intrinsic slow oscillations in thalamic relay neurons",
+      "journal": "Biophysical Journal",
+      "volume": "65",
+      "pages": "1538-1552",
+      "doi": "10.1016/S0006-3495(93)81190-1",
+      "note": "Kinetics of the hyperpolarization-activated cation current I_h (mixed Na+/K+, reversal ~ -43 mV) responsible for voltage 'sag' and rebound firing."
+    },
+    "rall_1962": {
+      "authors": "Rall W",
+      "year": 1962,
+      "title": "Theory of physiological properties of dendrites",
+      "journal": "Annals of the New York Academy of Sciences",
+      "volume": "96",
+      "pages": "1071-1092",
+      "doi": "10.1111/j.1749-6632.1962.tb54120.x",
+      "note": "Compartmental cable theory: axial coupling of membrane compartments through cytoplasmic resistance, the basis for multi-compartment propagation."
+    },
+    "mitchell_1961": {
+      "authors": "Mitchell P",
+      "year": 1961,
+      "title": "Coupling of phosphorylation to electron and hydrogen transfer by a chemi-osmotic type of mechanism",
+      "journal": "Nature",
+      "volume": "191",
+      "pages": "144-148",
+      "doi": "10.1038/191144a0",
+      "note": "The chemiosmotic hypothesis: the electron-transport chain pumps protons to build a proton-motive force (ΔΨ + ΔpH) that drives ATP synthase."
+    },
+    "cortassa_2003": {
+      "authors": "Cortassa S, Aon MA, Marbán E, Winslow RL, O'Rourke B",
+      "year": 2003,
+      "title": "An integrated model of cardiac mitochondrial energy metabolism and calcium dynamics",
+      "journal": "Biophysical Journal",
+      "volume": "84",
+      "pages": "2734-2755",
+      "doi": "10.1016/S0006-3495(03)75079-6",
+      "note": "Thermokinetic model coupling the TCA cycle, oxidative phosphorylation (ETC, F1F0-ATPase, ANT, proton leak) and mitochondrial Ca2+ handling (uniporter, Na+/Ca2+ exchanger) through the membrane potential ΔΨm. The basis for this organelle model."
+    },
+    "cortassa_2004": {
+      "authors": "Cortassa S, Aon MA, Winslow RL, O'Rourke B",
+      "year": 2004,
+      "title": "A mitochondrial oscillator dependent on reactive oxygen species",
+      "journal": "Biophysical Journal",
+      "volume": "87",
+      "pages": "2060-2073",
+      "doi": "10.1529/biophysj.104.041749",
+      "note": "Extends the energetic model with superoxide production (a shunt of electron transport), antioxidant scavenging, and the inner-membrane anion channel — reactive-oxygen-species handling that can drive ΔΨm oscillations."
+    },
+    "zhou_2009": {
+      "authors": "Zhou L, Cortassa S, Wei AC, Aon MA, Winslow RL, O'Rourke B",
+      "year": 2009,
+      "title": "Modeling cardiac action potential shortening driven by oxidative stress-induced mitochondrial oscillations in guinea pig cardiomyocytes",
+      "journal": "Biophysical Journal",
+      "volume": "97",
+      "pages": "1843-1852",
+      "doi": "10.1016/j.bpj.2009.07.029",
+      "note": "ROS-induced ROS release (RIRR) and ΔΨm depolarization through the inner-membrane anion channel / permeability transition."
+    },
+    "kembro_2013": {
+      "authors": "Kembro JM, Aon MA, Winslow RL, O'Rourke B, Cortassa S",
+      "year": 2013,
+      "title": "Integrating mitochondrial energetics, redox and ROS metabolic networks: a two-compartment model",
+      "journal": "Biophysical Journal",
+      "volume": "104",
+      "pages": "332-343",
+      "doi": "10.1016/j.bpj.2012.11.3808",
+      "note": "Two-compartment (matrix + cytoplasm) integrated model of energetics, redox couples (NADH, NADPH, GSH, Trx) and the full ROS scavenging network."
+    },
+    "magnus_keizer_1997": {
+      "authors": "Magnus G, Keizer J",
+      "year": 1997,
+      "title": "Minimal model of beta-cell mitochondrial Ca2+ handling",
+      "journal": "American Journal of Physiology",
+      "volume": "273",
+      "pages": "C717-C733",
+      "doi": "10.1152/ajpcell.1997.273.2.C717",
+      "note": "Kinetic expressions for the Ca2+ uniporter, Na+/Ca2+ exchanger, respiration-driven proton pumping and the F1F0-ATPase used (with the Pietrobon-Caplan thermodynamic forms) by later integrated mitochondrial models."
+    },
+    "bernardi_2015": {
+      "authors": "Bernardi P, Rasola A, Forte M, Lippe G",
+      "year": 2015,
+      "title": "The mitochondrial permeability transition pore: channel formation by F-ATP synthase, integration in signal transduction, and role in pathophysiology",
+      "journal": "Physiological Reviews",
+      "volume": "95",
+      "pages": "1111-1155",
+      "doi": "10.1152/physrev.00001.2015",
+      "note": "The permeability transition pore: Ca2+- and ROS-triggered opening collapses ΔΨm, releases matrix Ca2+ and commits the cell to death."
+    },
+    "pokhilko_2006": {
+      "authors": "Pokhilko AV, Ataullakhanov FI, Holmuhamedov EL",
+      "year": 2006,
+      "title": "Mathematical model of mitochondrial ionic homeostasis: three modes of Ca2+ transport",
+      "journal": "Journal of Theoretical Biology",
+      "volume": "243",
+      "pages": "152-169",
+      "doi": "10.1016/j.jtbi.2006.05.025",
+      "note": "Deterministic model of mitochondrial Ca2+ handling including a Ca2+-load-activated permeability transition pore that depolarises ΔΨm — the basis for the calibrated PTP gating used here."
+    }
+  }
+}
