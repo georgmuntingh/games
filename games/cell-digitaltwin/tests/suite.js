@@ -10,6 +10,7 @@ import { Simulator } from '../engine/integrator.js';
 import { buildModel as buildErythrocyte } from '../cells/erythrocyte.js';
 import { buildModel as buildCardiomyocyte } from '../cells/cardiomyocyte.js';
 import { buildModel as buildNeuron } from '../cells/neuron.js';
+import { buildModel as buildMitochondrion } from '../cells/mitochondrion.js';
 
 const tests = [];
 const test = (name, cell, fn) => tests.push({ name, cell, fn });
@@ -366,6 +367,94 @@ test('Pacing stays numerically stable over many spikes', 'neuron', (params) => {
   return { pass: finite && vhi > 20 && vhi < 80 && vlo > -95, detail: `V ∈ [${vlo.toFixed(0)}, ${vhi.toFixed(0)}] mV over 120 ms of pacing, all finite=${finite}` };
 });
 
+// ===========================================================================
+// Mitochondrion (Cortassa 2003 energetics + Ca²⁺ + ROS/PTP)
+// ===========================================================================
+const MDT = 1e-4;
+function buildMito(params) {
+  const { values: P } = resolveParams(params);
+  const m = buildMitochondrion(P); m.dtMax = MDT;
+  return m;
+}
+function settleMito(model, controls, T, fromState) {
+  const ctx = { controls: { ...controls }, t: 0 };
+  const sim = new Simulator(model, ctx);
+  if (fromState) sim.y = JSON.parse(fromState);
+  const n = Math.round(T / MDT);
+  for (let s = 0; s < n; s++) { sim.advance(MDT, MDT); ctx.t = sim.t; if (!isFinite(sim.y.dPsi)) break; }
+  return { sim, ctx, obs: model.observables(sim.y, ctx) };
+}
+// The resting (state-4) steady state is the same for every test, so settle it
+// once and reuse the snapshot — perturbations branch from it.
+let _mitoBaseline = null;
+function mitoBaseline(model) {
+  if (!_mitoBaseline) {
+    const b = settleMito(model, {}, 200);
+    _mitoBaseline = { state: JSON.stringify(b.sim.y), obs: b.obs };
+  }
+  return _mitoBaseline;
+}
+
+test('Reaches an energised resting (state-4) steady state', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const o = base.obs;
+  const y = JSON.parse(base.state);
+  let finite = true; for (const k of m.stateKeys) if (!isFinite(y[k])) finite = false;
+  const ok = finite && o.DeltaPsi > 120 && o.DeltaPsi < 240 && o.NADHfrac > 0.4 && o.ATP_ADP > 5;
+  return { pass: ok, detail: `ΔΨm=${o.DeltaPsi.toFixed(0)} mV, NADH ${(o.NADHfrac * 100).toFixed(0)}%, ATP/ADP ${o.ATP_ADP.toFixed(0)}, finite=${finite}` };
+});
+
+test('Adding ADP drives state-3 respiration', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const s3 = settleMito(m, { adp: 0.3 }, 60, base.state);
+  return { pass: s3.obs.VO2 > base.obs.VO2 * 1.4, detail: `O₂ uptake: state 4 ${base.obs.VO2.toFixed(2)} → state 3 ${s3.obs.VO2.toFixed(2)} (ADP added)` };
+});
+
+test('Cyanide (Complex IV block) stops respiration', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const cn = settleMito(m, { cyanide: 1 }, 60, base.state);
+  return { pass: cn.obs.VO2 < base.obs.VO2 * 0.2, detail: `O₂ uptake ${base.obs.VO2.toFixed(2)} → ${cn.obs.VO2.toFixed(2)} with cyanide` };
+});
+
+test('Oligomycin blocks ATP synthesis', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const ol = settleMito(m, { oligomycin: 1 }, 60, base.state);
+  return { pass: ol.obs.VATP < base.obs.VATP * 0.25 + 0.05, detail: `ATP synthesis ${base.obs.VATP.toFixed(2)} → ${ol.obs.VATP.toFixed(2)} with oligomycin` };
+});
+
+test('FCCP uncouples respiration from ATP synthesis', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const fccp = settleMito(m, { fccp: 1 }, 60, base.state);
+  const ok = fccp.obs.VATP < base.obs.VATP * 0.25 + 0.05 && fccp.obs.VO2 > base.obs.VO2 && fccp.obs.DeltaPsi < base.obs.DeltaPsi - 40;
+  return { pass: ok, detail: `uncoupled: ATP synth ${base.obs.VATP.toFixed(2)}→${fccp.obs.VATP.toFixed(2)}, O₂ ${base.obs.VO2.toFixed(2)}→${fccp.obs.VO2.toFixed(2)}, ΔΨm ${base.obs.DeltaPsi.toFixed(0)}→${fccp.obs.DeltaPsi.toFixed(0)} mV` };
+});
+
+test('Ca²⁺ challenge loads the matrix via the uniporter', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const ca = settleMito(m, { cai: 5 }, 100, base.state);
+  return { pass: ca.obs.Cam > base.obs.Cam * 5 && ca.obs.Cam > 0.5, detail: `matrix [Ca²⁺]: ${base.obs.Cam.toFixed(2)} → ${ca.obs.Cam.toFixed(2)} µM` };
+});
+
+test('Permeability transition pore opens and halts ATP synthesis', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const base = mitoBaseline(m);
+  const ptp = settleMito(m, { cai: 5, shunt: 0.1, ptpTrigger: 1 }, 60, base.state);
+  return { pass: ptp.obs.PTP > 0.5 && ptp.obs.VATP < base.obs.VATP * 0.5 + 0.05, detail: `PTP open ${ptp.obs.PTP.toFixed(2)}, ATP synthesis ${base.obs.VATP.toFixed(2)} → ${ptp.obs.VATP.toFixed(2)}` };
+});
+
+test('Integration stays bounded across perturbations', 'mitochondrion', (params) => {
+  const m = buildMito(params);
+  const r = settleMito(m, { adp: 0.4, cai: 4, shunt: 0.12, fccp: 0.5 }, 120);
+  let finite = true, dpsi = r.obs.DeltaPsi;
+  for (const k of m.stateKeys) if (!isFinite(r.sim.y[k])) finite = false;
+  return { pass: finite && dpsi >= -5 && dpsi < 260, detail: `all states finite=${finite}, ΔΨm=${dpsi.toFixed(0)} mV under combined stress` };
+});
 export function runAll(paramsMap) {
   return tests.map(({ name, cell, fn }) => {
     try {

@@ -222,6 +222,86 @@
       "pages": "1071-1092",
       "doi": "10.1111/j.1749-6632.1962.tb54120.x",
       "note": "Compartmental cable theory: axial coupling of membrane compartments through cytoplasmic resistance, the basis for multi-compartment propagation."
+    },
+    "mitchell_1961": {
+      "authors": "Mitchell P",
+      "year": 1961,
+      "title": "Coupling of phosphorylation to electron and hydrogen transfer by a chemi-osmotic type of mechanism",
+      "journal": "Nature",
+      "volume": "191",
+      "pages": "144-148",
+      "doi": "10.1038/191144a0",
+      "note": "The chemiosmotic hypothesis: the electron-transport chain pumps protons to build a proton-motive force (ΔΨ + ΔpH) that drives ATP synthase."
+    },
+    "cortassa_2003": {
+      "authors": "Cortassa S, Aon MA, Marbán E, Winslow RL, O'Rourke B",
+      "year": 2003,
+      "title": "An integrated model of cardiac mitochondrial energy metabolism and calcium dynamics",
+      "journal": "Biophysical Journal",
+      "volume": "84",
+      "pages": "2734-2755",
+      "doi": "10.1016/S0006-3495(03)75079-6",
+      "note": "Thermokinetic model coupling the TCA cycle, oxidative phosphorylation (ETC, F1F0-ATPase, ANT, proton leak) and mitochondrial Ca2+ handling (uniporter, Na+/Ca2+ exchanger) through the membrane potential ΔΨm. The basis for this organelle model."
+    },
+    "cortassa_2004": {
+      "authors": "Cortassa S, Aon MA, Winslow RL, O'Rourke B",
+      "year": 2004,
+      "title": "A mitochondrial oscillator dependent on reactive oxygen species",
+      "journal": "Biophysical Journal",
+      "volume": "87",
+      "pages": "2060-2073",
+      "doi": "10.1529/biophysj.104.041749",
+      "note": "Extends the energetic model with superoxide production (a shunt of electron transport), antioxidant scavenging, and the inner-membrane anion channel — reactive-oxygen-species handling that can drive ΔΨm oscillations."
+    },
+    "zhou_2009": {
+      "authors": "Zhou L, Cortassa S, Wei AC, Aon MA, Winslow RL, O'Rourke B",
+      "year": 2009,
+      "title": "Modeling cardiac action potential shortening driven by oxidative stress-induced mitochondrial oscillations in guinea pig cardiomyocytes",
+      "journal": "Biophysical Journal",
+      "volume": "97",
+      "pages": "1843-1852",
+      "doi": "10.1016/j.bpj.2009.07.029",
+      "note": "ROS-induced ROS release (RIRR) and ΔΨm depolarization through the inner-membrane anion channel / permeability transition."
+    },
+    "kembro_2013": {
+      "authors": "Kembro JM, Aon MA, Winslow RL, O'Rourke B, Cortassa S",
+      "year": 2013,
+      "title": "Integrating mitochondrial energetics, redox and ROS metabolic networks: a two-compartment model",
+      "journal": "Biophysical Journal",
+      "volume": "104",
+      "pages": "332-343",
+      "doi": "10.1016/j.bpj.2012.11.3808",
+      "note": "Two-compartment (matrix + cytoplasm) integrated model of energetics, redox couples (NADH, NADPH, GSH, Trx) and the full ROS scavenging network."
+    },
+    "magnus_keizer_1997": {
+      "authors": "Magnus G, Keizer J",
+      "year": 1997,
+      "title": "Minimal model of beta-cell mitochondrial Ca2+ handling",
+      "journal": "American Journal of Physiology",
+      "volume": "273",
+      "pages": "C717-C733",
+      "doi": "10.1152/ajpcell.1997.273.2.C717",
+      "note": "Kinetic expressions for the Ca2+ uniporter, Na+/Ca2+ exchanger, respiration-driven proton pumping and the F1F0-ATPase used (with the Pietrobon-Caplan thermodynamic forms) by later integrated mitochondrial models."
+    },
+    "bernardi_2015": {
+      "authors": "Bernardi P, Rasola A, Forte M, Lippe G",
+      "year": 2015,
+      "title": "The mitochondrial permeability transition pore: channel formation by F-ATP synthase, integration in signal transduction, and role in pathophysiology",
+      "journal": "Physiological Reviews",
+      "volume": "95",
+      "pages": "1111-1155",
+      "doi": "10.1152/physrev.00001.2015",
+      "note": "The permeability transition pore: Ca2+- and ROS-triggered opening collapses ΔΨm, releases matrix Ca2+ and commits the cell to death."
+    },
+    "pokhilko_2006": {
+      "authors": "Pokhilko AV, Ataullakhanov FI, Holmuhamedov EL",
+      "year": 2006,
+      "title": "Mathematical model of mitochondrial ionic homeostasis: three modes of Ca2+ transport",
+      "journal": "Journal of Theoretical Biology",
+      "volume": "243",
+      "pages": "152-169",
+      "doi": "10.1016/j.jtbi.2006.05.025",
+      "note": "Deterministic model of mitochondrial Ca2+ handling including a Ca2+-load-activated permeability transition pore that depolarises ΔΨm — the basis for the calibrated PTP gating used here."
     }
   }
 }

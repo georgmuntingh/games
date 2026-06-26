@@ -6,7 +6,9 @@
 import { SPECIES as ERY_SPECIES } from './erythrocyte.js';
 import { SPECIES as CARDIO_SPECIES } from './cardiomyocyte.js';
 import { SPECIES as NEURON_SPECIES } from './neuron.js';
+import { SPECIES as MITO_SPECIES } from './mitochondrion.js';
 import { createNeuronSchematic } from '../viz/neuron-schematic.js';
+import { createMitoSchematic } from '../viz/mito-schematic.js';
 
 const colorOf = (species, id) => (species.find((s) => s.id === id) || {}).color || '#888';
 const symOf = (species, id) => (species.find((s) => s.id === id) || {}).symbol || id;
@@ -364,6 +366,124 @@ export const neuronView = {
       IA: { dir: -1, rate: Math.abs(F.IA[s]) }, ICaL: ch(F.ICaL[s]),
       ISK: { dir: -1, rate: Math.abs(F.ISK[s]) }, Ih: ch(F.Ih[s]),
       INaK: { dir: -1, rate: Math.abs(F.iPump[s]) }, Ileak: ch(F.Ileak[s]),
+    };
+  },
+};
+
+// ===========================================================================
+// Mitochondrion (Cortassa 2003 integrated energetics + Ca²⁺ + ROS/PTP)
+// ===========================================================================
+export const mitochondrionView = {
+  timeLabel: 's',
+  dtMax: 1e-4,
+  speed: { min: 1, max: 30, unit: 's/s', default: 8 },
+  sampleEvery: 0.25,
+  plotWindow: 120,
+  fluxScale: 0.02,
+  defaultControls: {},
+  createSchematic: createMitoSchematic,
+  intro: 'At rest the mitochondrion sits in state 4: a high inner-membrane potential ΔΨm and reduced NADH, with little ATP turnover. Add ADP (state 3), block a complex, uncouple with FCCP, or challenge it with Ca²⁺ — and watch the proton-motive-force gauge.',
+
+  plotAxes: {
+    mV: { label: 'mV', side: 'left' },
+    frac: { label: 'frac', side: 'right' },
+    flux: { label: 'rate', side: 'right' },
+    uM: { label: 'µM', side: 'right' },
+  },
+  series: [
+    { key: 'dPsi', label: 'ΔΨm', color: '#10b981', axis: 'mV', on: true },
+    { key: 'pmf', label: 'Δp (PMF)', color: '#f59e0b', axis: 'mV', on: false },
+    { key: 'NADH', label: 'NADH/NAD', color: '#2563eb', axis: 'frac', on: true },
+    { key: 'VO2', label: 'O₂ uptake', color: '#3b82f6', axis: 'flux', on: true },
+    { key: 'VATP', label: 'ATP synth', color: '#22c55e', axis: 'flux', on: false },
+    { key: 'Cam', label: '[Ca²⁺]m (µM)', color: '#ef4444', axis: 'uM', on: false },
+    { key: 'ROS', label: 'ROS (µM)', color: '#f97316', axis: 'uM', on: false },
+    { key: 'PTP', label: 'PTP open', color: '#dc2626', axis: 'frac', on: false },
+  ],
+
+  sample(model, y, ctx) {
+    const o = model.observables(y, ctx);
+    return { dPsi: o.DeltaPsi, pmf: o.pmf, NADH: o.NADHfrac, VO2: o.VO2, VATP: o.VATP, Cam: o.Cam, ROS: o.ROS, PTP: o.PTP };
+  },
+
+  readouts(model, y, ctx) {
+    const o = model.observables(y, ctx);
+    return [
+      ['Membrane ΔΨm', o.DeltaPsi.toFixed(0), 'mV'],
+      ['Proton-motive force', o.pmf.toFixed(0), 'mV'],
+      ['NADH / (NADH+NAD)', (o.NADHfrac * 100).toFixed(0), '%'],
+      ['ATP / ADP (matrix)', o.ATP_ADP.toFixed(0), ''],
+      ['O₂ uptake', o.VO2.toFixed(2), 'rate'],
+      ['Matrix [Ca²⁺]', o.Cam.toFixed(2), 'µM'],
+    ];
+  },
+
+  stateRows(model, y, ctx) {
+    const o = model.observables(y, ctx);
+    return {
+      header: ['variable', 'value', '', ''],
+      rows: [
+        ['ΔΨm', o.DeltaPsi, null, 'mV'],
+        ['ΔΨ / ΔpH split', `${o.dPsi.toFixed(0)} / ${o.dPH.toFixed(0)}`, null, 'mV'],
+        ['NADH / NAD⁺', `${o.NADH.toFixed(2)} / ${(10 - o.NADH).toFixed(2)}`, null, 'mM'],
+        ['ATP / ADP (matrix)', `${o.ATPm.toFixed(1)} / ${o.ADPm.toFixed(2)}`, null, 'mM'],
+        ['matrix [Ca²⁺]', o.Cam, null, 'µM'],
+        ['ROS (superoxide)', o.ROS, null, 'µM'],
+        ['PTP open fraction', o.PTP, null, ''],
+      ],
+      footer: `O₂ uptake ${o.VO2.toFixed(2)} · ATP synthesis ${o.VATP.toFixed(2)} (relative rate)`,
+    };
+  },
+
+  chips(model, y) {
+    const C = model.concentrations(y);
+    const mk = (side, ids) => ids.map((id) => {
+      const val = C[side][id];
+      const text = id === 'Ca' ? `${(val * 1e3).toFixed(2)} µM` : `${val.toFixed(val < 1 ? 2 : 1)}`;
+      return { label: symOf(MITO_SPECIES, id), color: colorOf(MITO_SPECIES, id), text };
+    });
+    return { plasma: mk('cyto', ['ATP', 'ADP', 'Ca']), cyto: mk('matrix', ['NADH', 'ATP', 'Ca']) };
+  },
+
+  tint: {
+    options: [
+      { id: 'psi', name: 'Membrane potential ΔΨm' },
+      { id: 'nadh', name: 'NADH (redox)' },
+      { id: 'ca', name: 'Matrix Ca²⁺' },
+    ],
+    ranges: { psi: [0, 0.2], nadh: [0, 1], ca: [0, 2] },
+    default: 'psi',
+  },
+
+  controls: [
+    { key: 'adp', label: 'Cytosolic ADP', type: 'range', min: 0.01, max: 0.5, step: 0.01, def: 0.05, unit: ' mM', eq: 'low ≈ state 4 (rest); high ≈ state 3 (active)' },
+    { key: 'substrate', label: 'Substrate supply', type: 'range', min: 0, max: 3, step: 0.1, def: 1, unit: '×', eq: 'scales acetyl-CoA feeding the TCA cycle' },
+    { key: 'rotenone', label: 'Rotenone (Complex I)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales NADH-linked respiration by (1 − rotenone)' },
+    { key: 'cyanide', label: 'Cyanide (Complex IV)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'blocks O₂ reduction → respiration stops' },
+    { key: 'oligomycin', label: 'Oligomycin (ATP synthase)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'scales F₁F₀ flux by (1 − oligomycin)' },
+    { key: 'fccp', label: 'FCCP / DNP (uncoupler)', type: 'range', min: 0, max: 1, step: 0.05, def: 0, zeroLabel: 'off', eq: 'raises proton leak → ΔΨm collapses, respiration uncoupled from ATP' },
+    { key: 'cai', label: 'Cytosolic Ca²⁺', type: 'range', min: 0.05, max: 6, step: 0.05, def: 0.1, unit: ' µM', eq: 'drives matrix Ca²⁺ uptake via the uniporter' },
+    { key: 'shunt', label: 'ROS shunt (oxidative stress)', type: 'range', min: 0, max: 0.15, step: 0.005, def: 0.02, eq: 'fraction of electron transport diverted to superoxide' },
+  ],
+
+  actions: [
+    { id: 'adp', label: '⚡ Add ADP (state 3)', autoplay: true, fn: (ctx) => { ctx.controls.adp = 0.3; } },
+    { id: 'ca', label: 'Ca²⁺ challenge', autoplay: true, fn: (ctx) => { ctx.controls.cai = 4; } },
+    { id: 'ptp', label: 'Trigger PTP', autoplay: true, fn: (ctx) => { ctx.controls.ptpTrigger = 1; } },
+  ],
+
+  activity(model, F) {
+    const he = Math.abs(F.V_He), hf = Math.abs(F.V_He_F), hu = Math.abs(F.V_Hu);
+    return {
+      CI: { dir: -1, rate: he }, CIII: { dir: -1, rate: he }, CIV: { dir: -1, rate: Math.abs(F.V_O2) * 6 },
+      CII: { dir: -1, rate: hf },
+      CV: { dir: F.V_ATPase >= 0 ? 1 : -1, rate: hu },
+      ANT: { dir: 1, rate: Math.abs(F.V_ANT) },
+      leak: { dir: 1, rate: Math.abs(F.V_Hleak) },
+      MCU: { dir: 1, rate: Math.abs(F.V_uni) * 50 },
+      NCLX: { dir: -1, rate: Math.abs(F.V_NaCa) * 50 },
+      IMAC: { dir: -1, rate: Math.abs(F.V_IMAC_psi) },
+      PTP: { dir: 1, rate: F.V_PTP_psi },
     };
   },
 };

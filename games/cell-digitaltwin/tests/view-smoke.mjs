@@ -9,7 +9,8 @@ import { Simulator } from '../engine/integrator.js';
 import { buildModel as buildErythrocyte } from '../cells/erythrocyte.js';
 import { buildModel as buildCardiomyocyte } from '../cells/cardiomyocyte.js';
 import { buildModel as buildNeuron } from '../cells/neuron.js';
-import { erythrocyteView, cardiomyocyteView, neuronView } from '../cells/views.js';
+import { buildModel as buildMitochondrion } from '../cells/mitochondrion.js';
+import { erythrocyteView, cardiomyocyteView, neuronView, mitochondrionView } from '../cells/views.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (f) => JSON.parse(readFileSync(resolve(__dirname, f), 'utf8'));
@@ -38,6 +39,7 @@ const cells = {
   erythrocyte: { build: buildErythrocyte, view: erythrocyteView, params: read('../data/erythrocyte.params.json'), ctrl: {} },
   cardiomyocyte: { build: buildCardiomyocyte, view: cardiomyocyteView, params: read('../data/cardiomyocyte.params.json'), ctrl: { paced: true, bcl: 500 } },
   neuron: { build: buildNeuron, view: neuronView, params: read('../data/neuron.params.json'), ctrl: { injectComp: 3, stimAmp: 1.5, stimDur: 1, _stimUntil: 1 } },
+  mitochondrion: { build: buildMitochondrion, view: mitochondrionView, params: read('../data/mitochondrion.params.json'), ctrl: { adp: 0.3, cai: 2 } },
 };
 
 let ok = true;

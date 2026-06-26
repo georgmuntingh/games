@@ -431,3 +431,9 @@ body.show-math .param-table .ref {
 .cls-uniporter { color: var(--uniporter); }
 .cls-antiporter { color: var(--antiporter); }
 .cls-leak { color: var(--leak); }
+.cls-etc { color: #8b5cf6; }
+.cls-synthase { color: #22c55e; }
+.cls-carrier { color: #eab308; }
+.cls-exchanger { color: #0ea5e9; }
+.cls-ros { color: #f97316; }
+.cls-ptp { color: #ef4444; }
