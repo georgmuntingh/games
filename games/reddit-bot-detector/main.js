@@ -1,7 +1,7 @@
 import { PROFILES, BY_DIFFICULTY, DIFFICULTIES } from './profiles.js';
 import { emptyTally, record, metrics, formatPercent } from './scoring.js';
 
-const ROUND_SIZE = 8; // profiles per round (pools have 8 per tier)
+const ROUND_SIZE = 8; // profiles per round; tiers hold more, so rounds vary and seen-memory rotates them
 const STORAGE_PREFIX = 'reddit-bot-detector-';
 const HISTORY_KEY = `${STORAGE_PREFIX}history`;
 const HISTORY_LIMIT = 10;
