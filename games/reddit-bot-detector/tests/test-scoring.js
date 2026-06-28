@@ -109,7 +109,7 @@ test('every profile has the required fields and a valid label', () => {
   for (const p of PROFILES) {
     assertTrue(typeof p.id === 'string' && p.id.length > 0, `id missing on ${p.username}`);
     assertTrue(p.label === 'bot' || p.label === 'human', `bad label on ${p.id}`);
-    assertTrue(['easy', 'medium', 'hard'].includes(p.difficulty), `bad difficulty on ${p.id}`);
+    assertTrue(['easy', 'medium', 'hard', 'expert'].includes(p.difficulty), `bad difficulty on ${p.id}`);
     assertTrue(Array.isArray(p.samplePosts) && p.samplePosts.length > 0, `no posts on ${p.id}`);
     assertTrue(Array.isArray(p.tells) && p.tells.length > 0, `no tells on ${p.id}`);
     assertTrue(typeof p.outcome === 'string' && p.outcome.length > 0, `no outcome on ${p.id}`);
