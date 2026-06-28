@@ -35,6 +35,12 @@
       "title": "Sokoban",
       "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
       "tags": ["puzzle", "solo"]
+    },
+    {
+      "id": "reddit-bot-detector",
+      "title": "Spot the Bot",
+      "description": "Inspect Reddit profiles and call bot or human — then see the tells you missed.",
+      "tags": ["puzzle", "solo", "learning"]
     }
   ]
 }
