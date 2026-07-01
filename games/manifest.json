@@ -31,6 +31,12 @@
       "tags": ["math", "visualization", "interactive"]
     },
     {
+      "id": "bomberman",
+      "title": "Bomberman",
+      "description": "Drop bombs, blast soft blocks, hunt the hidden exit. Campaign vs AI plus local 2-player battle.",
+      "tags": ["arcade", "action", "solo", "versus"]
+    },
+    {
       "id": "sokoban",
       "title": "Sokoban",
       "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
