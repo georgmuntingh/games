@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Bomberman</title>
     <link rel="stylesheet" href="/shared/ui.css" />
     <link rel="stylesheet" href="./style.css" />
@@ -14,6 +17,15 @@
       <div class="layout">
         <div class="board-wrap">
           <canvas id="board" aria-label="Bomberman arena"></canvas>
+          <div id="fs-hud">
+            <span id="fs-left"></span>
+            <span id="fs-mid"></span>
+            <span id="fs-right"></span>
+            <span class="fs-buttons">
+              <button id="fs-pause" type="button" aria-label="Pause">⏸</button>
+              <button id="fs-mute" type="button" aria-label="Mute">🔊</button>
+            </span>
+          </div>
           <div id="menu-overlay" class="overlay" hidden>
             <div class="overlay-card menu-card">
               <h2>Bomberman</h2>
@@ -40,6 +52,9 @@
                 <button id="btn-quit" type="button" class="secondary">
                   Quit to menu
                 </button>
+              </div>
+              <div class="menu-row">
+                <button id="btn-lefty" type="button" class="secondary" hidden></button>
               </div>
             </div>
           </div>
@@ -95,24 +110,13 @@
               <li>Blast soft blocks, defeat every enemy, then find the exit hidden under a block.</li>
               <li><strong>Campaign:</strong> move with WASD or arrows, drop bombs with Space or E, detonate remote bombs with Q.</li>
               <li><strong>Battle:</strong> P1 uses WASD + E (bomb) + Q (detonate); P2 uses arrows + Enter (bomb) + Right Shift (detonate).</li>
+              <li><strong>Touch:</strong> drag anywhere on your side to steer with the thumbstick; tap 💣 to drop a bomb and ⚡ to detonate. In battle each player grips one end of the device.</li>
               <li>Power-ups: extra bomb, bigger blast, speed, remote detonator, bomb kick (walk into a bomb to send it sliding).</li>
               <li>Escape pauses, M mutes. Bombs chain-explode each other — careful.</li>
               <li>In battle, when time runs out the arena starts closing in.</li>
             </ul>
           </details>
         </aside>
-      </div>
-      <div id="touch-controls">
-        <div class="dpad">
-          <button data-dir="up" class="touch-btn" aria-label="Up">▲</button>
-          <button data-dir="left" class="touch-btn" aria-label="Left">◀</button>
-          <button data-dir="right" class="touch-btn" aria-label="Right">▶</button>
-          <button data-dir="down" class="touch-btn" aria-label="Down">▼</button>
-        </div>
-        <div class="touch-actions">
-          <button id="touch-detonate" class="touch-btn action" aria-label="Detonate" hidden>⚡</button>
-          <button id="touch-bomb" class="touch-btn action" aria-label="Drop bomb">💣</button>
-        </div>
       </div>
       <p id="status" class="status" aria-live="polite"></p>
     </main>

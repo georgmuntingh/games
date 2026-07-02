@@ -10,6 +10,7 @@ import {
 } from './levels.js';
 import { chooseEnemyDir, computeDangerTiles } from './ai.js';
 import { audio } from './audio.js';
+import { initTouch, setTouchMode, setRemote, setLefty } from './touch.js';
 
 if (import.meta.env?.DEV) validateLevels(LEVELS);
 
@@ -130,25 +131,27 @@ const P2_MOVES = {
   ArrowLeft: [-1, 0],
   ArrowRight: [1, 0],
 };
-const TOUCH_MOVES = {
-  'touch-up': [0, -1],
-  'touch-down': [0, 1],
-  'touch-left': [-1, 0],
-  'touch-right': [1, 0],
+// Synthetic key codes emitted by the touch thumbstick (touch.js). They live
+// in every control map because heldDirs is per-player.
+const STICK_MOVES = {
+  'stick-up': [0, -1],
+  'stick-down': [0, 1],
+  'stick-left': [-1, 0],
+  'stick-right': [1, 0],
 };
 
 const CAMPAIGN_CONTROLS = {
-  moves: { ...P1_MOVES, ...P2_MOVES, ...TOUCH_MOVES },
-  bomb: new Set(['Space', 'KeyE', 'Enter', 'touch-bomb']),
-  detonate: new Set(['KeyQ', 'ShiftLeft', 'ShiftRight', 'touch-detonate']),
+  moves: { ...P1_MOVES, ...P2_MOVES, ...STICK_MOVES },
+  bomb: new Set(['Space', 'KeyE', 'Enter']),
+  detonate: new Set(['KeyQ', 'ShiftLeft', 'ShiftRight']),
 };
 const BATTLE_P1_CONTROLS = {
-  moves: P1_MOVES,
+  moves: { ...P1_MOVES, ...STICK_MOVES },
   bomb: new Set(['KeyE']),
   detonate: new Set(['KeyQ']),
 };
 const BATTLE_P2_CONTROLS = {
-  moves: P2_MOVES,
+  moves: { ...P2_MOVES, ...STICK_MOVES },
   bomb: new Set(['Enter']),
   detonate: new Set(['ShiftRight']),
 };
@@ -183,11 +186,15 @@ const hudBTime = document.getElementById('hud-btime');
 const menuBtn = document.getElementById('menu-btn');
 const muteBtn = document.getElementById('mute');
 const statusEl = document.getElementById('status');
-const touchControls = document.getElementById('touch-controls');
-const touchDetonate = document.getElementById('touch-detonate');
-const touchBomb = document.getElementById('touch-bomb');
+const btnLefty = document.getElementById('btn-lefty');
+const fsLeft = document.getElementById('fs-left');
+const fsMid = document.getElementById('fs-mid');
+const fsRight = document.getElementById('fs-right');
+const fsPause = document.getElementById('fs-pause');
+const fsMute = document.getElementById('fs-mute');
 
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+const coarsePointer = window.matchMedia('(any-pointer: coarse)');
 
 const state = {
   screen: 'menu', // 'menu' | 'campaign' | 'battle'
@@ -235,6 +242,7 @@ function loadProgress() {
           ? Math.max(0, Math.min(LEVELS.length, stored.unlocked))
           : 0,
         muted: Boolean(stored.muted),
+        lefty: Boolean(stored.lefty),
         battle:
           stored.battle && typeof stored.battle === 'object'
             ? { p1: stored.battle.p1 | 0, p2: stored.battle.p2 | 0 }
@@ -244,7 +252,7 @@ function loadProgress() {
   } catch {
     // Corrupt storage — start fresh.
   }
-  return { unlocked: 0, muted: false, battle: { p1: 0, p2: 0 } };
+  return { unlocked: 0, muted: false, lefty: false, battle: { p1: 0, p2: 0 } };
 }
 
 function saveProgress() {
@@ -257,6 +265,39 @@ function saveProgress() {
 
 function palette() {
   return darkScheme.matches ? PALETTES.dark : PALETTES.light;
+}
+
+// Small vibration pulses on game events (Android/Chrome; iOS ignores it).
+// The mute toggle doubles as the haptics kill switch.
+function buzz(ms) {
+  if (!progress.muted) navigator.vibrate?.(ms);
+}
+
+// Fullscreen play mode: on touch devices the board takes over the viewport
+// and the thumbstick/action controls float on top of it.
+function enterPlayMode(mode) {
+  if (!coarsePointer.matches) {
+    setTouchMode(null);
+    return;
+  }
+  document.body.classList.add('touch-play');
+  setTouchMode(mode);
+  setLefty(progress.lefty);
+  try {
+    document.documentElement.requestFullscreen?.()?.catch?.(() => {});
+  } catch {
+    // Fullscreen API unavailable (iOS Safari) — the CSS takeover suffices.
+  }
+  computeLayout();
+}
+
+function exitPlayMode() {
+  document.body.classList.remove('touch-play');
+  setTouchMode(null);
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.()?.catch?.(() => {});
+  }
+  computeLayout();
 }
 
 function flashStatus(text) {
@@ -386,7 +427,7 @@ function showMenu() {
   }
   hudCampaign.hidden = true;
   hudBattle.hidden = true;
-  touchControls.classList.remove('active');
+  exitPlayMode();
   showOnly(menuOverlay);
   // Load a level as a dimmed backdrop behind the menu.
   loadGridOnly(Math.min(unlocked, LEVELS.length - 1));
@@ -422,11 +463,11 @@ function startCampaign(index) {
   const player = makePlayer(0, CAMPAIGN_CONTROLS);
   applyCatchUp(player, index);
   state.players = [player];
-  touchDetonate.hidden = !player.remote;
   hudCampaign.hidden = false;
   hudBattle.hidden = true;
   showOnly(null);
-  touchControls.classList.add('active');
+  enterPlayMode('campaign');
+  setRemote(0, player.remote);
   loadCampaignLevel(index);
 }
 
@@ -479,7 +520,7 @@ function startBattle(bestOf) {
   hudCampaign.hidden = true;
   hudBattle.hidden = false;
   showOnly(null);
-  touchControls.classList.remove('active');
+  enterPlayMode('battle');
   startBattleRound();
 }
 
@@ -506,6 +547,8 @@ function startBattleRound() {
   placeEntity(p1, arena.spawns[0].x, arena.spawns[0].y);
   placeEntity(p2, arena.spawns[1].x, arena.spawns[1].y);
   state.players = [p1, p2];
+  setRemote(0, false);
+  setRemote(1, false);
   computeLayout();
   setPhase('intro', INTRO_MS, {
     text: `Round ${state.round}`,
@@ -708,11 +751,10 @@ function updatePlayer(player, dt) {
     state.pickups.splice(state.pickups.indexOf(pickup), 1);
     grantPickup(player, pickup.type);
     audio.play('pickup');
+    buzz(10);
     spawnParticles(px, py, 6, palette().pickupBorder);
-    if (state.screen === 'campaign') {
-      touchDetonate.hidden = !player.remote;
-    }
-    updateHud(true);
+    setRemote(player.id, player.remote);
+    updateHud();
   }
 }
 
@@ -762,6 +804,7 @@ function tryPlaceBomb(player) {
   });
   player.bombsActive++;
   audio.play('place');
+  buzz(15);
 }
 
 function detonateRemote(player) {
@@ -906,6 +949,7 @@ function explodeBomb(first) {
   }
   state.shake = Math.min(11, state.shake + 6);
   audio.play('boom');
+  buzz(35);
 }
 
 function addFlame(x, y) {
@@ -1009,6 +1053,7 @@ function killPlayer(player) {
   player.heldDirs.length = 0;
   spawnParticles(player.rx, player.ry, 14, player.id === 0 ? palette().p1Body : palette().p2Body);
   audio.play('die');
+  buzz(80);
   state.shake = Math.min(11, state.shake + 4);
   if (state.screen === 'campaign') {
     setPhase('dying', DYING_MS);
@@ -1053,12 +1098,25 @@ function checkExit() {
 
 function computeLayout() {
   if (!state.cols) return;
-  const availW = Math.min(760, Math.max(280, mainEl.clientWidth - 32));
-  const availH = Math.max(320, window.innerHeight - 300);
+  let availW;
+  let availH;
+  let tileMin = TILE_MIN;
+  let tileMax = TILE_MAX;
+  if (document.body.classList.contains('touch-play')) {
+    // Fullscreen play mode: the board must always fit the viewport whole,
+    // under the 44px HUD strip. Controls float on top and reserve no space.
+    availW = window.innerWidth - 8;
+    availH = window.innerHeight - 52;
+    tileMin = 8;
+    tileMax = 56;
+  } else {
+    availW = Math.min(760, Math.max(280, mainEl.clientWidth - 32));
+    availH = Math.max(320, window.innerHeight - 300);
+  }
   state.tile = Math.max(
-    TILE_MIN,
+    tileMin,
     Math.min(
-      TILE_MAX,
+      tileMax,
       Math.floor(
         Math.min((availW - PAD * 2) / state.cols, (availH - PAD * 2) / state.rows)
       )
@@ -1445,12 +1503,21 @@ function updateHud() {
     setHud(hudTime, formatTime(state.timeLeft));
     hudTime.classList.toggle('warning', state.timeLeft < 30000);
     setHud(hudPower, powerBadges(player));
+    setHud(fsLeft, `L${state.levelIndex + 1} ${'♥'.repeat(Math.max(0, player.lives))}`);
+    setHud(fsMid, formatTime(state.timeLeft));
+    setHud(fsRight, powerBadges(player));
   } else if (state.screen === 'battle') {
     setHud(hudRound, `${state.round} (best of ${state.bestOf})`);
     setHud(hudP1, String(state.wins[0]));
     setHud(hudP2, String(state.wins[1]));
     setHud(hudBTime, state.suddenDeath ? 'Sudden death!' : formatTime(state.timeLeft));
     hudBTime.classList.toggle('warning', state.timeLeft < 30000);
+    setHud(fsLeft, `P1 ${state.wins[0]}`);
+    setHud(
+      fsMid,
+      state.suddenDeath ? 'Sudden death!' : `R${state.round} · ${formatTime(state.timeLeft)}`
+    );
+    setHud(fsRight, `${state.wins[1]} P2`);
   }
 }
 
@@ -1485,9 +1552,26 @@ function togglePause() {
 function toggleMute() {
   progress.muted = !progress.muted;
   audio.setMuted(progress.muted);
+  syncMuteButtons();
+  saveProgress();
+}
+
+function syncMuteButtons() {
   muteBtn.textContent = progress.muted ? 'Sound: off' : 'Sound: on';
   muteBtn.setAttribute('aria-pressed', String(progress.muted));
+  fsMute.textContent = progress.muted ? '🔇' : '🔊';
+}
+
+function toggleLefty() {
+  progress.lefty = !progress.lefty;
+  setLefty(progress.lefty);
+  syncLeftyButton();
   saveProgress();
+}
+
+function syncLeftyButton() {
+  btnLefty.hidden = !coarsePointer.matches;
+  btnLefty.textContent = progress.lefty ? 'Controls: left-handed' : 'Controls: right-handed';
 }
 
 window.addEventListener('keydown', (event) => {
@@ -1533,37 +1617,24 @@ window.addEventListener('blur', () => {
   }
 });
 
-// Touch d-pad: pointer events add and remove synthetic key codes.
-for (const btn of touchControls.querySelectorAll('[data-dir]')) {
-  const code = `touch-${btn.dataset.dir}`;
-  const press = (event) => {
-    event.preventDefault();
-    const player = state.players[0];
-    if (player && !player.heldDirs.includes(code)) player.heldDirs.push(code);
-  };
-  const release = () => {
-    const player = state.players[0];
-    if (player) {
-      const index = player.heldDirs.indexOf(code);
-      if (index >= 0) player.heldDirs.splice(index, 1);
-    }
-  };
-  btn.addEventListener('pointerdown', press);
-  btn.addEventListener('pointerup', release);
-  btn.addEventListener('pointercancel', release);
-  btn.addEventListener('pointerleave', release);
-}
-
-touchBomb.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  const player = state.players[0];
-  if (player) player.wantsBomb = true;
-});
-
-touchDetonate.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  const player = state.players[0];
-  if (player) player.wantsDetonate = true;
+// Touch controls (touch.js) feed the same per-player input model as the
+// keyboard: the stick swaps a single synthetic code in heldDirs, buttons set
+// the wants* flags.
+initTouch({
+  setHeld(playerId, code) {
+    const player = state.players[playerId];
+    if (!player) return;
+    player.heldDirs = player.heldDirs.filter((c) => !c.startsWith('stick-'));
+    if (code && !state.paused) player.heldDirs.push(code);
+  },
+  onBomb(playerId) {
+    const player = state.players[playerId];
+    if (player && !state.paused && state.phase !== 'over') player.wantsBomb = true;
+  },
+  onDetonate(playerId) {
+    const player = state.players[playerId];
+    if (player && !state.paused && state.phase !== 'over') player.wantsDetonate = true;
+  },
 });
 
 // Buttons blur themselves after clicks so Space/Enter don't re-trigger them.
@@ -1586,8 +1657,13 @@ onClick(btnAgain, () => {
 });
 onClick(menuBtn, quitToMenu);
 onClick(muteBtn, toggleMute);
+onClick(btnLefty, toggleLefty);
+onClick(fsPause, togglePause);
+onClick(fsMute, toggleMute);
 
 window.addEventListener('resize', computeLayout);
+window.visualViewport?.addEventListener('resize', computeLayout);
+document.addEventListener('fullscreenchange', computeLayout);
 darkScheme.addEventListener?.('change', () => {
   // Palette is re-read every frame; nothing to do beyond letting rAF redraw.
 });
@@ -1597,9 +1673,9 @@ darkScheme.addEventListener?.('change', () => {
 if (import.meta.env?.DEV) window.__bmState = state;
 
 audio.setMuted(progress.muted);
-muteBtn.textContent = progress.muted ? 'Sound: off' : 'Sound: on';
-muteBtn.setAttribute('aria-pressed', String(progress.muted));
-touchDetonate.hidden = true;
+syncMuteButtons();
+syncLeftyButton();
+setLefty(progress.lefty);
 showMenu();
 requestAnimationFrame((now) => {
   state.lastTime = now;
