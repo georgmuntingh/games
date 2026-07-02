@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Bomberman</title>
+    <script type="module" crossorigin src="/games/pr-previews/pr-12/assets/games/bomberman-DO9MUc5M.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-12/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-12/assets/bomberman-DelnSqUQ.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-12/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Bomberman</h1>
+      <div class="layout">
+        <div class="board-wrap">
+          <canvas id="board" aria-label="Bomberman arena"></canvas>
+          <div id="fs-hud">
+            <span id="fs-left"></span>
+            <span id="fs-mid"></span>
+            <span id="fs-right"></span>
+            <span class="fs-buttons">
+              <button id="fs-pause" type="button" aria-label="Pause">⏸</button>
+              <button id="fs-mute" type="button" aria-label="Mute">🔊</button>
+            </span>
+          </div>
+          <div id="menu-overlay" class="overlay" hidden>
+            <div class="overlay-card menu-card">
+              <h2>Bomberman</h2>
+              <div class="menu-section">
+                <h3>Campaign</h3>
+                <button id="btn-continue" type="button" hidden></button>
+                <button id="btn-new" type="button">New game</button>
+              </div>
+              <div class="menu-section">
+                <h3>Battle — 2 players</h3>
+                <div class="menu-row">
+                  <button id="btn-battle3" type="button">Best of 3</button>
+                  <button id="btn-battle5" type="button">Best of 5</button>
+                </div>
+                <p id="battle-score" class="menu-score" hidden></p>
+              </div>
+            </div>
+          </div>
+          <div id="pause-overlay" class="overlay" hidden>
+            <div class="overlay-card">
+              <h2>Paused</h2>
+              <div class="menu-row">
+                <button id="btn-resume" type="button">Resume</button>
+                <button id="btn-quit" type="button" class="secondary">
+                  Quit to menu
+                </button>
+              </div>
+              <div class="menu-row">
+                <button id="btn-lefty" type="button" class="secondary" hidden></button>
+              </div>
+            </div>
+          </div>
+          <div id="end-overlay" class="overlay" hidden>
+            <div class="overlay-card">
+              <h2 id="end-title"></h2>
+              <p id="end-detail"></p>
+              <div class="menu-row">
+                <button id="btn-again" type="button"></button>
+                <button id="btn-menu" type="button" class="secondary">
+                  Menu
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <aside class="sidebar">
+          <div class="panel stats" id="hud-campaign" hidden>
+            <div>
+              <span class="label">Level</span><span id="hud-level"></span>
+            </div>
+            <div>
+              <span class="label">Lives</span><span id="hud-lives"></span>
+            </div>
+            <div><span class="label">Time</span><span id="hud-time"></span></div>
+            <div>
+              <span class="label">Power</span><span id="hud-power"></span>
+            </div>
+          </div>
+          <div class="panel stats" id="hud-battle" hidden>
+            <div>
+              <span class="label">Round</span><span id="hud-round"></span>
+            </div>
+            <div>
+              <span class="label p1">P1 wins</span><span id="hud-p1"></span>
+            </div>
+            <div>
+              <span class="label p2">P2 wins</span><span id="hud-p2"></span>
+            </div>
+            <div>
+              <span class="label">Time</span><span id="hud-btime"></span>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="menu-btn" type="button" class="action-btn">Menu</button>
+            <button id="mute" type="button" class="action-btn" aria-pressed="false">
+              Sound: on
+            </button>
+          </div>
+          <details class="controls">
+            <summary>How to play</summary>
+            <ul>
+              <li>Blast soft blocks, defeat every enemy, then find the exit hidden under a block.</li>
+              <li><strong>Campaign:</strong> move with WASD or arrows, drop bombs with Space or E, detonate remote bombs with Q.</li>
+              <li><strong>Battle:</strong> P1 uses WASD + E (bomb) + Q (detonate); P2 uses arrows + Enter (bomb) + Right Shift (detonate).</li>
+              <li><strong>Touch:</strong> drag anywhere on your side to steer with the thumbstick; tap 💣 to drop a bomb and ⚡ to detonate. In battle each player grips one end of the device.</li>
+              <li>Power-ups: extra bomb, bigger blast, speed, remote detonator, bomb kick (walk into a bomb to send it sliding).</li>
+              <li>Escape pauses, M mutes. Bombs chain-explode each other — careful.</li>
+              <li>In battle, when time runs out the arena starts closing in.</li>
+            </ul>
+          </details>
+        </aside>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </main>
+  </body>
+</html>
