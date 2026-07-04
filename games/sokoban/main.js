@@ -1,5 +1,11 @@
 import { LEVELS, LEVEL_SET, validateLevels } from './levels.js';
 import { audio } from './audio.js';
+import {
+  createTouchControls,
+  coarsePointer,
+  enterPlayMode,
+  exitPlayMode,
+} from '../../shared/touch.js';
 
 if (import.meta.env?.DEV) {
   validateLevels(LEVELS);
@@ -23,6 +29,16 @@ const KEY_DIRS = {
   a: [-1, 0],
   d: [1, 0],
 };
+
+// The stick shares heldDirs with the keyboard; removal filters by array
+// reference, so touch directions must always be these exact vectors.
+const TOUCH_DIRS = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+};
+const TOUCH_DIR_VECS = new Set(Object.values(TOUCH_DIRS));
 
 const PALETTES = {
   light: {
@@ -87,6 +103,8 @@ const solvedDetail = document.getElementById('solved-detail');
 const levelOverlay = document.getElementById('level-overlay');
 const levelGrid = document.getElementById('level-grid');
 const levelClose = document.getElementById('level-close');
+const playTouchBtn = document.getElementById('play-touch');
+const fsExitBtn = document.getElementById('fs-exit');
 
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -390,8 +408,15 @@ function openLevelSelect() {
 
 function computeLayout() {
   const { level } = state;
-  const availW = Math.min(620, Math.max(240, mainEl.clientWidth - 32));
-  const availH = Math.max(280, window.innerHeight - 280);
+  // In fullscreen touch play the board gets the whole viewport minus the top
+  // strip and the thumb zone at the bottom.
+  const touchPlay = document.body.classList.contains('touch-play');
+  const availW = touchPlay
+    ? window.innerWidth - PAD * 2
+    : Math.min(620, Math.max(240, mainEl.clientWidth - 32));
+  const availH = touchPlay
+    ? Math.max(200, Math.round(window.innerHeight * 0.72))
+    : Math.max(280, window.innerHeight - 280);
   state.tile = Math.max(
     TILE_MIN,
     Math.min(
@@ -643,6 +668,9 @@ window.addEventListener('blur', () => {
 canvas.addEventListener(
   'touchstart',
   (event) => {
+    // In fullscreen play mode the joystick owns movement; swipes stay for
+    // the normal page layout.
+    if (document.body.classList.contains('touch-play')) return;
     if (event.touches.length !== 1) return;
     event.preventDefault();
     const t = event.touches[0];
@@ -682,7 +710,56 @@ levelClose.addEventListener('click', () => {
 });
 muteBtn.addEventListener('click', toggleMute);
 
+// Fullscreen touch play: the joystick feeds the same heldDirs model as the
+// keyboard, so hold-to-walk repeat comes from onMoveSettled's chaining.
+const touch = createTouchControls({
+  container: document.querySelector('.board-wrap'),
+  actions: [
+    { id: 'restart', label: '⟲', ariaLabel: 'restart level' },
+    { id: 'undo', label: '↩', ariaLabel: 'undo move' },
+  ],
+  onDirection(_playerId, dirName) {
+    state.heldDirs = state.heldDirs.filter((d) => !TOUCH_DIR_VECS.has(d));
+    if (!dirName) return;
+    const dir = TOUCH_DIRS[dirName];
+    state.heldDirs.push(dir);
+    handleDirInput(dir);
+  },
+  onAction(_playerId, actionId) {
+    if (actionId === 'undo') undo();
+    else restart();
+  },
+});
+
+function enterTouchMode() {
+  enterPlayMode();
+  fsExitBtn.hidden = false;
+  touch.show('solo');
+  computeLayout();
+  draw();
+}
+
+function exitTouchMode() {
+  touch.hide();
+  exitPlayMode();
+  fsExitBtn.hidden = true;
+  computeLayout();
+  draw();
+}
+
+playTouchBtn.addEventListener('click', enterTouchMode);
+fsExitBtn.addEventListener('click', exitTouchMode);
+playTouchBtn.hidden = !coarsePointer.matches;
+
 window.addEventListener('resize', () => {
+  computeLayout();
+  draw();
+});
+window.visualViewport?.addEventListener('resize', () => {
+  computeLayout();
+  draw();
+});
+document.addEventListener('fullscreenchange', () => {
   computeLayout();
   draw();
 });

@@ -132,6 +132,8 @@ h1 {
 .overlay {
   position: absolute;
   inset: 0;
+  /* Above the shared touch overlay (z-index 55) in fullscreen play mode. */
+  z-index: 70;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -220,4 +222,61 @@ h1 {
   to {
     opacity: 1;
   }
+}
+
+/* --- Fullscreen touch play mode ------------------------------------------ */
+/* Generic chrome hiding and the joystick overlay come from shared/touch.css. */
+
+body.touch-play .board-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: var(--ui-bg);
+  padding-top: calc(10px + env(safe-area-inset-top));
+}
+
+body.touch-play #board {
+  border: none;
+}
+
+body.touch-play .attribution {
+  display: none;
+}
+
+/* Status messages (e.g. the deadlock warning) become a floating toast. */
+body.touch-play .status {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  margin: 0;
+  z-index: 60;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+#fs-exit {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(8px + env(safe-area-inset-right));
+  z-index: 60;
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+  background: transparent;
+  color: var(--ui-fg);
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  touch-action: manipulation;
+}
+
+/* Restart is the small raised button next to the primary undo. */
+.touch-root [data-action='restart'] {
+  width: var(--btn-sm);
+  height: var(--btn-sm);
+  font-size: calc(var(--btn-sm) * 0.45);
+  margin-bottom: calc(var(--btn) * 0.55);
 }

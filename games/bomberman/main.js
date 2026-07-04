@@ -10,7 +10,12 @@ import {
 } from './levels.js';
 import { chooseEnemyDir, computeDangerTiles } from './ai.js';
 import { audio } from './audio.js';
-import { initTouch, setTouchMode, setRemote, setLefty } from './touch.js';
+import {
+  createTouchControls,
+  coarsePointer,
+  enterPlayMode as enterTouchPlay,
+  exitPlayMode as exitTouchPlay,
+} from '../../shared/touch.js';
 
 if (import.meta.env?.DEV) validateLevels(LEVELS);
 
@@ -194,7 +199,6 @@ const fsPause = document.getElementById('fs-pause');
 const fsMute = document.getElementById('fs-mute');
 
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
-const coarsePointer = window.matchMedia('(any-pointer: coarse)');
 
 const state = {
   screen: 'menu', // 'menu' | 'campaign' | 'battle'
@@ -277,26 +281,18 @@ function buzz(ms) {
 // and the thumbstick/action controls float on top of it.
 function enterPlayMode(mode) {
   if (!coarsePointer.matches) {
-    setTouchMode(null);
+    touch.hide();
     return;
   }
-  document.body.classList.add('touch-play');
-  setTouchMode(mode);
-  setLefty(progress.lefty);
-  try {
-    document.documentElement.requestFullscreen?.()?.catch?.(() => {});
-  } catch {
-    // Fullscreen API unavailable (iOS Safari) — the CSS takeover suffices.
-  }
+  enterTouchPlay();
+  touch.show(mode, mode === 'battle' ? [0, 1] : [0]);
+  touch.setLefty(progress.lefty);
   computeLayout();
 }
 
 function exitPlayMode() {
-  document.body.classList.remove('touch-play');
-  setTouchMode(null);
-  if (document.fullscreenElement) {
-    document.exitFullscreen?.()?.catch?.(() => {});
-  }
+  touch.hide();
+  exitTouchPlay();
   computeLayout();
 }
 
@@ -467,7 +463,7 @@ function startCampaign(index) {
   hudBattle.hidden = true;
   showOnly(null);
   enterPlayMode('campaign');
-  setRemote(0, player.remote);
+  touch.setActionVisible(0, 'detonate', player.remote);
   loadCampaignLevel(index);
 }
 
@@ -547,8 +543,8 @@ function startBattleRound() {
   placeEntity(p1, arena.spawns[0].x, arena.spawns[0].y);
   placeEntity(p2, arena.spawns[1].x, arena.spawns[1].y);
   state.players = [p1, p2];
-  setRemote(0, false);
-  setRemote(1, false);
+  touch.setActionVisible(0, 'detonate', false);
+  touch.setActionVisible(1, 'detonate', false);
   computeLayout();
   setPhase('intro', INTRO_MS, {
     text: `Round ${state.round}`,
@@ -753,7 +749,7 @@ function updatePlayer(player, dt) {
     audio.play('pickup');
     buzz(10);
     spawnParticles(px, py, 6, palette().pickupBorder);
-    setRemote(player.id, player.remote);
+    touch.setActionVisible(player.id, 'detonate', player.remote);
     updateHud();
   }
 }
@@ -1564,7 +1560,7 @@ function syncMuteButtons() {
 
 function toggleLefty() {
   progress.lefty = !progress.lefty;
-  setLefty(progress.lefty);
+  touch.setLefty(progress.lefty);
   syncLeftyButton();
   saveProgress();
 }
@@ -1617,23 +1613,26 @@ window.addEventListener('blur', () => {
   }
 });
 
-// Touch controls (touch.js) feed the same per-player input model as the
-// keyboard: the stick swaps a single synthetic code in heldDirs, buttons set
-// the wants* flags.
-initTouch({
-  setHeld(playerId, code) {
+// Touch controls (shared/touch.js) feed the same per-player input model as
+// the keyboard: the stick swaps a single synthetic stick-* code in heldDirs,
+// buttons set the wants* flags.
+const touch = createTouchControls({
+  container: document.querySelector('.board-wrap'),
+  actions: [
+    { id: 'detonate', label: '⚡', ariaLabel: 'detonate', hidden: true },
+    { id: 'bomb', label: '💣', ariaLabel: 'drop bomb' },
+  ],
+  onDirection(playerId, dir) {
     const player = state.players[playerId];
     if (!player) return;
     player.heldDirs = player.heldDirs.filter((c) => !c.startsWith('stick-'));
-    if (code && !state.paused) player.heldDirs.push(code);
+    if (dir && !state.paused) player.heldDirs.push(`stick-${dir}`);
   },
-  onBomb(playerId) {
+  onAction(playerId, actionId) {
     const player = state.players[playerId];
-    if (player && !state.paused && state.phase !== 'over') player.wantsBomb = true;
-  },
-  onDetonate(playerId) {
-    const player = state.players[playerId];
-    if (player && !state.paused && state.phase !== 'over') player.wantsDetonate = true;
+    if (!player || state.paused || state.phase === 'over') return;
+    if (actionId === 'bomb') player.wantsBomb = true;
+    else if (actionId === 'detonate') player.wantsDetonate = true;
   },
 });
 
@@ -1675,7 +1674,7 @@ if (import.meta.env?.DEV) window.__bmState = state;
 audio.setMuted(progress.muted);
 syncMuteButtons();
 syncLeftyButton();
-setLefty(progress.lefty);
+touch.setLefty(progress.lefty);
 showMenu();
 requestAnimationFrame((now) => {
   state.lastTime = now;

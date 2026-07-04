@@ -12,7 +12,9 @@
     <main>
       <h1>Tetris</h1>
       <div class="layout">
-        <canvas id="board" width="300" height="600" aria-label="Tetris board"></canvas>
+        <div class="board-wrap">
+          <canvas id="board" width="300" height="600" aria-label="Tetris board"></canvas>
+        </div>
         <aside class="sidebar">
           <div class="panel">
             <h2>Next</h2>
@@ -33,6 +35,7 @@
               <li><kbd>Z</kbd> rotate ccw</li>
               <li><kbd>Space</kbd> hard drop</li>
               <li><kbd>P</kbd> pause</li>
+              <li>Touch: stick moves, ⟳ rotates, ⤓ drops</li>
             </ul>
           </details>
         </aside>
