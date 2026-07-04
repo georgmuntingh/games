@@ -18,7 +18,9 @@ const DIRS = [
 function passable(world, x, y) {
   if (x < 0 || y < 0 || x >= world.cols || y >= world.rows) return false;
   if (world.grid[y][x] !== T_EMPTY) return false;
-  return !world.bombs.some((b) => b.x === x && b.y === y);
+  // Sticky bombs (the player's) don't block enemies — they walk onto them and
+  // the bomb attaches. Regular bombs remain solid obstacles.
+  return !world.bombs.some((b) => b.x === x && b.y === y && !b.sticky);
 }
 
 function occupiedTile(entity) {

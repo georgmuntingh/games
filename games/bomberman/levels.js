@@ -12,8 +12,8 @@ export const T_SOFT = 2;
 
 const ENEMY_TYPES = { W: 'wanderer', C: 'chaser', B: 'smart' };
 
-// Power-up types that random (non-guaranteed) drops choose from. Remote and
-// kick stay exclusive to guaranteed drops so their introduction is paced.
+// Power-up types that random (non-guaranteed) drops choose from. Remote, kick
+// and sticky stay exclusive to guaranteed drops so their introduction is paced.
 const RANDOM_DROP_POOL = ['bombs', 'range', 'speed'];
 
 export const LEVELS = [
@@ -92,7 +92,7 @@ export const LEVELS = [
   {
     name: 'The Chase',
     time: 180,
-    drops: ['bombs'],
+    drops: ['sticky', 'bombs'],
     dropChance: 0.1,
     map: [
       '#############',
@@ -373,7 +373,7 @@ export function makeBattleArena() {
   }
 
   const hidden = new Map();
-  const dropPool = ['bombs', 'bombs', 'range', 'range', 'speed', 'kick', 'remote'];
+  const dropPool = ['bombs', 'bombs', 'range', 'range', 'speed', 'kick', 'remote', 'sticky'];
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       if (grid[y][x] !== T_EMPTY || clear.has(cellKey(x, y))) continue;
