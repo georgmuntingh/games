@@ -1,0 +1,134 @@
+/* Shared touch-controls overlay (see shared/touch.js). Games provide their
+   own body.touch-play board takeover; this file covers the generic play-mode
+   chrome, the overlay itself, and a default one-player layout (stick
+   bottom-left, actions bottom-right, mirrored by .lefty). Multi-player mode
+   layouts live in the game's own CSS under .touch-root.mode-<mode> and must
+   set left/right explicitly (including `auto`) to beat the defaults. */
+
+body.touch-play {
+  overflow: hidden;
+}
+
+body.touch-play .back-link,
+body.touch-play main > h1,
+body.touch-play .sidebar {
+  display: none;
+}
+
+.touch-root {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+  --btn: clamp(56px, 11vmin, 78px);
+  --btn-sm: clamp(42px, 8.5vmin, 58px);
+}
+
+.touch-root .stick-zone,
+.touch-root .touch-action {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stick-zone {
+  position: absolute;
+}
+
+.stick-base {
+  position: absolute;
+  width: 110px;
+  height: 110px;
+  margin: -55px 0 0 -55px;
+  border-radius: 50%;
+  background: rgba(128, 128, 128, 0.18);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+  pointer-events: none;
+}
+
+.stick-base.active {
+  opacity: 1;
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.action-cluster {
+  position: absolute;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.touch-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--btn);
+  height: var(--btn);
+  font-size: calc(var(--btn) * 0.45);
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(128, 128, 128, 0.25);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.touch-action[hidden] {
+  display: none;
+}
+
+.touch-action:active {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0.94);
+}
+
+/* Idle fade: controls dim when untouched so the board stays visible. */
+.touch-root.idle .stick-base,
+.touch-root.idle .touch-action {
+  opacity: 0.35;
+  transition: opacity 0.6s ease-out;
+}
+
+.touch-root.idle .stick-base:not(.active) {
+  opacity: 0;
+}
+
+/* Default 1-player layout: stick zone bottom-left, actions bottom-right
+   (mirrored if lefty). */
+.touch-root .stick-zone {
+  left: 0;
+  bottom: 0;
+  width: 45%;
+  height: 65%;
+}
+
+.touch-root .action-cluster {
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.touch-root.lefty .stick-zone {
+  left: auto;
+  right: 0;
+}
+
+.touch-root.lefty .action-cluster {
+  right: auto;
+  left: calc(18px + env(safe-area-inset-left));
+  flex-direction: row-reverse;
+}
