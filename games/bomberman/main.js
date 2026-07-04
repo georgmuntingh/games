@@ -54,6 +54,7 @@ const PICKUP_LABELS = {
   speed: 'S',
   remote: 'RC',
   kick: 'K',
+  sticky: 'ST',
 };
 
 const PALETTES = {
@@ -229,6 +230,7 @@ const state = {
   wins: [0, 0],
   shake: 0,
   endAction: null,
+  fullscreen: false,
   tile: 32,
   pixelRatio: 1,
   lastTime: 0,
@@ -293,7 +295,30 @@ function enterPlayMode(mode) {
 function exitPlayMode() {
   touch.hide();
   exitTouchPlay();
+  setFullscreen(false);
   computeLayout();
+}
+
+// Keyboard fullscreen (desktop): the board takes over the viewport and scales
+// up to fill the screen. Reuses the same body-class CSS takeover as touch play
+// (via the `fs-mode` class) but without the thumbstick overlay. Real fullscreen
+// is best-effort on top — the CSS takeover works even if it's blocked.
+function setFullscreen(on) {
+  if (on === state.fullscreen) return;
+  state.fullscreen = on;
+  document.body.classList.toggle('fs-mode', on);
+  try {
+    if (on) document.documentElement.requestFullscreen?.()?.catch?.(() => {});
+    else if (document.fullscreenElement) document.exitFullscreen?.()?.catch?.(() => {});
+  } catch {
+    // Fullscreen API unavailable — the CSS takeover suffices.
+  }
+  computeLayout();
+}
+
+function toggleFullscreen() {
+  if (state.screen === 'menu') return;
+  setFullscreen(!state.fullscreen);
 }
 
 function flashStatus(text) {
@@ -325,6 +350,7 @@ function makePlayer(id, controls) {
     speedLevel: 0,
     remote: false,
     kick: false,
+    sticky: false,
     heldDirs: [],
     wantsBomb: false,
     wantsDetonate: false,
@@ -761,8 +787,12 @@ function tryMovePlayer(player, dir) {
   if (tileAt(nx, ny) !== T_EMPTY) return;
   const bomb = bombAt(nx, ny);
   if (bomb) {
-    if (player.kick && !bomb.slide) kickBomb(bomb, dir);
-    return;
+    // A sticky bomb from an opponent doesn't block — the player walks onto it
+    // and it attaches (handled in updateBombs). Own bombs behave as usual.
+    if (!(bomb.sticky && bomb.owner !== player)) {
+      if (player.kick && !bomb.slide) kickBomb(bomb, dir);
+      return;
+    }
   }
   player.x = nx;
   player.y = ny;
@@ -782,6 +812,7 @@ function grantPickup(player, type) {
   else if (type === 'speed') player.speedLevel = Math.min(4, player.speedLevel + 1);
   else if (type === 'remote') player.remote = true;
   else if (type === 'kick') player.kick = true;
+  else if (type === 'sticky') player.sticky = true;
 }
 
 function tryPlaceBomb(player) {
@@ -797,6 +828,8 @@ function tryPlaceBomb(player) {
     range: player.range,
     owner: player,
     slide: null,
+    sticky: player.sticky,
+    stuck: null,
   });
   player.bombsActive++;
   audio.play('place');
@@ -846,7 +879,10 @@ function updateEnemies(dt) {
       enemy.thinkCooldown -= dt;
       if (enemy.thinkCooldown <= 0) {
         const dir = chooseEnemyDir(enemy, world);
-        if (dir && tileAt(enemy.x + dir[0], enemy.y + dir[1]) === T_EMPTY && !bombAt(enemy.x + dir[0], enemy.y + dir[1])) {
+        const blockBomb = dir ? bombAt(enemy.x + dir[0], enemy.y + dir[1]) : null;
+        // Sticky bombs (always the player's) don't block enemies — they walk
+        // onto them and the bomb attaches in updateBombs.
+        if (dir && tileAt(enemy.x + dir[0], enemy.y + dir[1]) === T_EMPTY && (!blockBomb || blockBomb.sticky)) {
           enemy.dir = dir;
           enemy.x += dir[0];
           enemy.y += dir[1];
@@ -866,9 +902,39 @@ function updateEnemies(dt) {
   }
 }
 
+// Is a stuck carrier still around to ride? Players die in place (alive=false),
+// enemies are spliced out of state.enemies when killed.
+function carrierInPlay(entity) {
+  return state.players.includes(entity) ? entity.alive : state.enemies.includes(entity);
+}
+
+function updateSticky(bomb) {
+  if (!bomb.stuck) {
+    const target = entityAt(bomb.x, bomb.y);
+    // Attach to the first opponent standing on the bomb (never the owner).
+    if (target && target !== bomb.owner) {
+      bomb.stuck = target;
+      bomb.slide = null;
+    }
+    return;
+  }
+  if (!carrierInPlay(bomb.stuck)) {
+    // Carrier is gone — the bomb drops where it last was and ticks down alone.
+    bomb.stuck = null;
+    return;
+  }
+  // Ride along: the bomb tracks the carrier and detonates on their tile.
+  const carrier = bomb.stuck;
+  bomb.rx = carrier.rx;
+  bomb.ry = carrier.ry;
+  bomb.x = Math.round(carrier.rx);
+  bomb.y = Math.round(carrier.ry);
+}
+
 function updateBombs(dt) {
   for (const bomb of [...state.bombs]) {
     if (!state.bombs.includes(bomb)) continue;
+    if (bomb.sticky) updateSticky(bomb);
     if (bomb.slide) {
       const slide = bomb.slide;
       slide.t += dt;
@@ -1098,13 +1164,16 @@ function computeLayout() {
   let availH;
   let tileMin = TILE_MIN;
   let tileMax = TILE_MAX;
-  if (document.body.classList.contains('touch-play')) {
+  const fsMode = document.body.classList.contains('fs-mode');
+  if (document.body.classList.contains('touch-play') || fsMode) {
     // Fullscreen play mode: the board must always fit the viewport whole,
     // under the 44px HUD strip. Controls float on top and reserve no space.
     availW = window.innerWidth - 8;
     availH = window.innerHeight - 52;
     tileMin = 8;
-    tileMax = 56;
+    // Keyboard fullscreen has no thumbstick to clear, so let tiles grow large
+    // enough to fill a desktop monitor; touch play keeps a tighter cap.
+    tileMax = fsMode ? 88 : 56;
   } else {
     availW = Math.min(760, Math.max(280, mainEl.clientWidth - 32));
     availH = Math.max(320, window.innerHeight - 300);
@@ -1253,7 +1322,8 @@ function drawPickup(pickup, pal, t) {
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = pal.pickupText;
-  ctx.font = `bold ${Math.round(t * (pickup.type === 'remote' ? 0.32 : 0.44))}px system-ui, sans-serif`;
+  const twoChar = pickup.type === 'remote' || pickup.type === 'sticky';
+  ctx.font = `bold ${Math.round(t * (twoChar ? 0.32 : 0.44))}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(PICKUP_LABELS[pickup.type], ox + t * 0.5, oy + t * 0.54);
@@ -1488,6 +1558,7 @@ function powerBadges(player) {
   let badges = `B${player.bombCap} R${player.range} S${player.speedLevel}`;
   if (player.remote) badges += ' RC';
   if (player.kick) badges += ' K';
+  if (player.sticky) badges += ' ST';
   return badges;
 }
 
@@ -1573,6 +1644,10 @@ function syncLeftyButton() {
 window.addEventListener('keydown', (event) => {
   if (event.code === 'KeyM') {
     toggleMute();
+    return;
+  }
+  if (event.code === 'KeyF') {
+    toggleFullscreen();
     return;
   }
   if (event.code === 'Escape') {
@@ -1662,7 +1737,14 @@ onClick(fsMute, toggleMute);
 
 window.addEventListener('resize', computeLayout);
 window.visualViewport?.addEventListener('resize', computeLayout);
-document.addEventListener('fullscreenchange', computeLayout);
+document.addEventListener('fullscreenchange', () => {
+  // Browser-driven exit (Esc/F11) should drop our keyboard fullscreen too.
+  if (!document.fullscreenElement && state.fullscreen) {
+    state.fullscreen = false;
+    document.body.classList.remove('fs-mode');
+  }
+  computeLayout();
+});
 darkScheme.addEventListener?.('change', () => {
   // Palette is re-read every frame; nothing to do beyond letting rAF redraw.
 });
