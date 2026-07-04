@@ -17,6 +17,10 @@ h1 {
   flex-wrap: wrap;
 }
 
+.board-wrap {
+  position: relative;
+}
+
 #board {
   background: #0b0d12;
   border: 1px solid var(--ui-border);
@@ -24,6 +28,43 @@ h1 {
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+/* Fullscreen touch play mode: the board takes the viewport (shared/touch.css
+   hides the page chrome and hosts the stick/button overlay). The tall board
+   fits height-first, above the thumb zone. */
+body.touch-play .board-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: var(--ui-bg);
+  padding: calc(10px + env(safe-area-inset-top)) 0 25vh;
+}
+
+body.touch-play #board {
+  height: 100%;
+  width: auto;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+}
+
+/* Pause and hard-drop are raised above the primary rotate button. */
+.touch-root [data-action='drop'] {
+  width: var(--btn-sm);
+  height: var(--btn-sm);
+  font-size: calc(var(--btn-sm) * 0.45);
+  margin-bottom: calc(var(--btn) * 0.55);
+}
+
+.touch-root [data-action='pause'] {
+  width: var(--btn-sm);
+  height: var(--btn-sm);
+  font-size: calc(var(--btn-sm) * 0.45);
+  margin-bottom: calc(var(--btn) * 1.2);
 }
 
 .sidebar {

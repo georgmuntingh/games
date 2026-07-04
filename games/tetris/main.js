@@ -1,6 +1,19 @@
+import {
+  createTouchControls,
+  coarsePointer,
+  enterPlayMode,
+  exitPlayMode,
+} from '../../shared/touch.js';
+
 const COLS = 10;
 const ROWS = 20;
 const CELL = 30;
+
+// Touch auto-repeat: the keyboard gets repeat from the OS, the stick needs
+// its own cadence (first move immediately, then repeat while held).
+const TOUCH_REPEAT_INITIAL_MS = 170;
+const TOUCH_REPEAT_H_MS = 90;
+const TOUCH_REPEAT_V_MS = 50;
 
 const COLORS = {
   I: '#22d3ee',
@@ -78,6 +91,8 @@ let running = false;
 let paused = false;
 let gameOver = false;
 let rafId = null;
+let touchDir = null;
+let touchRepeatAt = 0;
 
 function emptyBoard() {
   return Array.from({ length: ROWS }, () => Array(COLS).fill(null));
@@ -243,6 +258,15 @@ function step(now) {
     }
     lastDropAt = now;
   }
+  if (touchDir && touchDir !== 'up' && now >= touchRepeatAt) {
+    if (touchDir === 'left') shift(-1);
+    else if (touchDir === 'right') shift(1);
+    else {
+      softDrop();
+      lastDropAt = now;
+    }
+    touchRepeatAt = now + (touchDir === 'down' ? TOUCH_REPEAT_V_MS : TOUCH_REPEAT_H_MS);
+  }
   draw();
 }
 
@@ -368,6 +392,10 @@ function start() {
   reset();
   running = true;
   playBtn.textContent = 'Pause';
+  if (coarsePointer.matches) {
+    enterPlayMode();
+    touch.show('solo');
+  }
 }
 
 function togglePause() {
@@ -379,6 +407,9 @@ function togglePause() {
 
 function finish() {
   running = false;
+  touchDir = null;
+  touch.hide();
+  exitPlayMode();
   statusEl.textContent = `Game over — score ${score}.`;
   playBtn.textContent = 'Play again';
 }
@@ -430,6 +461,41 @@ window.addEventListener('keydown', (event) => {
       break;
     default:
   }
+});
+
+// The stick moves/soft-drops (repeat handled in step); buttons cover the
+// discrete actions. Stick-up is ignored — too easy to hit by accident.
+const touch = createTouchControls({
+  container: document.querySelector('.board-wrap'),
+  actions: [
+    { id: 'pause', label: '⏸', ariaLabel: 'pause' },
+    { id: 'drop', label: '⤓', ariaLabel: 'hard drop' },
+    { id: 'rotate', label: '⟳', ariaLabel: 'rotate' },
+  ],
+  onDirection(_playerId, dir) {
+    touchDir = dir;
+    if (!running || paused || gameOver || !dir || dir === 'up') return;
+    if (dir === 'left') shift(-1);
+    else if (dir === 'right') shift(1);
+    else {
+      softDrop();
+      lastDropAt = performance.now();
+    }
+    touchRepeatAt = performance.now() + TOUCH_REPEAT_INITIAL_MS;
+  },
+  onAction(_playerId, actionId) {
+    if (actionId === 'pause') {
+      togglePause();
+      return;
+    }
+    if (!running || paused || gameOver) return;
+    if (actionId === 'rotate') {
+      rotate(1);
+    } else {
+      hardDrop();
+      lastDropAt = performance.now();
+    }
+  },
 });
 
 reset();
