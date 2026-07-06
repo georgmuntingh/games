@@ -2,3 +2,8 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# Eggerland map extraction: source image (copyrighted) and generated
+# intermediates stay out of the repo; only the emitted rooms.js is committed.
+games/eggerland/tools/assets/
+games/eggerland/tools/out/
