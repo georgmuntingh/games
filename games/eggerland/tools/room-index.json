@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Hand-written stage numbering for the extracted map: grid coordinate",
+    "('col,row', row 0 = north) to stage number. Filled in by reading the",
+    "stage labels off the map image once the real extraction runs (M6);",
+    "the provisional entries below match the hand-transcribed starter",
+    "rooms. Special stages (A-V, hidden) get string ids as extraRooms in",
+    "map-layout.json and are numbered 0 here."
+  ],
+  "stageByCoord": {
+    "0,9": 1,
+    "1,9": 2,
+    "2,9": 3,
+    "0,8": 4,
+    "1,8": 5,
+    "2,8": 6
+  }
+}
