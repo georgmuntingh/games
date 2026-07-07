@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eggerland</title>
+    <script type="module" crossorigin src="/games/pr-previews/pr-15/assets/games/eggerland-B2AGGitF.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-15/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-15/assets/touch-D618qPxG.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-15/assets/touch-xmpglBJo.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-15/assets/eggerland-CpkAzx7Y.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-15/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <h1>Eggerland</h1>
+      <div class="layout">
+        <div class="board-wrap">
+          <canvas id="board" aria-label="Eggerland room"></canvas>
+          <div id="clear-overlay" class="overlay" hidden>
+            <div class="overlay-card">
+              <h2>Room clear!</h2>
+              <p>The doors are open.</p>
+            </div>
+          </div>
+          <div id="death-overlay" class="overlay" hidden>
+            <div class="overlay-card">
+              <h2>Ouch!</h2>
+              <p id="death-detail"></p>
+              <p class="hint">Press any key to try again.</p>
+            </div>
+          </div>
+          <div id="map-overlay" class="overlay" hidden>
+            <div class="overlay-card map-card">
+              <h2>Labyrinth map</h2>
+              <div id="map-grid" role="listbox" aria-label="Choose a room"></div>
+              <button id="map-close" type="button">Close</button>
+            </div>
+          </div>
+          <button id="fs-exit" type="button" hidden aria-label="Exit fullscreen">✕</button>
+        </div>
+        <aside class="sidebar">
+          <div class="panel stats">
+            <div>
+              <span class="label">Room</span><span id="stage-label">—</span>
+            </div>
+            <div>
+              <span class="label">Hearts</span><span id="hearts">0 / 0</span>
+            </div>
+            <div>
+              <span class="label">Shots</span><span id="shots">0</span>
+            </div>
+            <div>
+              <span class="label">Cleared</span><span id="cleared-count">0 / 0</span>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="play-touch" type="button" class="action-btn" hidden>
+              Play fullscreen
+            </button>
+          </div>
+          <div class="btn-row">
+            <button id="restart" type="button" class="action-btn">
+              Restart (R)
+            </button>
+            <button id="map-btn" type="button" class="action-btn">Map (Esc)</button>
+          </div>
+          <div class="btn-row">
+            <button id="mute" type="button" class="action-btn" aria-pressed="false">
+              Sound: on
+            </button>
+          </div>
+          <details class="controls">
+            <summary>How to play</summary>
+            <ul>
+              <li>Collect every heart to open the treasure chest, then grab the jewel to clear the room and open its doors.</li>
+              <li>Move with the arrow keys or WASD; on touch screens, swipe or play fullscreen with the joystick.</li>
+              <li>Push emerald blocks to hide from Medusa gazes — push them into water to build a bridge.</li>
+              <li>Some hearts grant two magic shots (Space or X). A shot turns Snakey, Rocky or Alma into a pushable egg; a second shot sends the egg flying.</li>
+              <li>Gols and Skulls wake up when the last heart is taken. R restarts the room, M mutes, Esc opens the map.</li>
+            </ul>
+          </details>
+        </aside>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+      <p class="attribution">
+        A fan tribute to Eggerland 2 (HAL Laboratory, 1986, MSX2). Original
+        world map reference by Benoît Delvaux.
+      </p>
+    </main>
+  </body>
+</html>
