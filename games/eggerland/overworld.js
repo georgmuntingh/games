@@ -66,7 +66,7 @@ export function loadProgress() {
       return {
         current: typeof stored.current === 'string' && ROOMS[stored.current]
           ? stored.current
-          : '0,0',
+          : '0,9',
         muted: Boolean(stored.muted),
         cleared: stored.cleared && typeof stored.cleared === 'object' ? stored.cleared : {},
         visited: stored.visited && typeof stored.visited === 'object' ? stored.visited : {},
@@ -75,7 +75,7 @@ export function loadProgress() {
   } catch {
     // Corrupt storage — start fresh.
   }
-  return { current: '0,0', muted: false, cleared: {}, visited: {} };
+  return { current: '0,9', muted: false, cleared: {}, visited: {} };
 }
 
 export function saveProgress(progress) {
