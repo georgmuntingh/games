@@ -6,7 +6,7 @@ export { ROOM_W, ROOM_H } from './tiles.js';
 
 export const ROOMS = {
   '0,0': {
-    stage: 0,
+    stage: 41,
     terrain: [
       '~~~~~~~~~~~',
       '.~........T',
@@ -40,7 +40,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: null },
   },
   '1,0': {
-    stage: 0,
+    stage: 42,
     terrain: [
       '~~~~~~~~~~~',
       '~~~.T.#..~.',
@@ -68,7 +68,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '2,0': {
-    stage: 0,
+    stage: 43,
     terrain: [
       '~~~~~~~~~~~',
       '~...T..T.T~',
@@ -98,7 +98,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '3,0': {
-    stage: 0,
+    stage: 64,
     terrain: [
       '.......<...',
       'TT.#..TTTT~',
@@ -125,7 +125,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '4,0': {
-    stage: 0,
+    stage: 63,
     terrain: [
       '...........',
       '.T.T.T.T.T.',
@@ -160,7 +160,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '5,0': {
-    stage: 0,
+    stage: 60,
     terrain: [
       '......>....',
       '.......TvTT',
@@ -196,7 +196,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '6,0': {
-    stage: 0,
+    stage: 59,
     terrain: [
       '...T.T.....',
       '...T.T.....',
@@ -235,7 +235,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '7,0': {
-    stage: 0,
+    stage: 58,
     terrain: [
       '.T...T...T.',
       'vT...T.....',
@@ -274,7 +274,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '8,0': {
-    stage: 0,
+    stage: 72,
     terrain: [
       '.......>...',
       '..T.....vT.',
@@ -318,7 +318,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: 5, w: 5 },
   },
   '9,0': {
-    stage: 0,
+    stage: 73,
     terrain: [
       '.......T...',
       '.......T...',
@@ -370,7 +370,7 @@ export const ROOMS = {
     exits: { n: null, s: 5, e: null, w: 5 },
   },
   '0,1': {
-    stage: 0,
+    stage: 40,
     terrain: [
       '...~...~...',
       '.T......#..',
@@ -398,7 +398,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,1': {
-    stage: 0,
+    stage: 45,
     terrain: [
       '...T..T.#..',
       '..T.#...#..',
@@ -430,7 +430,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,1': {
-    stage: 0,
+    stage: 44,
     terrain: [
       '~~~~~.~~~~~',
       '~.~~.~~.~~~',
@@ -459,7 +459,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,1': {
-    stage: 0,
+    stage: 62,
     terrain: [
       '#.#...~TTT.',
       '#.##.#.T.TT',
@@ -489,7 +489,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,1': {
-    stage: 0,
+    stage: 61,
     terrain: [
       '..........~',
       '.T.........',
@@ -534,7 +534,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,1': {
-    stage: 0,
+    stage: 71,
     terrain: [
       '.TT.T.T.T.~',
       '..T.T.T.T..',
@@ -560,7 +560,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,1': {
-    stage: 0,
+    stage: 57,
     terrain: [
       '...T...T...',
       '...T.......',
@@ -600,7 +600,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,1': {
-    stage: 0,
+    stage: 75,
     terrain: [
       'v.v.T...T..',
       '.T.<.^T^...',
@@ -638,7 +638,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,1': {
-    stage: 0,
+    stage: 65,
     terrain: [
       '..T....T...',
       'T>.^.>.<>T.',
@@ -664,7 +664,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,1': {
-    stage: 0,
+    stage: 74,
     terrain: [
       'T~TTT...v..',
       '...........',
@@ -701,7 +701,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,2': {
-    stage: 0,
+    stage: 39,
     terrain: [
       '.T~~~.~~~T.',
       'T........TT',
@@ -730,7 +730,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,2': {
-    stage: 0,
+    stage: 46,
     terrain: [
       'v~T~.......',
       'T<~~~~~~#..',
@@ -768,7 +768,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,2': {
-    stage: 0,
+    stage: 67,
     terrain: [
       '...~...T.T.',
       '.#.~.T.T..T',
@@ -808,7 +808,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,2': {
-    stage: 0,
+    stage: 66,
     terrain: [
       '....T.v....',
       'Tv..TT.T.TT',
@@ -848,7 +848,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,2': {
-    stage: 0,
+    stage: 68,
     terrain: [
       '.......T...',
       '.TTTT.TTTT.',
@@ -880,7 +880,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,2': {
-    stage: 0,
+    stage: 69,
     terrain: [
       '...........',
       '....T......',
@@ -915,7 +915,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,2': {
-    stage: 0,
+    stage: 70,
     terrain: [
       '....T.T....',
       '~.TTT.TTTT.',
@@ -948,7 +948,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,2': {
-    stage: 0,
+    stage: 56,
     terrain: [
       '..T.....T..',
       '...........',
@@ -994,7 +994,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,2': {
-    stage: 0,
+    stage: 76,
     terrain: [
       '...........',
       '...........',
@@ -1033,7 +1033,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,2': {
-    stage: 0,
+    stage: 77,
     terrain: [
       '...........',
       '~..........',
@@ -1066,7 +1066,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,3': {
-    stage: 0,
+    stage: 38,
     terrain: [
       '~~~~~.~~~~~',
       '~~~~~~~~~~~',
@@ -1091,7 +1091,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,3': {
-    stage: 0,
+    stage: 47,
     terrain: [
       '~~~~~.~~~~~',
       '~~~~...~~~~',
@@ -1127,7 +1127,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,3': {
-    stage: 0,
+    stage: 48,
     terrain: [
       'TTTTT.TTTTT',
       'TTTTTTTTTTT',
@@ -1157,7 +1157,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,3': {
-    stage: 0,
+    stage: 49,
     terrain: [
       '.T.........',
       '...........',
@@ -1198,7 +1198,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,3': {
-    stage: 0,
+    stage: 52,
     terrain: [
       '..T.....T..',
       'TTT.....TTT',
@@ -1235,7 +1235,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,3': {
-    stage: 0,
+    stage: 53,
     terrain: [
       '...........',
       '.TT#TTTTTT.',
@@ -1263,7 +1263,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,3': {
-    stage: 0,
+    stage: 54,
     terrain: [
       '...........',
       '..TvT...TT.',
@@ -1312,7 +1312,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,3': {
-    stage: 0,
+    stage: 55,
     terrain: [
       '...........',
       '.....TTT...',
@@ -1350,7 +1350,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,3': {
-    stage: 0,
+    stage: 79,
     terrain: [
       '...........',
       '.....v.....',
@@ -1410,7 +1410,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,3': {
-    stage: 0,
+    stage: 78,
     terrain: [
       '...........',
       '...........',
@@ -1461,7 +1461,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,4': {
-    stage: 0,
+    stage: 37,
     terrain: [
       '~~~~~.~~~~~',
       '~~.T~~~T~~~',
@@ -1488,7 +1488,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,4': {
-    stage: 0,
+    stage: 34,
     terrain: [
       '~~~~~.~~~~~',
       '~~~~~~~~~~~',
@@ -1509,7 +1509,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,4': {
-    stage: 0,
+    stage: 33,
     terrain: [
       '.T.........',
       '...........',
@@ -1542,7 +1542,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,4': {
-    stage: 0,
+    stage: 50,
     terrain: [
       '..........~',
       '.T.T....#.T',
@@ -1573,7 +1573,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,4': {
-    stage: 0,
+    stage: 51,
     terrain: [
       '...........',
       '...T.....T.',
@@ -1635,7 +1635,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,4': {
-    stage: 0,
+    stage: 98,
     terrain: [
       '..TTT....T.',
       '..TTT......',
@@ -1669,7 +1669,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,4': {
-    stage: 0,
+    stage: 99,
     terrain: [
       '......<>...',
       '.......T...',
@@ -1707,7 +1707,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,4': {
-    stage: 0,
+    stage: 100,
     terrain: [
       '....T......',
       '....T....TT',
@@ -1741,7 +1741,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,4': {
-    stage: 0,
+    stage: 80,
     terrain: [
       '..~........',
       '...........',
@@ -1777,7 +1777,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,4': {
-    stage: 0,
+    stage: 81,
     terrain: [
       '...........',
       '~T.T.T.T...',
@@ -1822,7 +1822,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,5': {
-    stage: 0,
+    stage: 36,
     terrain: [
       '.T.T...T.T~',
       '.~~~~~~~~~~',
@@ -1859,7 +1859,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,5': {
-    stage: 0,
+    stage: 35,
     terrain: [
       '~~~~~.~~~~~',
       '~~...T..T~~',
@@ -1884,7 +1884,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,5': {
-    stage: 0,
+    stage: 32,
     terrain: [
       '..#....#...',
       '..T....T...',
@@ -1912,7 +1912,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,5': {
-    stage: 0,
+    stage: 31,
     terrain: [
       '...........',
       '^TTTv...T..',
@@ -1942,7 +1942,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,5': {
-    stage: 0,
+    stage: 30,
     terrain: [
       '...........',
       'T..........',
@@ -1980,7 +1980,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,5': {
-    stage: 0,
+    stage: 96,
     terrain: [
       'T.<T.....T.',
       'T.TTTTTTTT.',
@@ -2026,7 +2026,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,5': {
-    stage: 0,
+    stage: 95,
     terrain: [
       '...........',
       '.T....T.TvT',
@@ -2066,7 +2066,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,5': {
-    stage: 0,
+    stage: 94,
     terrain: [
       '....T....T.',
       '......T..T~',
@@ -2098,7 +2098,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,5': {
-    stage: 0,
+    stage: 83,
     terrain: [
       'T.........~',
       'TTvTvTvTvTT',
@@ -2127,7 +2127,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,5': {
-    stage: 0,
+    stage: 82,
     terrain: [
       '~.T........',
       'T.TTTTTTT..',
@@ -2157,7 +2157,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,6': {
-    stage: 0,
+    stage: 10,
     terrain: [
       '~~~~~.~~~~~',
       '~~~~~~~~~~~',
@@ -2182,7 +2182,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,6': {
-    stage: 0,
+    stage: 11,
     terrain: [
       '.T.........',
       '~~~~~~~~.T.',
@@ -2215,7 +2215,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,6': {
-    stage: 0,
+    stage: 12,
     terrain: [
       '.#.#...#.#.',
       '...........',
@@ -2250,7 +2250,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,6': {
-    stage: 0,
+    stage: 13,
     terrain: [
       '......T....',
       '..T.....T..',
@@ -2284,7 +2284,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,6': {
-    stage: 0,
+    stage: 29,
     terrain: [
       '.T.......T.',
       '.T.........',
@@ -2314,7 +2314,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,6': {
-    stage: 0,
+    stage: 97,
     terrain: [
       '...~...T...',
       'T#T..T..T#T',
@@ -2350,7 +2350,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,6': {
-    stage: 0,
+    stage: 26,
     terrain: [
       '...........',
       '...........',
@@ -2389,7 +2389,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,6': {
-    stage: 0,
+    stage: 93,
     terrain: [
       '......T.T..',
       '....TTT....',
@@ -2430,7 +2430,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,6': {
-    stage: 0,
+    stage: 84,
     terrain: [
       'TTT~T.TT.TT',
       '..T.T.TT..T',
@@ -2459,7 +2459,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,6': {
-    stage: 0,
+    stage: 85,
     terrain: [
       '...T.......',
       '...TTTTTTT.',
@@ -2499,7 +2499,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,7': {
-    stage: 0,
+    stage: 9,
     terrain: [
       '~.T.......~',
       '~~~~~~~~.~T',
@@ -2526,7 +2526,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,7': {
-    stage: 0,
+    stage: 8,
     terrain: [
       '.T......T..',
       '^..T.......',
@@ -2562,7 +2562,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,7': {
-    stage: 0,
+    stage: 7,
     terrain: [
       '....T.T....',
       '..T.....T..',
@@ -2595,7 +2595,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,7': {
-    stage: 0,
+    stage: 14,
     terrain: [
       '....~..T..T',
       'T.T#T.T.#..',
@@ -2635,7 +2635,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,7': {
-    stage: 0,
+    stage: 28,
     terrain: [
       '..........~',
       '...........',
@@ -2661,7 +2661,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,7': {
-    stage: 0,
+    stage: 27,
     terrain: [
       '...........',
       '...TTTTT...',
@@ -2702,7 +2702,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,7': {
-    stage: 0,
+    stage: 25,
     terrain: [
       '...........',
       '.....v.....',
@@ -2729,7 +2729,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,7': {
-    stage: 0,
+    stage: 92,
     terrain: [
       'T.........T',
       'T.........T',
@@ -2774,7 +2774,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,7': {
-    stage: 0,
+    stage: 91,
     terrain: [
       '....T......',
       '....>......',
@@ -2826,7 +2826,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,7': {
-    stage: 0,
+    stage: 86,
     terrain: [
       '...........',
       '...........',
@@ -2868,7 +2868,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,8': {
-    stage: 0,
+    stage: 2,
     terrain: [
       '.T..~.~....',
       '....~.~....',
@@ -2895,7 +2895,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: null },
   },
   '1,8': {
-    stage: 0,
+    stage: 3,
     terrain: [
       '.T.T...T.T.',
       '...<..T#...',
@@ -2928,7 +2928,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '2,8': {
-    stage: 0,
+    stage: 6,
     terrain: [
       '..T.T.T...T',
       '.#...#..###',
@@ -2962,7 +2962,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '3,8': {
-    stage: 0,
+    stage: 15,
     terrain: [
       '...T~...T..',
       '....#..#<..',
@@ -2994,7 +2994,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '4,8': {
-    stage: 0,
+    stage: 18,
     terrain: [
       '.T....T....',
       'TT.........',
@@ -3026,7 +3026,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '5,8': {
-    stage: 0,
+    stage: 19,
     terrain: [
       '...T..<.T..',
       '......T...T',
@@ -3061,7 +3061,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '6,8': {
-    stage: 0,
+    stage: 24,
     terrain: [
       '...T..<.T..',
       '......T...T',
@@ -3101,7 +3101,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '7,8': {
-    stage: 0,
+    stage: 23,
     terrain: [
       '...........',
       '...........',
@@ -3138,7 +3138,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '8,8': {
-    stage: 0,
+    stage: 90,
     terrain: [
       '...........',
       '..T......T.',
@@ -3184,7 +3184,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: 5, w: 5 },
   },
   '9,8': {
-    stage: 0,
+    stage: 87,
     terrain: [
       '....T.T...T',
       '....T.T....',
@@ -3242,7 +3242,7 @@ export const ROOMS = {
     exits: { n: 5, s: 5, e: null, w: 5 },
   },
   '0,9': {
-    stage: 0,
+    stage: 1,
     terrain: [
       '...........',
       '...........',
@@ -3270,7 +3270,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: null },
   },
   '1,9': {
-    stage: 0,
+    stage: 4,
     terrain: [
       '~..........',
       'TTTT###TTTT',
@@ -3304,7 +3304,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '2,9': {
-    stage: 0,
+    stage: 5,
     terrain: [
       '...........',
       'TTTTT.TTTTT',
@@ -3335,7 +3335,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '3,9': {
-    stage: 0,
+    stage: 16,
     terrain: [
       '.T.......~.',
       '.....#.....',
@@ -3369,7 +3369,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '4,9': {
-    stage: 0,
+    stage: 17,
     terrain: [
       '...<.......',
       '...T..TT.T#',
@@ -3406,7 +3406,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '5,9': {
-    stage: 0,
+    stage: 20,
     terrain: [
       '~..........',
       '...T...T...',
@@ -3460,7 +3460,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '6,9': {
-    stage: 0,
+    stage: 21,
     terrain: [
       '~TTTT.T....',
       'T.....T.TTT',
@@ -3496,7 +3496,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '7,9': {
-    stage: 0,
+    stage: 22,
     terrain: [
       '...........',
       '..T.T.T.T..',
@@ -3532,7 +3532,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '8,9': {
-    stage: 0,
+    stage: 89,
     terrain: [
       '...........',
       '...........',
@@ -3587,7 +3587,7 @@ export const ROOMS = {
     exits: { n: 5, s: null, e: 5, w: 5 },
   },
   '9,9': {
-    stage: 0,
+    stage: 88,
     terrain: [
       '..........~',
       '...TT.TTTTT',
