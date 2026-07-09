@@ -1,18 +1,11 @@
 {
   "_comment": [
-    "Hand-written stage numbering for the extracted map: grid coordinate",
-    "('col,row', row 0 = north) to stage number. Filled in by reading the",
-    "stage labels off the map image once the real extraction runs (M6);",
-    "the provisional entries below match the hand-transcribed starter",
-    "rooms. Special stages (A-V, hidden) get string ids as extraRooms in",
-    "map-layout.json and are numbered 0 here."
+    "grid coordinate 'col,row' -> printed stage number, read off the map.",
+    "The 10x10 grid is spatial, NOT in numeric order (top-left room is",
+    "stage 41). stageByCoord is intentionally empty: the printed numbers",
+    "are small and could not be transcribed reliably enough to trust, and",
+    "the spatial overworld navigates by grid position, so rooms are keyed",
+    "and displayed by 'col,row'. Fill this in to show real stage numbers."
   ],
-  "stageByCoord": {
-    "0,9": 1,
-    "1,9": 2,
-    "2,9": 3,
-    "0,8": 4,
-    "1,8": 5,
-    "2,8": 6
-  }
+  "stageByCoord": {}
 }
