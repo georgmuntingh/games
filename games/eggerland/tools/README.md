@@ -37,3 +37,13 @@ file and re-running `mapemit.mjs`. Annotation skulls next to the printed stage
 numbers are intentionally labelled `none`.
 
 `out/` and `assets/` are gitignored; `eggerland2-map.png` is the source image.
+
+## Classic tile theme
+
+`node tools/build-atlas.mjs` samples one clean 16x16 bitmap per semantic
+type from the map (terrain, hearts, chest, emerald, key, arrows, and the
+enemies it can find) and writes `../tiles-classic.js` — a base64 data-URI
+atlas plus a name->index map. The game's "Tiles: Modern/Classic" toggle
+switches render.js between the procedural art and blitting these sprites;
+types with no map sprite (player, egg, open chest, projectiles, and enemy
+types absent from the map) fall back to the procedural drawing.

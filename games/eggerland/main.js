@@ -22,6 +22,8 @@ import {
   drawPlayer,
   drawEnemy,
   drawProjectile,
+  setRenderTheme,
+  onAtlasReady,
 } from './render.js';
 import { audio } from './audio.js';
 import {
@@ -273,6 +275,7 @@ function palette() {
 
 function draw(now) {
   const pal = palette();
+  ctx.imageSmoothingEnabled = false; // keep pixel-art tiles crisp when scaled
   const open = doorsOpen();
   if (terrainDirty || lastDoorsOpen !== open) {
     renderTerrain(terrainCanvas, roomState.room, Math.round(tile * pixelRatio), pal, open);
@@ -517,6 +520,25 @@ function toggleMute() {
 
 muteBtn.addEventListener('click', toggleMute);
 
+const tilesBtn = document.getElementById('tiles');
+function updateTilesButton() {
+  const classic = progress.theme === 'classic';
+  tilesBtn.textContent = classic ? 'Tiles: Classic' : 'Tiles: Modern';
+  tilesBtn.setAttribute('aria-pressed', String(classic));
+}
+function toggleTheme() {
+  progress.theme = progress.theme === 'classic' ? 'modern' : 'classic';
+  setRenderTheme(progress.theme);
+  saveProgress(progress);
+  terrainDirty = true;
+  updateTilesButton();
+}
+tilesBtn.addEventListener('click', toggleTheme);
+// Classic sprites arrive asynchronously; repaint the terrain once ready.
+onAtlasReady(() => {
+  terrainDirty = true;
+});
+
 // Fullscreen touch play: the joystick feeds the same heldDirs model as
 // the keyboard.
 const touch = createTouchControls({
@@ -568,6 +590,8 @@ darkScheme.addEventListener('change', () => {
 
 audio.setMuted(progress.muted);
 updateMuteButton();
+setRenderTheme(progress.theme);
+updateTilesButton();
 loadRoom(roomKey);
 computeLayout();
 requestAnimationFrame(frame);

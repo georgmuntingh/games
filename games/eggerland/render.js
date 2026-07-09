@@ -4,6 +4,54 @@
 // door gaps, so canvas space is (ROOM_W+2) × (ROOM_H+2) tiles.
 
 import { ROOM_W, ROOM_H } from './rooms.js';
+import { CLASSIC_ATLAS, CLASSIC_MAP, CLASSIC_TILE } from './tiles-classic.js';
+
+// --- Theme: 'modern' (procedural art) or 'classic' (pixel sprites lifted
+// from eggerland2-map.png). Classic blits the atlas where a sprite exists
+// and falls back to the procedural drawing otherwise (player, egg, open
+// chest, projectiles, and enemy types not present on the map).
+let theme = 'modern';
+export function setRenderTheme(t) {
+  theme = t === 'classic' ? 'classic' : 'modern';
+}
+export function getRenderTheme() {
+  return theme;
+}
+
+let atlasImg = null;
+let atlasReady = false;
+let onReady = null;
+export function onAtlasReady(cb) {
+  onReady = cb;
+  if (atlasReady) cb();
+}
+if (typeof Image !== 'undefined') {
+  atlasImg = new Image();
+  atlasImg.onload = () => {
+    atlasReady = true;
+    if (onReady) onReady();
+  };
+  atlasImg.src = CLASSIC_ATLAS;
+}
+
+function classicOn() {
+  return theme === 'classic' && atlasReady;
+}
+
+// Blit atlas cell `name` into (dx,dy) scaled to `size`. Returns false when
+// the sprite isn't in the atlas so callers can fall back to procedural.
+function blit(ctx, name, dx, dy, size) {
+  const i = CLASSIC_MAP[name];
+  if (i === undefined) return false;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(atlasImg, i * CLASSIC_TILE, 0, CLASSIC_TILE, CLASSIC_TILE, dx, dy, size, size);
+  return true;
+}
+
+const TERRAIN_SPRITE = {
+  '.': 'floor', '~': 'water', '#': 'wall', T: 'tree',
+  '^': 'arrow-up', v: 'arrow-down', '<': 'arrow-left', '>': 'arrow-right',
+};
 
 export const PALETTES = {
   light: {
@@ -139,6 +187,13 @@ function drawFloorBase(ctx, px, py, t, pal, gx, gy) {
 }
 
 function drawTerrainTile(ctx, ch, px, py, t, pal, gx, gy) {
+  if (classicOn()) {
+    // Blit floor under overlay-style terrain, then the terrain sprite.
+    blit(ctx, 'floor', px, py, t);
+    const name = TERRAIN_SPRITE[ch];
+    if (name && name !== 'floor') blit(ctx, name, px, py, t);
+    return;
+  }
   switch (ch) {
     case '~': {
       ctx.fillStyle = pal.water;
@@ -274,8 +329,11 @@ function drawBorder(ctx, room, tile, pal, doorsOpen) {
     );
     if (doorSide) {
       // Door gap: golden frame, and a slab across it while closed.
-      ctx.fillStyle = (x + y) % 2 === 0 ? pal.floorA : pal.floorB;
-      ctx.fillRect(px, py, t, t);
+      if (classicOn()) blit(ctx, 'floor', px, py, t);
+      else {
+        ctx.fillStyle = (x + y) % 2 === 0 ? pal.floorA : pal.floorB;
+        ctx.fillRect(px, py, t, t);
+      }
       ctx.strokeStyle = pal.doorFrame;
       ctx.lineWidth = Math.max(2, t * 0.12);
       ctx.strokeRect(px + t * 0.08, py + t * 0.08, t * 0.84, t * 0.84);
@@ -283,6 +341,10 @@ function drawBorder(ctx, room, tile, pal, doorsOpen) {
         ctx.fillStyle = pal.doorClosed;
         ctx.fillRect(px + t * 0.16, py + t * 0.16, t * 0.68, t * 0.68);
       }
+      continue;
+    }
+    if (classicOn()) {
+      blit(ctx, 'wall', px, py, t);
       continue;
     }
     // Brick border, matching sokoban's two-course wall look.
@@ -317,6 +379,7 @@ export function drawHeart(ctx, x, y, tile, pal) {
   const px = org(x, tile);
   const py = org(y, tile);
   const t = tile;
+  if (classicOn() && blit(ctx, 'heart', px, py, t)) return;
   const cx = px + t / 2;
   ctx.fillStyle = pal.heart;
   ctx.beginPath();
@@ -333,6 +396,7 @@ export function drawKey(ctx, x, y, tile, pal) {
   const px = org(x, tile);
   const py = org(y, tile);
   const t = tile;
+  if (classicOn() && blit(ctx, 'key', px, py, t)) return;
   ctx.strokeStyle = pal.doorFrame;
   ctx.lineWidth = Math.max(2, t * 0.12);
   ctx.lineCap = 'round';
@@ -353,6 +417,7 @@ export function drawChest(ctx, chest, tile, pal, time) {
   const py = org(chest.y, tile);
   const t = tile;
   if (chest.taken) return;
+  if (classicOn() && !chest.open && blit(ctx, 'chest', px, py, t)) return;
   if (!chest.open) {
     ctx.fillStyle = pal.chest;
     ctx.fillRect(px + t * 0.12, py + t * 0.22, t * 0.76, t * 0.6);
@@ -388,6 +453,7 @@ export function drawBlock(ctx, b, tile, pal) {
   const px = org(b.x, tile);
   const py = org(b.y, tile);
   const t = tile;
+  if (classicOn() && b.kind === 'emerald' && b.mode !== 'raft' && blit(ctx, 'emerald', px, py, t)) return;
   if (b.kind === 'emerald') {
     const raft = b.mode === 'raft';
     const m = t * (raft ? 0.16 : 0.1);
@@ -466,6 +532,7 @@ export function drawEnemy(ctx, e, tile, pal, time) {
   const px = org(e.x, tile);
   const py = org(e.y, tile);
   const t = tile;
+  if (classicOn() && blit(ctx, e.type, px, py, t)) return;
   const cx = px + t / 2;
   const cy = py + t / 2;
   ctx.fillStyle = pal.shadow;

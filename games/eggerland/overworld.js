@@ -68,6 +68,7 @@ export function loadProgress() {
           ? stored.current
           : '0,9',
         muted: Boolean(stored.muted),
+        theme: stored.theme === 'classic' ? 'classic' : 'modern',
         cleared: stored.cleared && typeof stored.cleared === 'object' ? stored.cleared : {},
         visited: stored.visited && typeof stored.visited === 'object' ? stored.visited : {},
       };
@@ -75,7 +76,7 @@ export function loadProgress() {
   } catch {
     // Corrupt storage — start fresh.
   }
-  return { current: '0,9', muted: false, cleared: {}, visited: {} };
+  return { current: '0,9', muted: false, theme: 'modern', cleared: {}, visited: {} };
 }
 
 export function saveProgress(progress) {
