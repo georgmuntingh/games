@@ -73,6 +73,9 @@ export function createRoomState(room, { inert = false } = {}) {
     player: makeMover(spawn.x, spawn.y),
     hearts: new Set(),
     heartsTotal: 0,
+    keys: new Set(),
+    keysTotal: 0,
+    keysGot: 0,
     shots: 0,
     chest: { x: chestDef.x, y: chestDef.y, open: inert, taken: inert },
     blocks: [],
@@ -89,6 +92,9 @@ export function createRoomState(room, { inert = false } = {}) {
     if (e.t === 'heart' && !inert) {
       state.hearts.add(key(e.x, e.y));
       state.heartsTotal++;
+    } else if (e.t === 'key' && !inert) {
+      state.keys.add(key(e.x, e.y));
+      state.keysTotal++;
     } else if (e.t === 'emerald') {
       state.blocks.push({ kind: 'emerald', mode: 'solid', ...makeMover(e.x, e.y) });
     } else if (ENEMY_DEFS[e.t] && !inert) {
@@ -296,6 +302,11 @@ function fireShot(state) {
 function onPlayerSettled(state) {
   const p = state.player;
   const k = key(p.tx, p.ty);
+  if (state.keys.has(k)) {
+    state.keys.delete(k);
+    state.keysGot++;
+    emit(state, 'key');
+  }
   if (state.hearts.has(k)) {
     state.hearts.delete(k);
     const bonus = state.room.shotHearts.has(k);

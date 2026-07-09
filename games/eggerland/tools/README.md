@@ -1,79 +1,39 @@
-# Eggerland map-extraction pipeline
+# Eggerland map-extraction tools
 
-Converts the fan-made Eggerland 2 (Meikyū Shinwa) global map PNG into
-the game's `rooms.js`. The map was created by Benoît Delvaux
-(MSX blue, msxblue.com); a zip of it is hosted at:
+Convert the fan-made global map `eggerland2-map.png` (all 100 normal stages
+of Eggerland 2 / Meikyū Shinwa, arranged spatially by Benoît Delvaux) into
+the game's room data `../rooms.js`.
 
-    https://www.msx.org/download/download/2015/11/eggerland2-map.zip
+## Geometry (`map-layout.json`)
 
-The image is copyrighted, so it is **not** committed — `assets/` and
-`out/` are gitignored. Only the derived room data (`../rooms.js`) is
-checked in.
+Measured from the image: each screenshot tile is **16 px** (the map is a 2×
+upscale of the 8-px native tiles); every room is an **11×11** playfield
+framed by half-tile walls, so the room-to-room pitch is 8 + 11·16 + 8 = 192.
+The 10×10 grid of stages 1–100 starts at interior pixel **(291, 36)**. Note
+the source has sub-pixel drift across the grid, so no integer origin tiles
+every room exactly to the pixel — the classifier is deliberately ±1px
+tolerant (terrain read from an inset ring, entities from tile centres).
 
-## Getting the map into `assets/`
-
-This remote environment's network egress allowlist currently blocks
-both msx.org and msxblue.com (verified 2026-07-06 and again on
-2026-07-07: the proxy gateway answers 403 `host_not_allowed` to the
-CONNECT). Two ways to unblock the real extraction (milestone M6):
-
-1. Add `msx.org` (and optionally `msxblue.com`) to the environment's
-   network egress settings, then:
-
-       curl -LO https://www.msx.org/download/download/2015/11/eggerland2-map.zip
-       unzip eggerland2-map.zip -d games/eggerland/tools/assets/
-       # expected file: games/eggerland/tools/assets/eggerland2-map.png
-
-2. Or download it on your own machine and drop the PNG into
-   `games/eggerland/tools/assets/eggerland2-map.png` (e.g. commit it
-   temporarily to a scratch branch, or paste it into a session with
-   filesystem access — just don't merge the PNG itself).
-
-## Workflow
+## Pipeline
 
 ```
-# 1. Measure the room grid (border peaks, pitch, tile-size hints):
-node games/eggerland/tools/extract.mjs analyze
-
-# 2. Write map-layout.json by hand from those measurements:
-#    - tileSize: for 14-tile-wide rooms separated by a 1-tile border,
-#      tileSize = column pitch / 15 (e.g. pitch 240 -> 16 px tiles).
-#      (The self-similarity hint is unreliable on flat-colored areas;
-#      trust the border pitch.)
-#    - mainGrid.origin: pixel of stage row-0/col-0's top-left interior
-#    - mainGrid.pitch/cols/rows: from the peak spacing (10×10 expected)
-#    - extraRooms: pixel origins of the lettered/hidden stages
-#    - excludeRects: legend and text areas to ignore
-#    - roomOverrides: any room whose interior is not 14×10
-
-# 3. Slice + dedupe tiles, emit the numbered contact sheet:
-node games/eggerland/tools/extract.mjs atlas
-#    -> out/contact-sheet.png, out/tile-atlas.json
-#    View the sheet and write tile-labels.json mapping every hash to a
-#    label from LABEL_DEFS in ../tiles.js (floor, rock, tree, water,
-#    lava, sand, arrow-*, brick, door, heart, chest, emerald, player,
-#    snakey, leeper, medusa, don-medusa, gol, skull, rocky, alma,
-#    decoration). Use --quant if anti-aliasing inflates the tile count
-#    (a warning fires above ~400 unique tiles).
-
-# 4. Fill in room-index.json (grid coordinate -> stage number, read off
-#    the map labels), then regenerate the game data:
-node games/eggerland/tools/extract.mjs rooms
-#    -> ../rooms.js (fails loudly listing any unlabeled hash)
+node tools/mapsig.mjs    # dedupe tiles by sprite-signature -> out/sig-tiles.{png,json}
+                         # (view the contact sheet, label the frequent signatures
+                         #  in sig-labels.json — keyed by signature string)
+node tools/mapemit.mjs   # classify every tile and write ../rooms.js
 ```
 
-Facts the image cannot express — Don Medusa/Rocky patrol axes, which
-hearts grant magic shots, hidden-stage triggers — belong in
-`../room-overrides.js`, which the game merges over the generated data.
-That keeps `rooms` a pure, re-runnable function of PNG + labels.
+- `classify-core.mjs` — colour categories, border-ring terrain, sprite signature.
+- `classify-tile.mjs` — ±1px-tolerant `terrainInset` (floor/water/wall/tree).
+- `mapemit.mjs` — hybrid classifier: terrain from the inset ring; on floor
+  tiles the entity/arrow/decor type from `sig-labels.json` (nearest-signature
+  fallback). Auto-opens doors between adjacent rooms for the spatial overworld,
+  guarantees one player spawn + one chest per room.
 
-## Test
+`sig-labels.json` maps each sprite-signature to a label (heart, chest,
+emerald, key, arrow-*, snakey, rocky, medusa, leeper, gol, tree, none). Enemy
+typing from 16-px tiles is best-effort and easy to correct by editing this
+file and re-running `mapemit.mjs`. Annotation skulls next to the printed stage
+numbers are intentionally labelled `none`.
 
-```
-node games/eggerland/tools/test-extract.mjs
-```
-
-Builds a synthetic 2×2-room fixture map (`fixture.mjs`), runs the
-atlas + rooms pipeline over it and diffs the result against the
-fixture's expected rooms; exits non-zero on any mismatch. This keeps
-the pipeline verifiable while the real map is unavailable.
+`out/` and `assets/` are gitignored; `eggerland2-map.png` is the source image.

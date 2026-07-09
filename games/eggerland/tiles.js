@@ -3,8 +3,8 @@
 // ROOM_H strings of ROOM_W chars; everything that moves or can be
 // picked up lives in the room's `entities` list instead.
 
-export const ROOM_W = 14;
-export const ROOM_H = 10;
+export const ROOM_W = 11;
+export const ROOM_H = 11;
 
 export const TILE = {
   FLOOR: '.',
@@ -39,6 +39,7 @@ export const TILE_PROPS = {
 export const ENTITY_TYPES = [
   'player',
   'heart',
+  'key',
   'chest',
   'emerald',
   'snakey',

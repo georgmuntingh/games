@@ -16,6 +16,7 @@ import {
   BOARD_ROWS,
   renderTerrain,
   drawHeart,
+  drawKey,
   drawChest,
   drawBlock,
   drawPlayer,
@@ -166,6 +167,7 @@ function setStatus(text) {
 
 const EVENT_SOUNDS = {
   step: 'step',
+  key: 'bonus',
   push: 'push',
   shot: 'shot',
   'dry-fire': 'dryFire',
@@ -312,6 +314,10 @@ function draw(now) {
   for (const k of s.hearts) {
     const [x, y] = k.split(',').map(Number);
     drawHeart(ctx, x, y, tile, pal);
+  }
+  for (const k of s.keys) {
+    const [x, y] = k.split(',').map(Number);
+    drawKey(ctx, x, y, tile, pal);
   }
   drawChest(ctx, s.chest, tile, pal, time);
   for (const b of s.blocks) drawBlock(ctx, b, tile, pal);

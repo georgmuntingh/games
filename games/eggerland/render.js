@@ -329,6 +329,25 @@ export function drawHeart(ctx, x, y, tile, pal) {
   ctx.stroke();
 }
 
+export function drawKey(ctx, x, y, tile, pal) {
+  const px = org(x, tile);
+  const py = org(y, tile);
+  const t = tile;
+  ctx.strokeStyle = pal.doorFrame;
+  ctx.lineWidth = Math.max(2, t * 0.12);
+  ctx.lineCap = 'round';
+  // Bow (ring) top-left, blade running down-right, with two teeth.
+  ctx.beginPath();
+  ctx.arc(px + t * 0.34, py + t * 0.34, t * 0.16, 0, Math.PI * 2);
+  ctx.moveTo(px + t * 0.44, py + t * 0.44);
+  ctx.lineTo(px + t * 0.74, py + t * 0.74);
+  ctx.moveTo(px + t * 0.66, py + t * 0.66);
+  ctx.lineTo(px + t * 0.78, py + t * 0.54);
+  ctx.moveTo(px + t * 0.74, py + t * 0.74);
+  ctx.lineTo(px + t * 0.86, py + t * 0.62);
+  ctx.stroke();
+}
+
 export function drawChest(ctx, chest, tile, pal, time) {
   const px = org(chest.x, tile);
   const py = org(chest.y, tile);
