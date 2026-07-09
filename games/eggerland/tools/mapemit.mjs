@@ -12,8 +12,9 @@ import { terrainOf, signature } from './classify-core.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ARROW = { 'arrow-up': '^', 'arrow-down': 'v', 'arrow-left': '<', 'arrow-right': '>' };
-const TERRAIN = { floor: '.', water: '~', wall: '#', tree: 'T', bush: 'R', player: '.', ...ARROW };
-const ENTITIES = new Set(['heart', 'chest', 'emerald', 'key', 'snakey', 'rocky', 'medusa', 'leeper', 'gol']);
+// 'skull' is the map's hidden-access marker, not an enemy -> floor.
+const TERRAIN = { floor: '.', water: '~', wall: '#', tree: 'T', bush: 'R', player: '.', skull: '.', ...ARROW };
+const ENTITIES = new Set(['heart', 'chest', 'emerald', 'key', 'snakey', 'rocky', 'medusa', 'don-medusa', 'leeper', 'gol']);
 
 // Kept for build-atlas.mjs's label finder (not used by the SSD classifier).
 function hamming(a, b) { let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++; return d; }
@@ -46,8 +47,13 @@ function readTemplates(img, templates, ts) {
   return out;
 }
 
-function matchName(img, x0, y0, ts, tmpls) {
-  let best = 'floor', bd = Infinity;
+// An entity/enemy match beyond this SSD is not a confident match — the
+// distance histogram shows real entities well under it and terrain-into-
+// enemy false positives far above it, so those fall back to terrain.
+const ENTITY_MAX_DIST = 1800000;
+
+function matchTile(img, x0, y0, ts, tmpls) {
+  let best = 'floor', bd = Infinity, bestTerr = 'floor', btd = Infinity;
   for (const t of tmpls) {
     let sum = 0, k = 0;
     for (let j = 0; j < ts; j++) for (let i = 0; i < ts; i++) {
@@ -56,10 +62,12 @@ function matchName(img, x0, y0, ts, tmpls) {
       const dg = img.data[si + 1] - t.buf[k++];
       const db = img.data[si + 2] - t.buf[k++];
       sum += dr * dr + dg * dg + db * db;
-      if (sum >= bd) break;
     }
     if (sum < bd) { bd = sum; best = t.name; }
+    if (TERRAIN[t.name] && sum < btd) { btd = sum; bestTerr = t.name; }
   }
+  // Only accept an entity when its match is confident; else take the terrain.
+  if (!TERRAIN[best] && bd > ENTITY_MAX_DIST) best = bestTerr;
   return best;
 }
 
@@ -69,7 +77,7 @@ export function classifyRoom(img, rect, ts, tmpls) {
   for (let ty = 0; ty < rect.h; ty++) {
     let row = '';
     for (let tx = 0; tx < rect.w; tx++) {
-      const name = matchName(img, rect.px + tx * ts, rect.py + ty * ts, ts, tmpls);
+      const name = matchTile(img, rect.px + tx * ts, rect.py + ty * ts, ts, tmpls);
       if (TERRAIN[name]) { row += TERRAIN[name]; continue; }
       row += '.';
       if (ENTITIES.has(name)) entities.push({ t: name, x: tx, y: ty });

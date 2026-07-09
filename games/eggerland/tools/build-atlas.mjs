@@ -95,6 +95,10 @@ const targets = [
   ['rocky', () => findLabel('rocky')],
   ['medusa', () => findLabel('medusa')],
   ['leeper', () => bestTile((f) => f.magenta > 0.12 && f.brown > 0.2 ? f.magenta : 0)],
+  // Don Medusa: red/white horned ram face (distinct from Rocky's round red).
+  ['don-medusa', () => bestTile((f) => f.red > 0.18 && f.white > 0.1 && f.white < 0.5 && f.green < 0.12 && f.cream < 0.06 && f.blue < 0.05 ? f.red + f.white : 0)],
+  // Skull: the map's white hidden-access marker (rendered as floor, not an enemy).
+  ['skull', () => bestTile((f) => f.white > 0.2 && f.blue < 0.05 && f.green < 0.08 && f.cream < 0.05 && f.brown < 0.5 ? f.white : 0)],
   ['gol', () => findLabel('gol')],
   ['arrow-up', () => findLabel('arrow-up')],
   ['arrow-down', () => findLabel('arrow-down')],
