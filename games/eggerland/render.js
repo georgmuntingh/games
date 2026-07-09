@@ -49,7 +49,7 @@ function blit(ctx, name, dx, dy, size) {
 }
 
 const TERRAIN_SPRITE = {
-  '.': 'floor', '~': 'water', '#': 'wall', T: 'tree',
+  '.': 'floor', '~': 'water', '#': 'wall', T: 'tree', R: 'bush',
   '^': 'arrow-up', v: 'arrow-down', '<': 'arrow-left', '>': 'arrow-right',
 };
 
@@ -64,6 +64,8 @@ export const PALETTES = {
     doorClosed: '#6e4a30',
     tree: '#2f8f3e',
     treeDark: '#1f6b2c',
+    bush: '#d13a3a',
+    bushDark: '#8a1f1f',
     trunk: '#6e4426',
     rock: '#8f8677',
     rockDark: '#6b6355',
@@ -116,6 +118,8 @@ export const PALETTES = {
     doorClosed: '#382516',
     tree: '#27793a',
     treeDark: '#175427',
+    bush: '#c23333',
+    bushDark: '#7a1a1a',
     trunk: '#5a3a22',
     rock: '#6e6759',
     rockDark: '#4d473c',
@@ -251,6 +255,24 @@ function drawTerrainTile(ctx, ch, px, py, t, pal, gx, gy) {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(px + t * 0.5, py + t * fy, t * r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'R': {
+      // Red bush: overlapping red mounds (blocks movement, like a tree).
+      drawFloorBase(ctx, px, py, t, pal, gx, gy);
+      const mounds = [[0.3, 0.62], [0.7, 0.62], [0.5, 0.48]];
+      ctx.fillStyle = pal.bushDark;
+      for (const [fx, fy] of mounds) {
+        ctx.beginPath();
+        ctx.arc(px + t * fx, py + t * fy, t * 0.27, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = pal.bush;
+      for (const [fx, fy] of mounds) {
+        ctx.beginPath();
+        ctx.arc(px + t * fx, py + t * (fy - 0.06), t * 0.2, 0, Math.PI * 2);
         ctx.fill();
       }
       break;
@@ -497,6 +519,7 @@ export function drawPlayer(ctx, p, tile, pal) {
   const px = org(p.x, tile);
   const py = org(p.y, tile);
   const t = tile;
+  if (classicOn() && blit(ctx, 'player', px, py, t)) return;
   const cx = px + t / 2;
   const cy = py + t * 0.55;
   ctx.fillStyle = pal.shadow;

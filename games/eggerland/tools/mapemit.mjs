@@ -1,22 +1,22 @@
-// Emit games/eggerland/rooms.js from eggerland2-map.png. Hybrid classifier:
-// terrain from each tile's inset ring (classify-tile.terrainInset, ±1px
-// tolerant), and — on floor tiles — the entity/arrow/decor type from the
-// sprite-signature (classify-core.signature) looked up in sig-labels.json
-// with nearest-signature fallback. Rooms keyed 'col,row' on the 10x10 grid;
-// doors auto-opened between neighbours for the spatial overworld.
+// Emit games/eggerland/rooms.js from eggerland2-map.png by raw-RGB template
+// matching: every 11x11 interior tile is compared (sum of squared pixel
+// differences) against the clean reference tiles in tools/templates.json
+// (produced by build-atlas.mjs) and assigned the nearest one. Terrain and
+// entities follow the matched template; red bushes -> 'R', green trees ->
+// 'T'. Doors are auto-opened between adjacent rooms for the spatial overworld.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPng, roomRects, emitRoomsModule } from './extract.mjs';
-import { terrainInset } from './classify-tile.mjs';
 import { terrainOf, signature } from './classify-core.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ARROW = { 'arrow-up': '^', 'arrow-down': 'v', 'arrow-left': '<', 'arrow-right': '>' };
-const ENTITIES = new Set(['heart', 'chest', 'emerald', 'key', 'snakey', 'rocky', 'medusa', 'leeper', 'gol', 'skull']);
+const TERRAIN = { floor: '.', water: '~', wall: '#', tree: 'T', bush: 'R', player: '.', ...ARROW };
+const ENTITIES = new Set(['heart', 'chest', 'emerald', 'key', 'snakey', 'rocky', 'medusa', 'leeper', 'gol']);
 
+// Kept for build-atlas.mjs's label finder (not used by the SSD classifier).
 function hamming(a, b) { let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++; return d; }
-
 export function buildClassifier(sigLabels) {
   const labeled = Object.entries(sigLabels);
   const cache = new Map();
@@ -32,24 +32,47 @@ export function buildClassifier(sigLabels) {
   };
 }
 
-export function classifyRoom(img, rect, ts, labelFor) {
+function readTemplates(img, templates, ts) {
+  const out = [];
+  for (const [name, [x, y]] of Object.entries(templates)) {
+    const buf = new Uint8ClampedArray(ts * ts * 3);
+    let k = 0;
+    for (let j = 0; j < ts; j++) for (let i = 0; i < ts; i++) {
+      const si = ((y + j) * img.width + (x + i)) * 4;
+      buf[k++] = img.data[si]; buf[k++] = img.data[si + 1]; buf[k++] = img.data[si + 2];
+    }
+    out.push({ name, buf });
+  }
+  return out;
+}
+
+function matchName(img, x0, y0, ts, tmpls) {
+  let best = 'floor', bd = Infinity;
+  for (const t of tmpls) {
+    let sum = 0, k = 0;
+    for (let j = 0; j < ts; j++) for (let i = 0; i < ts; i++) {
+      const si = ((y0 + j) * img.width + (x0 + i)) * 4;
+      const dr = img.data[si] - t.buf[k++];
+      const dg = img.data[si + 1] - t.buf[k++];
+      const db = img.data[si + 2] - t.buf[k++];
+      sum += dr * dr + dg * dg + db * db;
+      if (sum >= bd) break;
+    }
+    if (sum < bd) { bd = sum; best = t.name; }
+  }
+  return best;
+}
+
+export function classifyRoom(img, rect, ts, tmpls) {
   const terrain = [];
   const entities = [];
   for (let ty = 0; ty < rect.h; ty++) {
     let row = '';
     for (let tx = 0; tx < rect.w; tx++) {
-      const x = rect.px + tx * ts, y = rect.py + ty * ts;
-      const terr = terrainInset(img, x, y, ts);
-      if (terr === 'water') { row += '~'; continue; }
-      if (terr === 'wall') { row += '#'; continue; }
-      // Floor or tree ring -> ask the signature what overlay/decor sits here.
-      const { sig } = signature(img, x, y, ts, terrainOf(img, x, y, ts));
-      const label = labelFor(sig);
-      if (label === 'tree' || (terr === 'tree' && !ENTITIES.has(label) && !ARROW[label])) { row += 'T'; continue; }
-      if (ARROW[label]) { row += ARROW[label]; continue; }
+      const name = matchName(img, rect.px + tx * ts, rect.py + ty * ts, ts, tmpls);
+      if (TERRAIN[name]) { row += TERRAIN[name]; continue; }
       row += '.';
-      if (ENTITIES.has(label)) entities.push({ t: label, x: tx, y: ty });
-      else if (label === 'key') entities.push({ t: 'key', x: tx, y: ty });
+      if (ENTITIES.has(name)) entities.push({ t: name, x: tx, y: ty });
     }
     terrain.push(row);
   }
@@ -59,15 +82,15 @@ export function classifyRoom(img, rect, ts, labelFor) {
 function main() {
   const img = loadPng(path.join(HERE, 'eggerland2-map.png'));
   const layout = JSON.parse(fs.readFileSync(path.join(HERE, 'map-layout.json'), 'utf8'));
-  const sigLabels = JSON.parse(fs.readFileSync(path.join(HERE, 'sig-labels.json'), 'utf8'));
+  const templates = JSON.parse(fs.readFileSync(path.join(HERE, 'templates.json'), 'utf8'));
   const roomIndex = JSON.parse(fs.readFileSync(path.join(HERE, 'room-index.json'), 'utf8'));
   const ts = layout.tileSize;
-  const labelFor = buildClassifier(sigLabels);
+  const tmpls = readTemplates(img, templates, ts);
   const rects = roomRects(layout);
   const byId = new Map(rects.map((r) => [r.id, r]));
   const rooms = {};
   for (const rect of rects) {
-    const { terrain, entities } = classifyRoom(img, rect, ts, labelFor);
+    const { terrain, entities } = classifyRoom(img, rect, ts, tmpls);
     rooms[rect.id] = { stage: roomIndex.stageByCoord?.[rect.id] ?? 0, terrain, entities, exits: { n: null, s: null, e: null, w: null } };
   }
 

@@ -5,7 +5,7 @@ import { ROOMS, ROOM_W, ROOM_H } from './rooms.js';
 import { OVERRIDES } from './room-overrides.js';
 import { TILE_PROPS, ENTITY_TYPES } from './tiles.js';
 
-const STORAGE_KEY = 'eggerland-v1';
+const STORAGE_KEY = 'eggerland-v2';
 
 export const GRID_COLS = 10;
 export const GRID_ROWS = 10;
