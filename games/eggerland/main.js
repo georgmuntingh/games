@@ -26,6 +26,7 @@ import {
   onAtlasReady,
 } from './render.js';
 import { audio } from './audio.js';
+import { music } from './music.js';
 import {
   createTouchControls,
   coarsePointer,
@@ -424,6 +425,7 @@ function anyKeyRestart() {
 
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  music.start(); // first-gesture kick for autoplay-restricted browsers
   const k = event.key.toLowerCase();
   if (!deathOverlay.hidden) {
     event.preventDefault();
@@ -466,6 +468,7 @@ window.addEventListener('blur', () => {
 canvas.addEventListener(
   'touchstart',
   (event) => {
+    music.start();
     if (document.body.classList.contains('touch-play')) return;
     if (anyKeyRestart()) return;
     if (event.touches.length !== 1) return;
@@ -497,6 +500,7 @@ canvas.addEventListener('touchcancel', () => {
 });
 
 canvas.addEventListener('pointerdown', () => {
+  music.start();
   anyKeyRestart();
 });
 
@@ -513,6 +517,7 @@ function updateMuteButton() {
 
 function toggleMute() {
   audio.setMuted(!audio.muted);
+  music.setMuted(audio.muted);
   progress.muted = audio.muted;
   saveProgress(progress);
   updateMuteButton();
@@ -549,11 +554,13 @@ const touch = createTouchControls({
     { id: 'map', label: '▦', ariaLabel: 'open map' },
   ],
   onDirection(_playerId, dirName) {
+    music.start();
     heldDirs = heldDirs.filter((d) => !TOUCH_DIR_VECS.has(d));
     if (!dirName) return;
     heldDirs.push(TOUCH_DIRS[dirName]);
   },
   onAction(_playerId, actionId) {
+    music.start();
     if (anyKeyRestart()) return;
     if (actionId === 'shoot') shootQueued = true;
     else if (actionId === 'restart') restartRoom();
@@ -589,6 +596,7 @@ darkScheme.addEventListener('change', () => {
 // --- Boot -----------------------------------------------------------------------
 
 audio.setMuted(progress.muted);
+music.setMuted(progress.muted);
 updateMuteButton();
 setRenderTheme(progress.theme);
 updateTilesButton();
