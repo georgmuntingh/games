@@ -437,6 +437,11 @@ export function emitRoomsModule(rooms, { generatedBy = 'tools/extract.mjs' } = {
     lines.push(
       `    exits: { n: ${ex.n}, s: ${ex.s}, e: ${ex.e}, w: ${ex.w} },`
     );
+    if (room.shotHearts && room.shotHearts.length) {
+      lines.push(
+        `    shotHearts: [${room.shotHearts.map(([x, y]) => `[${x}, ${y}]`).join(', ')}],`
+      );
+    }
     lines.push('  },');
   }
   lines.push('};');

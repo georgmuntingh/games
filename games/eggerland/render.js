@@ -397,21 +397,40 @@ function org(v, tile) {
   return (v + 1) * tile;
 }
 
-export function drawHeart(ctx, x, y, tile, pal) {
+export function drawHeart(ctx, x, y, tile, pal, power = false) {
   const px = org(x, tile);
   const py = org(y, tile);
   const t = tile;
-  if (classicOn() && blit(ctx, 'heart', px, py, t)) return;
-  const cx = px + t / 2;
-  ctx.fillStyle = pal.heart;
-  ctx.beginPath();
-  ctx.moveTo(cx, py + t * 0.78);
-  ctx.bezierCurveTo(px + t * 0.06, py + t * 0.45, px + t * 0.2, py + t * 0.16, cx, py + t * 0.36);
-  ctx.bezierCurveTo(px + t * 0.8, py + t * 0.16, px + t * 0.94, py + t * 0.45, cx, py + t * 0.78);
-  ctx.fill();
-  ctx.strokeStyle = pal.heartDark;
-  ctx.lineWidth = Math.max(1, t * 0.05);
-  ctx.stroke();
+  if (!(classicOn() && blit(ctx, 'heart', px, py, t))) {
+    const cx = px + t / 2;
+    ctx.fillStyle = pal.heart;
+    ctx.beginPath();
+    ctx.moveTo(cx, py + t * 0.78);
+    ctx.bezierCurveTo(px + t * 0.06, py + t * 0.45, px + t * 0.2, py + t * 0.16, cx, py + t * 0.36);
+    ctx.bezierCurveTo(px + t * 0.8, py + t * 0.16, px + t * 0.94, py + t * 0.45, cx, py + t * 0.78);
+    ctx.fill();
+    ctx.strokeStyle = pal.heartDark;
+    ctx.lineWidth = Math.max(1, t * 0.05);
+    ctx.stroke();
+  }
+  // Power-heart: a golden four-point spark to mark it grants magic shots.
+  if (power) {
+    const sx = px + t * 0.72;
+    const sy = py + t * 0.26;
+    const r = t * 0.2;
+    ctx.fillStyle = pal.doorFrame;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - r);
+    ctx.lineTo(sx + r * 0.28, sy - r * 0.28);
+    ctx.lineTo(sx + r, sy);
+    ctx.lineTo(sx + r * 0.28, sy + r * 0.28);
+    ctx.lineTo(sx, sy + r);
+    ctx.lineTo(sx - r * 0.28, sy + r * 0.28);
+    ctx.lineTo(sx - r, sy);
+    ctx.lineTo(sx - r * 0.28, sy - r * 0.28);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 export function drawKey(ctx, x, y, tile, pal) {

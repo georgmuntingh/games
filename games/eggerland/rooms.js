@@ -101,6 +101,7 @@ export const ROOMS = {
       { t: 'heart', x: 8, y: 7 },
     ],
     exits: { n: null, s: 5, e: 5, w: 5 },
+    shotHearts: [[2, 1]],
   },
   '3,0': {
     stage: 64,
@@ -680,6 +681,7 @@ export const ROOMS = {
       { t: 'emerald', x: 3, y: 10 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[1, 0]],
   },
   '3,2': {
     stage: 66,
@@ -893,6 +895,7 @@ export const ROOMS = {
       { t: 'chest', x: 5, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: null },
+    shotHearts: [[3, 8]],
   },
   '1,3': {
     stage: 47,
@@ -1183,6 +1186,7 @@ export const ROOMS = {
       { t: 'emerald', x: 6, y: 6 },
     ],
     exits: { n: 5, s: 5, e: 5, w: null },
+    shotHearts: [[2, 1]],
   },
   '1,4': {
     stage: 34,
@@ -1358,6 +1362,7 @@ export const ROOMS = {
       { t: 'chest', x: 10, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[0, 2]],
   },
   '6,4': {
     stage: 99,
@@ -1575,6 +1580,7 @@ export const ROOMS = {
       { t: 'chest', x: 10, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[9, 2]],
   },
   '4,5': {
     stage: 30,
@@ -1611,6 +1617,7 @@ export const ROOMS = {
       { t: 'chest', x: 9, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[10, 0]],
   },
   '5,5': {
     stage: 96,
@@ -1809,6 +1816,7 @@ export const ROOMS = {
       { t: 'chest', x: 10, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[0, 2]],
   },
   '3,6': {
     stage: 13,
@@ -2426,6 +2434,7 @@ export const ROOMS = {
       { t: 'chest', x: 9, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[2, 0]],
   },
   '4,8': {
     stage: 18,
@@ -2488,6 +2497,7 @@ export const ROOMS = {
       { t: 'chest', x: 9, y: 0 },
     ],
     exits: { n: 5, s: 5, e: 5, w: 5 },
+    shotHearts: [[10, 0]],
   },
   '6,8': {
     stage: 24,

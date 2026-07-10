@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "Transcribed verbatim from the map's POWER legend. Three power items,",
+    "each listed with the exact stages it appears in. The game's core power",
+    "is the magic shot (2 shots), so every POWER stage marks one heart as a",
+    "power-heart that grants shots when collected (shotStages = the union).",
+    "The three lists are kept distinct for future per-item effects."
+  ],
+  "power1_stages": [12, 19, 30, 37],
+  "power2_stages": [15, 20, 37, 38, 43, 81, 87, 88, 90, 91, 93],
+  "power3_stages": [20, 24, 30, 31, 57, 59, 67, 84, 88, 91, 98, 100]
+}

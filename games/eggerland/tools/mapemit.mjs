@@ -131,8 +131,22 @@ function main() {
       outer: for (let y = 0; y < H; y++) for (let x = W - 1; x >= 0; x--)
         if (room.terrain[y][x] === '.' && !room.entities.some((e) => e.x === x && e.y === y)) { room.entities.push({ t: 'chest', x, y }); break outer; }
   }
+  // Power hearts: the legend's POWER section lists exactly which stages
+  // grant the magic-shot power. Mark one heart in each such room (authoritative).
+  const powers = JSON.parse(fs.readFileSync(path.join(HERE, 'powers.json'), 'utf8'));
+  const shotStages = new Set([
+    ...powers.power1_stages, ...powers.power2_stages, ...powers.power3_stages,
+  ]);
+  let powerRooms = 0;
+  for (const room of Object.values(rooms)) {
+    if (!shotStages.has(room.stage)) continue;
+    const heart = room.entities.find((e) => e.t === 'heart');
+    if (heart) { room.shotHearts = [[heart.x, heart.y]]; powerRooms++; }
+  }
+
   const out = path.join(HERE, '..', 'rooms.js');
   fs.writeFileSync(out, emitRoomsModule(rooms, { generatedBy: 'tools/mapemit.mjs' }));
+  console.log(`power-heart rooms (from legend POWER stages): ${powerRooms}`);
   const counts = {};
   for (const room of Object.values(rooms)) for (const e of room.entities) counts[e.t] = (counts[e.t] || 0) + 1;
   console.log(`${Object.keys(rooms).length} rooms -> ${out}`);
