@@ -52,19 +52,32 @@ function readTemplates(img, templates, ts) {
 // enemy false positives far above it, so those fall back to terrain.
 const ENTITY_MAX_DIST = 1800000;
 
+// The screenshots were tiled at a pitch a hair under 192 px, so the interior
+// grid drifts ~1 px left across the right half of the map (cols 6-9). An
+// exact-position SSD therefore misses every sprite there and falls back to
+// wall/floor. Searching a small pixel neighbourhood recovers the true tile
+// regardless of drift; observed drift never exceeds 1 px in either axis.
+const OFFSET = 1;
+
 function matchTile(img, x0, y0, ts, tmpls) {
   let best = 'floor', bd = Infinity, bestTerr = 'floor', btd = Infinity;
   for (const t of tmpls) {
-    let sum = 0, k = 0;
-    for (let j = 0; j < ts; j++) for (let i = 0; i < ts; i++) {
-      const si = ((y0 + j) * img.width + (x0 + i)) * 4;
-      const dr = img.data[si] - t.buf[k++];
-      const dg = img.data[si + 1] - t.buf[k++];
-      const db = img.data[si + 2] - t.buf[k++];
-      sum += dr * dr + dg * dg + db * db;
+    // Nearest match over the ±OFFSET neighbourhood — a shifted tile still
+    // scores its true content, not the terrain it drifted into.
+    let tBest = Infinity;
+    for (let dy = -OFFSET; dy <= OFFSET; dy++) for (let dx = -OFFSET; dx <= OFFSET; dx++) {
+      let sum = 0, k = 0;
+      for (let j = 0; j < ts; j++) for (let i = 0; i < ts; i++) {
+        const si = ((y0 + dy + j) * img.width + (x0 + dx + i)) * 4;
+        const dr = img.data[si] - t.buf[k++];
+        const dg = img.data[si + 1] - t.buf[k++];
+        const db = img.data[si + 2] - t.buf[k++];
+        sum += dr * dr + dg * dg + db * db;
+      }
+      if (sum < tBest) tBest = sum;
     }
-    if (sum < bd) { bd = sum; best = t.name; }
-    if (TERRAIN[t.name] && sum < btd) { btd = sum; bestTerr = t.name; }
+    if (tBest < bd) { bd = tBest; best = t.name; }
+    if (TERRAIN[t.name] && tBest < btd) { btd = tBest; bestTerr = t.name; }
   }
   // Only accept an entity when its match is confident; else take the terrain.
   if (!TERRAIN[best] && bd > ENTITY_MAX_DIST) best = bestTerr;
@@ -131,6 +144,27 @@ function main() {
       outer: for (let y = 0; y < H; y++) for (let x = W - 1; x >= 0; x--)
         if (room.terrain[y][x] === '.' && !room.entities.some((e) => e.x === x && e.y === y)) { room.entities.push({ t: 'chest', x, y }); break outer; }
   }
+  // Power-hearts: the map's POWER legend lists exactly which stages carry a
+  // shot-granting item. Mark one heart in each such room as a power-heart; the
+  // legend is authoritative, so if the classifier found no heart there, place
+  // one on a free floor tile.
+  const powers = JSON.parse(fs.readFileSync(path.join(HERE, 'powers.json'), 'utf8'));
+  const shotStages = new Set([...powers.power1_stages, ...powers.power2_stages, ...powers.power3_stages]);
+  let powerRooms = 0;
+  for (const room of Object.values(rooms)) {
+    if (!shotStages.has(room.stage)) continue;
+    let heart = room.entities.find((e) => e.t === 'heart');
+    if (!heart) {
+      outer: for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+        if (room.terrain[y][x] === '.' && !room.entities.some((e) => e.x === x && e.y === y)) {
+          heart = { t: 'heart', x, y }; room.entities.push(heart); break outer;
+        }
+    }
+    if (heart) { room.shotHearts = [[heart.x, heart.y]]; powerRooms++; }
+  }
+  console.log(`power rooms: ${powerRooms} / ${shotStages.size} POWER stages`);
+  if (powerRooms !== shotStages.size) console.warn('WARNING: some POWER stages got no power-heart');
+
   const out = path.join(HERE, '..', 'rooms.js');
   fs.writeFileSync(out, emitRoomsModule(rooms, { generatedBy: 'tools/mapemit.mjs' }));
   const counts = {};

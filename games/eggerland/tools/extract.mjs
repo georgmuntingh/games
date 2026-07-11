@@ -437,6 +437,12 @@ export function emitRoomsModule(rooms, { generatedBy = 'tools/extract.mjs' } = {
     lines.push(
       `    exits: { n: ${ex.n}, s: ${ex.s}, e: ${ex.e}, w: ${ex.w} },`
     );
+    // Power-hearts (grant +2 magic shots) — assigned from the map's POWER legend.
+    if (room.shotHearts && room.shotHearts.length) {
+      lines.push(
+        `    shotHearts: [${room.shotHearts.map(([x, y]) => `[${x}, ${y}]`).join(', ')}],`
+      );
+    }
     lines.push('  },');
   }
   lines.push('};');

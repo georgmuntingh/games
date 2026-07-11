@@ -78,6 +78,7 @@ export const PALETTES = {
     arrow: '#f0e6d2',
     heart: '#e33549',
     heartDark: '#a01f30',
+    spark: '#ffe36e',
     chest: '#8a5a2b',
     chestDark: '#5d3b1a',
     jewel: '#3fd0e0',
@@ -132,6 +133,7 @@ export const PALETTES = {
     arrow: '#e5d9bd',
     heart: '#d92b40',
     heartDark: '#8c1a29',
+    spark: '#ffd84a',
     chest: '#7a4e23',
     chestDark: '#4e3115',
     jewel: '#37bcd0',
@@ -397,11 +399,27 @@ function org(v, tile) {
   return (v + 1) * tile;
 }
 
-export function drawHeart(ctx, x, y, tile, pal) {
+// A four-point golden sparkle, drawn top-right, marking a power-heart.
+function drawPowerSpark(ctx, px, py, t, pal) {
+  const sx = px + t * 0.74, sy = py + t * 0.24, r = t * 0.22, n = r * 0.34;
+  ctx.fillStyle = pal.spark ?? '#ffe36e';
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - r);
+  ctx.quadraticCurveTo(sx + n, sy - n, sx + r, sy);
+  ctx.quadraticCurveTo(sx + n, sy + n, sx, sy + r);
+  ctx.quadraticCurveTo(sx - n, sy + n, sx - r, sy);
+  ctx.quadraticCurveTo(sx - n, sy - n, sx, sy - r);
+  ctx.fill();
+}
+
+export function drawHeart(ctx, x, y, tile, pal, power = false) {
   const px = org(x, tile);
   const py = org(y, tile);
   const t = tile;
-  if (classicOn() && blit(ctx, 'heart', px, py, t)) return;
+  if (classicOn() && blit(ctx, 'heart', px, py, t)) {
+    if (power) drawPowerSpark(ctx, px, py, t, pal);
+    return;
+  }
   const cx = px + t / 2;
   ctx.fillStyle = pal.heart;
   ctx.beginPath();
@@ -412,6 +430,7 @@ export function drawHeart(ctx, x, y, tile, pal) {
   ctx.strokeStyle = pal.heartDark;
   ctx.lineWidth = Math.max(1, t * 0.05);
   ctx.stroke();
+  if (power) drawPowerSpark(ctx, px, py, t, pal);
 }
 
 export function drawKey(ctx, x, y, tile, pal) {

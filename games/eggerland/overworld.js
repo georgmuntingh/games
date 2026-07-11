@@ -33,7 +33,11 @@ export function getRoom(key) {
       const patch = over.entityProps?.find((p) => p.x === e.x && p.y === e.y);
       return patch ? { ...e, ...patch.props } : { ...e };
     }),
-    shotHearts: new Set((over.shotHearts ?? []).map(([x, y]) => `${x},${y}`)),
+    // Power-hearts (grant magic shots): the generated data (from the map's
+    // POWER legend) plus any hand-curated overrides.
+    shotHearts: new Set(
+      [...(base.shotHearts ?? []), ...(over.shotHearts ?? [])].map(([x, y]) => `${x},${y}`)
+    ),
   };
   merged.set(key, room);
   return room;

@@ -317,7 +317,7 @@ function draw(now) {
   const time = s.time;
   for (const k of s.hearts) {
     const [x, y] = k.split(',').map(Number);
-    drawHeart(ctx, x, y, tile, pal);
+    drawHeart(ctx, x, y, tile, pal, s.room.shotHearts.has(k));
   }
   for (const k of s.keys) {
     const [x, y] = k.split(',').map(Number);
