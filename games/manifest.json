@@ -41,6 +41,12 @@
       "title": "Sokoban",
       "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
       "tags": ["puzzle", "solo"]
+    },
+    {
+      "id": "antenna",
+      "title": "The Antenna",
+      "description": "Distraction-free YouTube: chronological subscriptions, watch-later queue, and a local library — no recommendation algorithm.",
+      "tags": ["app", "video", "solo"]
     }
   ]
 }

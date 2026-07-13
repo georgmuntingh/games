@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Antenna</title>
+    <link rel="stylesheet" href="/shared/ui.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="back-link" href="../../">← Back to games</a>
+    <main>
+      <header class="app-header">
+        <h1>The Antenna</h1>
+        <nav class="tabs" aria-label="Sections">
+          <a href="#/feed" data-view="feed">Feed</a>
+          <a href="#/library" data-view="library">Library</a>
+          <a href="#/search" data-view="search">Search</a>
+          <a href="#/history" data-view="history">History</a>
+          <a href="#/settings" data-view="settings">Settings</a>
+        </nav>
+      </header>
+
+      <section id="view-feed" hidden></section>
+      <section id="view-library" hidden></section>
+      <section id="view-search" hidden></section>
+      <section id="view-history" hidden></section>
+      <section id="view-settings" hidden></section>
+
+      <section id="view-theater" hidden>
+        <div class="player-wrap">
+          <div id="player"></div>
+          <div id="end-card" class="player-overlay" hidden>
+            <div class="overlay-inner">
+              <h2>That's it.</h2>
+              <div class="overlay-buttons">
+                <button id="ec-replay" type="button">↺ Replay</button>
+                <button id="ec-next" type="button" hidden>Next in queue ⏭</button>
+                <button id="ec-back" type="button">← Back</button>
+              </div>
+            </div>
+          </div>
+          <div id="up-next" class="player-overlay" hidden>
+            <div class="overlay-inner">
+              <p class="muted">Up next in your queue</p>
+              <h2 id="un-title"></h2>
+              <p id="un-countdown" class="muted"></p>
+              <div class="overlay-buttons">
+                <button id="un-play" type="button">Play now</button>
+                <button id="un-cancel" type="button">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="theater-meta">
+          <h2 id="theater-title"></h2>
+          <p id="theater-author" class="muted"></p>
+          <div class="theater-controls">
+            <button id="th-prev" type="button" hidden>⏮ Previous in queue</button>
+            <button id="th-next" type="button" hidden>Next in queue ⏭</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <div id="toast-root" aria-live="polite"></div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
