@@ -319,6 +319,12 @@ section h2:first-child {
   z-index: 5;
 }
 
+/* display:flex above would defeat the hidden attribute (author styles beat
+   the UA's [hidden] rule), so restore it explicitly. */
+.player-overlay[hidden] {
+  display: none;
+}
+
 .overlay-inner {
   text-align: center;
   padding: 1rem;
