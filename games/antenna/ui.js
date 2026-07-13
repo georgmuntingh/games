@@ -85,9 +85,101 @@ export function saveToLibrary(video) {
   toast('Saved to library');
 }
 
+export function createLocalPlaylist(name) {
+  const playlist = { id: crypto.randomUUID(), name, items: [], createdAt: Date.now() };
+  update((s) => {
+    s.localPlaylists.push(playlist);
+  });
+  return playlist.id;
+}
+
+export function addToLocalPlaylist(playlistId, video) {
+  const { videoId, title, author, thumbnail } = video;
+  let name = '';
+  let added = false;
+  update((s) => {
+    const p = s.localPlaylists.find((x) => x.id === playlistId);
+    if (!p) return;
+    name = p.name;
+    if (!p.items.some((it) => it.videoId === videoId)) {
+      p.items.push({
+        videoId,
+        title: title || videoId,
+        author: author || '',
+        thumbnail: thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+      });
+      added = true;
+    }
+  });
+  if (name) toast(added ? `Added to ${name}` : `Already in ${name}`);
+}
+
+let openMenu = null;
+
+function closePlaylistMenu() {
+  if (!openMenu) return;
+  openMenu.remove();
+  openMenu = null;
+  document.removeEventListener('click', onOutsideClick, true);
+  document.removeEventListener('keydown', onMenuKeydown, true);
+  window.removeEventListener('scroll', closePlaylistMenu, true);
+}
+
+function onOutsideClick(e) {
+  if (openMenu && !openMenu.contains(e.target)) closePlaylistMenu();
+}
+
+function onMenuKeydown(e) {
+  if (e.key === 'Escape') {
+    e.stopPropagation(); // don't also leave the theater
+    closePlaylistMenu();
+  }
+}
+
+/** "+ Playlist" popup: pick a local playlist (or create one) for this video. */
+export function openPlaylistMenu(video, anchorEl) {
+  closePlaylistMenu();
+  const items = getState().localPlaylists.map((p) =>
+    h('button', {
+      type: 'button',
+      class: 'popup-item',
+      onclick: () => {
+        addToLocalPlaylist(p.id, video);
+        closePlaylistMenu();
+      },
+    }, `${p.name} (${p.items.length})`),
+  );
+  const menu = h(
+    'div',
+    { class: 'popup-menu', role: 'menu' },
+    items.length ? items : h('span', { class: 'popup-empty hint' }, 'No playlists yet'),
+    h('button', {
+      type: 'button',
+      class: 'popup-item popup-new',
+      onclick: () => {
+        const name = prompt('New playlist name');
+        if (name && name.trim()) addToLocalPlaylist(createLocalPlaylist(name.trim()), video);
+        closePlaylistMenu();
+      },
+    }, '+ New playlist…'),
+  );
+  // Fixed positioning from the button; cards clip overflow so the menu
+  // lives on document.body instead.
+  const rect = anchorEl.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 228))}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+  document.body.append(menu);
+  openMenu = menu;
+  setTimeout(() => {
+    document.addEventListener('click', onOutsideClick, true);
+    document.addEventListener('keydown', onMenuKeydown, true);
+    window.addEventListener('scroll', closePlaylistMenu, true);
+  });
+}
+
 /**
  * A video card for the feed/library/search grids.
- * opts: { showSave, showChannelLink, extraActions: [element] }
+ * opts: { showSave, showPlaylist, showChannelLink, extraActions: [element] }
  */
 export function videoCard(video, opts = {}) {
   const s = getState();
@@ -113,6 +205,15 @@ export function videoCard(video, opts = {}) {
   const actions = [
     h('button', { class: 'quiet', type: 'button', onclick: () => addToQueue(video) }, '+ Queue'),
   ];
+  if (opts.showPlaylist !== false) {
+    actions.push(
+      h('button', {
+        class: 'quiet',
+        type: 'button',
+        onclick: (e) => openPlaylistMenu(video, e.currentTarget),
+      }, '+ Playlist'),
+    );
+  }
   if (opts.showSave !== false && !s.savedVideos.some((v) => v.videoId === video.videoId)) {
     actions.push(
       h('button', { class: 'quiet', type: 'button', onclick: () => saveToLibrary(video) }, 'Save'),

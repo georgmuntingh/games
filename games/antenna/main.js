@@ -15,6 +15,10 @@ function parseHash() {
   const [name, arg] = parts;
   if (name === 'watch' && arg) return { view: 'theater', params: { videoId: arg } };
   if (name === 'playlist' && arg) return { view: 'theater', params: { playlistId: arg } };
+  if (name === 'local' && arg) {
+    const index = parseInt(parts[2], 10);
+    return { view: 'theater', params: { localPlaylistId: arg, index: Number.isNaN(index) ? 0 : index } };
+  }
   if (name === 'channel' && arg) return { view: 'feed', params: { channelId: arg } };
   if (views[name]) return { view: name, params: {} };
   return { view: 'feed', params: {} };

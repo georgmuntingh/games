@@ -4,6 +4,7 @@
 import { getState, update, recordPosition, clearPosition, markWatched, flush } from '../storage.js';
 import { createPlayer } from '../player.js';
 import { findCachedVideo } from '../feeds.js';
+import { openPlaylistMenu } from '../ui.js';
 
 export const el = document.getElementById('view-theater');
 
@@ -17,7 +18,7 @@ const prevBtn = document.getElementById('th-prev');
 const nextBtn = document.getElementById('th-next');
 
 let playerPromise = null; // created once, reused for every video
-let current = null; // { videoId, playlistId, title, author }
+let current = null; // { videoId, playlistId, localPlaylistId, index, title, author }
 let countdownTimer = null;
 let pendingNext = null;
 let lastTime = 0; // latest known playback position, for synchronous saves
@@ -50,7 +51,18 @@ function lookupMeta(videoId) {
 
 function setMeta(title, author) {
   titleEl.textContent = title || '';
-  authorEl.textContent = author || '';
+  const parts = [author || ''];
+  if (current?.localPlaylistId) {
+    const p = getState().localPlaylists.find((x) => x.id === current.localPlaylistId);
+    if (p) parts.push(`${p.name} · ${current.index + 1}/${p.items.length}`);
+  }
+  authorEl.textContent = parts.filter(Boolean).join(' — ');
+}
+
+/** The local playlist being played, or null. */
+function currentLocalPlaylist() {
+  if (!current?.localPlaylistId) return null;
+  return getState().localPlaylists.find((x) => x.id === current.localPlaylistId) || null;
 }
 
 function hideOverlays() {
@@ -61,11 +73,28 @@ function hideOverlays() {
   upNext.hidden = true;
 }
 
-function updateQueueButtons() {
+function updateNavButtons() {
+  // A local playlist context takes priority over queue membership.
+  const localList = currentLocalPlaylist();
+  if (localList) {
+    const i = current.index;
+    prevBtn.hidden = !(i > 0);
+    nextBtn.hidden = !(i < localList.items.length - 1);
+    prevBtn.textContent = '⏮ Previous';
+    nextBtn.textContent = 'Next ⏭';
+    prevBtn.onclick = i > 0 ? () => { location.hash = `#/local/${localList.id}/${i - 1}`; } : null;
+    nextBtn.onclick =
+      i < localList.items.length - 1
+        ? () => { location.hash = `#/local/${localList.id}/${i + 1}`; }
+        : null;
+    return;
+  }
   const s = getState();
   const idx = current?.videoId ? s.queue.findIndex((q) => q.videoId === current.videoId) : -1;
   prevBtn.hidden = !(idx > 0);
   nextBtn.hidden = !(idx !== -1 && idx < s.queue.length - 1);
+  prevBtn.textContent = '⏮ Previous in queue';
+  nextBtn.textContent = 'Next in queue ⏭';
   prevBtn.onclick = idx > 0 ? () => { location.hash = `#/watch/${s.queue[idx - 1].videoId}`; } : null;
   nextBtn.onclick =
     idx !== -1 && idx < s.queue.length - 1
@@ -90,7 +119,7 @@ function handlePlaying(data) {
     current.author = data.author || current.author;
     setMeta(current.title, current.author);
   }
-  updateQueueButtons();
+  updateNavButtons();
 }
 
 function showEndCard() {
@@ -99,9 +128,9 @@ function showEndCard() {
   endCard.hidden = false;
 }
 
-function showUpNext(next) {
-  pendingNext = next;
-  upNextTitle.textContent = next.title;
+function showUpNext(title, targetHash) {
+  pendingNext = targetHash;
+  upNextTitle.textContent = title;
   let remaining = 5;
   upNextCountdown.textContent = `Playing in ${remaining}…`;
   upNext.hidden = false;
@@ -113,15 +142,28 @@ function showUpNext(next) {
 }
 
 function playPendingNext() {
-  const next = pendingNext;
+  const target = pendingNext;
   hideOverlays();
-  if (next) location.hash = `#/watch/${next.videoId}`;
+  if (target) location.hash = target;
 }
 
 function handleEnded() {
   if (!current?.videoId) return;
   markWatched(current);
   clearPosition(current.videoId);
+
+  // Local playlist playback: advance by index; items are never consumed.
+  const localList = currentLocalPlaylist();
+  if (localList) {
+    const next = localList.items[current.index + 1];
+    if (next) {
+      showUpNext(next.title, `#/local/${localList.id}/${current.index + 1}`);
+      return;
+    }
+    showEndCard();
+    return;
+  }
+
   const s = getState();
   const idx = s.queue.findIndex((q) => q.videoId === current.videoId);
   if (idx !== -1) {
@@ -130,7 +172,7 @@ function handleEnded() {
       st.queue.splice(idx, 1); // watched = done with watch-later
     });
     if (next) {
-      showUpNext(next);
+      showUpNext(next.title, `#/watch/${next.videoId}`);
       return;
     }
   }
@@ -139,31 +181,52 @@ function handleEnded() {
 
 export async function enter(params = {}) {
   hideOverlays();
-  const player = await ensurePlayer();
+
+  // Resolve the playback context and show metadata immediately; only then
+  // await the player (its API script can be slow to arrive).
+  let load = null;
 
   if (params.playlistId) {
     const known = getState().playlists.find((p) => p.playlistId === params.playlistId);
     current = { videoId: '', playlistId: params.playlistId, title: known?.title || 'Playlist', author: known?.author || '' };
-    setMeta(current.title, current.author);
-    updateQueueButtons();
-    player.loadPlaylist(params.playlistId);
-    return;
+    load = (p) => p.loadPlaylist(params.playlistId);
+  } else if (params.localPlaylistId) {
+    const list = getState().localPlaylists.find((p) => p.id === params.localPlaylistId);
+    const item = list?.items[params.index];
+    if (!item) {
+      location.hash = '#/library';
+      return;
+    }
+    current = {
+      videoId: item.videoId,
+      playlistId: '',
+      localPlaylistId: list.id,
+      index: params.index,
+      title: item.title,
+      author: item.author,
+    };
+    const pos = getState().positions[item.videoId]?.t || 0;
+    load = (p) => p.loadVideo(item.videoId, pos > 5 ? pos : 0);
+  } else {
+    const videoId = params.videoId;
+    if (!videoId) {
+      location.hash = '#/feed';
+      return;
+    }
+    // Same plain video re-routed (e.g. hashchange noise): keep playing.
+    if (current?.videoId === videoId && !current.playlistId && !current.localPlaylistId) return;
+    const meta = lookupMeta(videoId);
+    current = { videoId, playlistId: '', title: meta?.title || 'Loading…', author: meta?.author || '' };
+    const pos = getState().positions[videoId]?.t || 0;
+    const dur = meta?.durationSec;
+    const start = pos > 5 && (dur == null || pos < dur - 10) ? pos : 0;
+    load = (p) => p.loadVideo(videoId, start);
   }
 
-  const videoId = params.videoId;
-  if (!videoId) {
-    location.hash = '#/feed';
-    return;
-  }
-  if (current?.videoId === videoId && !current.playlistId) return; // same video (e.g. re-route)
-  const meta = lookupMeta(videoId);
-  current = { videoId, playlistId: '', title: meta?.title || '', author: meta?.author || '' };
-  setMeta(current.title || 'Loading…', current.author);
-  updateQueueButtons();
-  const pos = getState().positions[videoId]?.t || 0;
-  const dur = meta?.durationSec;
-  const start = pos > 5 && (dur == null || pos < dur - 10) ? pos : 0;
-  player.loadVideo(videoId, start);
+  setMeta(current.title, current.author);
+  updateNavButtons();
+  const player = await ensurePlayer();
+  load(player);
 }
 
 export function leave() {
@@ -210,6 +273,19 @@ document.getElementById('un-cancel').addEventListener('click', () => {
   showEndCard();
 });
 
+document.getElementById('th-save-playlist').addEventListener('click', (e) => {
+  if (!current?.videoId) return;
+  openPlaylistMenu(
+    {
+      videoId: current.videoId,
+      title: current.title,
+      author: current.author,
+      thumbnail: `https://i.ytimg.com/vi/${current.videoId}/hqdefault.jpg`,
+    },
+    e.currentTarget,
+  );
+});
+
 document.addEventListener('antenna:change', () => {
-  if (!el.hidden) updateQueueButtons();
+  if (!el.hidden && current) updateNavButtons();
 });

@@ -5,11 +5,12 @@ import { parseVideoInput, parsePlaylistInput, parseChannelInput, parseTakeoutCsv
 import { noembed, scrapeChannelId } from '../net.js';
 import { refreshChannel } from '../feeds.js';
 import * as api from '../api.js';
-import { h, videoCard, toast, saveToLibrary } from '../ui.js';
+import { h, videoCard, toast, saveToLibrary, createLocalPlaylist } from '../ui.js';
 
 export const el = document.getElementById('view-library');
 
 let visible = false;
+const expandedPlaylists = new Set(); // survives re-renders triggered by antenna:change
 
 export function enter() {
   visible = true;
@@ -299,6 +300,107 @@ function savedSection() {
   ];
 }
 
+function playlistItemRows(playlist) {
+  const s = getState();
+  return playlist.items.map((item, i) =>
+    h(
+      'li',
+      {},
+      h('span', { class: 'grow' },
+        h('a', {
+          href: `#/local/${playlist.id}/${i}`,
+          class: s.watched[item.videoId] ? 'watched' : null,
+        }, item.title),
+        item.author ? h('span', { class: 'hint' }, ` — ${item.author}`) : null,
+        s.watched[item.videoId] ? h('span', { class: 'hint' }, ' ✓') : null),
+      h('button', {
+        class: 'quiet', type: 'button', title: 'Move up', disabled: i === 0 ? '' : null,
+        onclick: () => update((st) => {
+          const p = st.localPlaylists.find((x) => x.id === playlist.id);
+          [p.items[i - 1], p.items[i]] = [p.items[i], p.items[i - 1]];
+        }),
+      }, '▲'),
+      h('button', {
+        class: 'quiet', type: 'button', title: 'Move down', disabled: i === playlist.items.length - 1 ? '' : null,
+        onclick: () => update((st) => {
+          const p = st.localPlaylists.find((x) => x.id === playlist.id);
+          [p.items[i], p.items[i + 1]] = [p.items[i + 1], p.items[i]];
+        }),
+      }, '▼'),
+      h('button', {
+        class: 'quiet', type: 'button', title: 'Remove from playlist',
+        onclick: () => update((st) => {
+          const p = st.localPlaylists.find((x) => x.id === playlist.id);
+          p.items.splice(i, 1);
+        }),
+      }, '✕'),
+    ),
+  );
+}
+
+function myPlaylistsSection() {
+  const s = getState();
+  const nameInput = h('input', {
+    type: 'text',
+    placeholder: 'New playlist name',
+    onkeydown: (e) => { if (e.key === 'Enter') addPlaylist(); },
+  });
+  function addPlaylist() {
+    const name = nameInput.value.trim();
+    if (!name) return;
+    nameInput.value = '';
+    expandedPlaylists.add(createLocalPlaylist(name));
+  }
+  const rows = s.localPlaylists.map((p) => {
+    const details = h(
+      'details',
+      { class: 'playlist', ontoggle: (e) => {
+        if (e.target.open) expandedPlaylists.add(p.id);
+        else expandedPlaylists.delete(p.id);
+      } },
+      h(
+        'summary',
+        {},
+        h('span', { class: 'grow' }, h('strong', {}, p.name), h('span', { class: 'hint' }, ` · ${p.items.length} video${p.items.length === 1 ? '' : 's'}`)),
+        p.items.length
+          ? h('button', {
+              class: 'action', type: 'button',
+              onclick: (e) => { e.preventDefault(); location.hash = `#/local/${p.id}/0`; },
+            }, '▶ Play')
+          : null,
+        h('button', {
+          class: 'quiet', type: 'button',
+          onclick: (e) => {
+            e.preventDefault();
+            const name = prompt('Rename playlist', p.name);
+            if (name && name.trim()) update((st) => { st.localPlaylists.find((x) => x.id === p.id).name = name.trim(); });
+          },
+        }, 'Rename'),
+        h('button', {
+          class: 'danger', type: 'button',
+          onclick: (e) => {
+            e.preventDefault();
+            if (confirm(`Delete playlist “${p.name}” (${p.items.length} videos)? The videos themselves are not affected.`)) {
+              expandedPlaylists.delete(p.id);
+              update((st) => { st.localPlaylists = st.localPlaylists.filter((x) => x.id !== p.id); });
+            }
+          },
+        }, 'Delete'),
+      ),
+      p.items.length
+        ? h('ul', { class: 'row-list' }, playlistItemRows(p))
+        : h('p', { class: 'hint playlist-empty' }, 'Empty — use “+ Playlist” on any video card or in the player.'),
+    );
+    if (expandedPlaylists.has(p.id)) details.open = true;
+    return details;
+  });
+  return [
+    h('h2', {}, `My playlists (${s.localPlaylists.length})`),
+    h('div', { class: 'toolbar' }, nameInput, h('button', { class: 'quiet', type: 'button', onclick: addPlaylist }, 'Add playlist')),
+    ...(rows.length ? rows : [h('p', { class: 'hint' }, 'Your own collections. Create one here, then add videos via “+ Playlist” anywhere.')]),
+  ];
+}
+
 function playlistsSection() {
   const s = getState();
   const rows = s.playlists.map((p) =>
@@ -315,7 +417,7 @@ function playlistsSection() {
     ),
   );
   return [
-    h('h2', {}, `Playlists (${s.playlists.length})`),
+    h('h2', {}, `YouTube playlists (${s.playlists.length})`),
     s.playlists.length ? h('ul', { class: 'row-list' }, rows) : h('p', { class: 'hint' }, 'Paste a playlist URL above to keep it here. Playlists play natively — no API key needed.'),
   ];
 }
@@ -325,6 +427,7 @@ function render() {
   el.replaceChildren(
     ...addSection(),
     ...queueSection(),
+    ...myPlaylistsSection(),
     ...savedSection(),
     ...playlistsSection(),
     ...channelsSection(),

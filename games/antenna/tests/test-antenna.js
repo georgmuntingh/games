@@ -225,6 +225,17 @@ test('validate: accepts defaults and rejects bad shapes', () => {
   assertTrue(validate({ version: 1, watched: [] }) !== null, 'watched must be object');
 });
 
+test('validate: rejects non-array localPlaylists', () => {
+  assertTrue(validate({ version: 1, localPlaylists: {} }) !== null);
+  assertEq(validate({ version: 1, localPlaylists: [] }), null);
+});
+
+test('migrate: old backups without localPlaylists get an empty list', () => {
+  const migrated = migrate({ version: 1, channels: [] });
+  assertTrue(Array.isArray(migrated.localPlaylists), 'localPlaylists default');
+  assertEq(migrated.localPlaylists.length, 0);
+});
+
 test('migrate: fills missing fields and settings', () => {
   const migrated = migrate({ version: 1, channels: [{ id: 'UCx', title: 'X' }] });
   assertEq(migrated.channels.length, 1);

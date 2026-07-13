@@ -13,7 +13,8 @@ export function defaults() {
     channels: [], // { id, title, categoryId, addedAt }
     categories: [], // { id, name }
     savedVideos: [], // { videoId, title, author, channelId, thumbnail, durationSec, addedAt }
-    playlists: [], // { playlistId, title, author, addedAt }
+    playlists: [], // { playlistId, title, author, addedAt } — links to YouTube playlists
+    localPlaylists: [], // { id, name, items: [{ videoId, title, author, thumbnail }], createdAt }
     queue: [], // { videoId, title, author, thumbnail }
     watched: {}, // videoId -> watchedAt (ms)
     positions: {}, // videoId -> { t, updatedAt }
@@ -31,7 +32,7 @@ export function defaults() {
 export function validate(raw) {
   if (!raw || typeof raw !== 'object') return 'Not a JSON object';
   if (raw.version !== 1) return `Unsupported version: ${raw.version}`;
-  for (const key of ['channels', 'categories', 'savedVideos', 'playlists', 'queue', 'history']) {
+  for (const key of ['channels', 'categories', 'savedVideos', 'playlists', 'localPlaylists', 'queue', 'history']) {
     if (key in raw && !Array.isArray(raw[key])) return `Field "${key}" must be an array`;
   }
   for (const key of ['watched', 'positions', 'settings']) {
