@@ -82,19 +82,28 @@ export async function videoMeta(videoId, apiKey) {
   };
 }
 
+const PERIOD_MS = { day: 86400e3, week: 7 * 86400e3, month: 30 * 86400e3, year: 365 * 86400e3 };
+
+/** RFC3339 lower bound for an upload-date period ('' / unknown → null). */
+export function publishedAfterForPeriod(period, nowMs = Date.now()) {
+  const span = PERIOD_MS[period];
+  return span ? new Date(nowMs - span).toISOString() : null;
+}
+
 /**
  * Plain search (100 quota units!). Returns { videos, channels }.
- * order: '' for relevance, 'date' for newest first.
+ * order: any search.list order (date, relevance, viewCount, rating, title).
  */
-export async function search(query, { order = '', apiKey }) {
+export async function search(query, { order = 'date', publishedAfter = null, apiKey }) {
   const params = {
     part: 'snippet',
     q: query,
     type: 'video,channel',
     maxResults: '20',
     safeSearch: 'none',
+    order,
   };
-  if (order) params.order = order;
+  if (publishedAfter) params.publishedAfter = publishedAfter;
   const data = await apiGet('search', params, apiKey);
   const videos = [];
   const channels = [];

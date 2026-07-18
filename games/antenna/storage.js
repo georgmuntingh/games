@@ -24,6 +24,8 @@ export function defaults() {
       proxyTemplate: '',
       showShorts: false,
       feedTTLMinutes: 30,
+      searchOrder: 'date', // deliberate default: chronology, not YouTube's ranking
+      searchPeriod: '', // '' = any time; 'day' | 'week' | 'month' | 'year'
     },
   };
 }

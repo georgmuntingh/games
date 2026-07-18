@@ -9,6 +9,7 @@ import {
   isShortVideo,
 } from '../parse.js';
 import { defaults, validate, migrate } from '../storage.js';
+import { publishedAfterForPeriod } from '../api.js';
 
 const tests = [];
 function test(name, fn) {
@@ -244,6 +245,17 @@ test('migrate: fills missing fields and settings', () => {
   const partial = migrate({ version: 1, settings: { apiKey: 'k' } });
   assertEq(partial.settings.apiKey, 'k');
   assertEq(partial.settings.showShorts, false, 'missing setting filled');
+  assertEq(partial.settings.searchOrder, 'date', 'search order defaults to newest first');
+  assertEq(partial.settings.searchPeriod, '', 'search period defaults to any time');
+});
+
+test('publishedAfterForPeriod', () => {
+  const now = Date.UTC(2026, 6, 18, 12, 0, 0); // 2026-07-18T12:00:00Z
+  assertEq(publishedAfterForPeriod('', now), null);
+  assertEq(publishedAfterForPeriod('bogus', now), null);
+  assertEq(publishedAfterForPeriod('day', now), '2026-07-17T12:00:00.000Z');
+  assertEq(publishedAfterForPeriod('week', now), '2026-07-11T12:00:00.000Z');
+  assertEq(publishedAfterForPeriod('year', now), '2025-07-18T12:00:00.000Z');
 });
 
 // --- runner (same pattern as lr-bsplines) ------------------------------------

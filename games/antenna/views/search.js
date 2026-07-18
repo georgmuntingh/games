@@ -21,13 +21,33 @@ export function leave() {
   visible = false;
 }
 
-async function doSearch(query, orderByDate) {
-  const { apiKey } = getState().settings;
+const SORT_OPTIONS = [
+  ['date', 'Newest first'],
+  ['relevance', 'Relevance'],
+  ['viewCount', 'Most viewed'],
+  ['rating', 'Highest rated'],
+  ['title', 'Title A–Z'],
+];
+
+const PERIOD_OPTIONS = [
+  ['', 'Any time'],
+  ['day', 'Today'],
+  ['week', 'This week'],
+  ['month', 'This month'],
+  ['year', 'This year'],
+];
+
+async function doSearch(query) {
+  const { apiKey, searchOrder, searchPeriod } = getState().settings;
   searching = true;
   render();
   try {
     lastQuery = query;
-    lastResults = await api.search(query, { order: orderByDate ? 'date' : '', apiKey });
+    lastResults = await api.search(query, {
+      order: searchOrder || 'date',
+      publishedAfter: api.publishedAfterForPeriod(searchPeriod),
+      apiKey,
+    });
   } catch (err) {
     lastResults = null;
     toast(`Search failed: ${err.message}`);
@@ -100,15 +120,30 @@ function render() {
     style: 'flex:1; min-width: 14rem;',
     onkeydown: (e) => { if (e.key === 'Enter') submit(); },
   });
-  const dateBox = h('input', { type: 'checkbox' });
   function submit() {
     const q = input.value.trim();
-    if (q) doSearch(q, dateBox.checked);
+    if (q) doSearch(q);
+  }
+  // Changing sort or period re-runs the current search right away.
+  function settingSelect(key, options, label) {
+    const value = getState().settings[key];
+    return h(
+      'select',
+      {
+        'aria-label': label,
+        onchange: (e) => {
+          update((s) => { s.settings[key] = e.target.value; });
+          if (lastQuery) doSearch(lastQuery);
+        },
+      },
+      options.map(([v, text]) => h('option', { value: v, selected: v === value ? '' : null }, text)),
+    );
   }
   el.replaceChildren(
     h('div', { class: 'toolbar' },
       input,
-      h('label', {}, dateBox, 'Newest first'),
+      settingSelect('searchOrder', SORT_OPTIONS, 'Sort results by'),
+      settingSelect('searchPeriod', PERIOD_OPTIONS, 'Uploaded within'),
       h('button', { class: 'action', type: 'button', onclick: submit }, 'Search'),
     ),
     h('p', { class: 'hint' }, 'Tip: prefer Subscribe / Save over instant watching — curate first, watch on your own time.'),
