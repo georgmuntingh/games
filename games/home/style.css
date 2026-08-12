@@ -1,0 +1,101 @@
+/* A start page that is black on every device, in every colour scheme. The
+   colours here are hard-coded rather than pulled from /shared/ui.css on
+   purpose: ui.css turns the page light under `prefers-color-scheme: light`,
+   and this page is meant to be the same void everywhere. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: #000;
+}
+
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    sans-serif;
+  color: #d4d4d4;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+}
+
+/* A 4px dot with a 44px transparent hit area around it, so it stays tappable
+   on touch without becoming visible. */
+#dot {
+  /* Chromium's UA stylesheet makes buttons border-box, which would eat the
+     padding that forms the hit area. */
+  box-sizing: content-box;
+  width: 4px;
+  height: 4px;
+  padding: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: #1c1c1c;
+  background-clip: content-box;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 200ms ease;
+}
+
+#dot:hover,
+#dot:focus-visible {
+  background: #3a3a3a;
+  background-clip: content-box;
+  outline: none;
+}
+
+#launcher {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 30rem;
+  max-width: 90vw;
+}
+
+#q {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #d4d4d4;
+  caret-color: #555;
+  /* 1rem keeps iOS Safari from zooming the viewport when the field is focused. */
+  font: inherit;
+  font-size: 1rem;
+  text-align: center;
+}
+
+#q:focus {
+  outline: none;
+}
+
+#hint {
+  /* Reserved height, so revealing a hint never shifts the input. */
+  min-height: 1.25rem;
+  margin-top: 0.5rem;
+  color: #3a3a3a;
+  font-size: 0.8rem;
+  transition: opacity 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #dot,
+  #hint {
+    transition: none;
+  }
+}

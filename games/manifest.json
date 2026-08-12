@@ -41,6 +41,12 @@
       "title": "Sokoban",
       "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
       "tags": ["puzzle", "solo"]
+    },
+    {
+      "id": "home",
+      "title": "Home",
+      "description": "A completely black browser start page. One tiny dot opens a keyboard launcher — everything else is nothing.",
+      "tags": ["tool", "utility"]
     }
   ]
 }
