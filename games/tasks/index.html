@@ -20,6 +20,9 @@
           <span class="sr-only">Project</span>
           <select id="project-picker" aria-label="Project"></select>
         </label>
+        <button type="button" id="project-open" class="icon-btn" title="Project details">
+          ✎
+        </button>
 
         <details class="dropdown" id="people-filter">
           <summary id="people-summary">Everyone</summary>
@@ -190,42 +193,86 @@
       </section>
 
       <section>
-        <h3>Project</h3>
-        <label class="field">
-          <span>Name</span>
-          <input id="p-title" type="text" placeholder="Website relaunch" />
-        </label>
-        <div class="grid2">
-          <label class="field">
-            <span>Starts</span>
-            <input id="p-start" type="date" />
-          </label>
-          <label class="field">
-            <span>Ends</span>
-            <input id="p-end" type="date" />
-          </label>
-        </div>
-        <label class="field">
-          <span>End goal</span>
-          <textarea id="p-goal" rows="3" placeholder="What does done look like?"></textarea>
-        </label>
-        <p class="muted small">
-          The goal is the context the assistant uses to work out what is missing. Markdown
-          is fine.
-        </p>
-        <div class="row">
-          <button type="button" id="new-project">New project…</button>
-          <button type="button" id="delete-project" class="danger">Delete project</button>
-        </div>
-      </section>
-
-      <section>
         <h3>Board</h3>
         <div class="row">
           <button type="button" id="load-demo">Reload demo project</button>
           <button type="button" id="clear-board" class="danger">Clear demo &amp; start empty</button>
         </div>
       </section>
+    </dialog>
+
+    <dialog id="project" class="sheet">
+      <form method="dialog" class="sheet-head">
+        <h2 id="project-heading">Project</h2>
+        <button class="icon" title="Close">✕</button>
+      </form>
+
+      <label class="field">
+        <span>Name</span>
+        <input id="p-title" type="text" placeholder="Website relaunch" />
+      </label>
+
+      <label class="field">
+        <span>End goal</span>
+        <input
+          id="p-goal"
+          type="text"
+          placeholder="What does done look like, in one line?"
+          autocomplete="off"
+        />
+      </label>
+
+      <div class="grid2">
+        <label class="field">
+          <span>Starts</span>
+          <input id="p-start" type="date" />
+        </label>
+        <label class="field">
+          <span>Ends</span>
+          <input id="p-end" type="date" />
+        </label>
+      </div>
+
+      <section class="roster">
+        <div class="section-head">
+          <h2>People</h2>
+          <span class="muted small" id="p-people-hint"></span>
+        </div>
+        <ul id="p-people" class="chips"></ul>
+        <form id="p-people-form">
+          <input
+            id="p-people-new"
+            type="text"
+            list="people-list"
+            placeholder="Add someone and press Enter"
+            autocomplete="off"
+          />
+        </form>
+      </section>
+
+      <label class="field">
+        <span>Context</span>
+        <textarea
+          id="p-context"
+          rows="10"
+          placeholder="Anything worth knowing: constraints, allocations, decisions already made, open questions. Markdown is fine."
+        ></textarea>
+      </label>
+      <p class="muted small">
+        Sent to the assistant alongside the goal, verbatim. This is the place to dump
+        whatever context you want it to reason within.
+      </p>
+
+      <div class="panel-foot">
+        <label class="field colour-field">
+          <span>Colour</span>
+          <input id="p-color" type="color" />
+        </label>
+        <div class="row">
+          <button type="button" id="project-create" hidden>Create</button>
+          <button type="button" id="project-delete" class="danger">Delete project</button>
+        </div>
+      </div>
     </dialog>
 
     <dialog id="suggestions" class="sheet">

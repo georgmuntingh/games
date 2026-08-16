@@ -13,6 +13,7 @@ const LEVEL_SEPARATION = 96;
 const MIN_FIT_SCALE = 0.72;
 const NODE_WIDTH = 176;
 const NODE_HEIGHT = 46;
+const STRIPE_WIDTH = 4;
 const GUTTER_PAD = 12;
 
 /** Pull the live theme values so the canvas follows light/dark like the rest of the page. */
@@ -73,7 +74,25 @@ function wrap(ctx, text, maxWidth, maxLines) {
  * A node is a rounded card: a progress ring, the title, and nothing else. Status is
  * carried by the border — red for overdue, dashed for blocked, muted when done.
  */
-function drawTask(ctx, x, y, { status, title, selected, theme, showHandle }) {
+/**
+ * A stripe down the node's left edge, one band per coloured project the task belongs
+ * to. Its value is the multi-project case: a task on this board that also belongs to
+ * another project shows two bands, and says so at a glance.
+ */
+function drawStripe(ctx, left, top, colors) {
+  if (!colors.length) return;
+  const height = NODE_HEIGHT / colors.length;
+  ctx.save();
+  roundRect(ctx, left, top, NODE_WIDTH, NODE_HEIGHT, 8);
+  ctx.clip();
+  colors.forEach((color, index) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(left, top + index * height, STRIPE_WIDTH, height);
+  });
+  ctx.restore();
+}
+
+function drawTask(ctx, x, y, { status, title, selected, theme, showHandle, colors }) {
   const left = x - NODE_WIDTH / 2;
   const top = y - NODE_HEIGHT / 2;
 
@@ -85,6 +104,8 @@ function drawTask(ctx, x, y, { status, title, selected, theme, showHandle }) {
   ctx.fillStyle = status.done ? theme.surfaceDone : theme.surface;
   ctx.fill();
   ctx.restore();
+
+  drawStripe(ctx, left, top, colors ?? []);
 
   ctx.save();
   roundRect(ctx, left, top, NODE_WIDTH, NODE_HEIGHT, 8);
@@ -101,7 +122,7 @@ function drawTask(ctx, x, y, { status, title, selected, theme, showHandle }) {
   ctx.restore();
 
   // Progress ring.
-  const ringX = left + 20;
+  const ringX = left + STRIPE_WIDTH + 18;
   const ringY = y;
   const radius = 9;
   ctx.save();
@@ -344,6 +365,7 @@ export function createGraph(container, handlers = {}) {
                 selected: state.selected || next.selectedId === task.id,
                 theme,
                 showHandle: next.selectedId === task.id,
+                colors: next.projectColors.get(task.id) ?? [],
               }),
             nodeDimensions: { width: NODE_WIDTH, height: NODE_HEIGHT },
           }),

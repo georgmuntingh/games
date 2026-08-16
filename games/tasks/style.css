@@ -253,7 +253,8 @@ body {
 .field input,
 .field textarea,
 .field select,
-#subtask-new {
+#subtask-new,
+#p-people-new {
   font: inherit;
   font-size: 0.86rem;
   color: var(--ui-fg);
@@ -273,7 +274,8 @@ body {
 .field input:focus,
 .field textarea:focus,
 .field select:focus,
-#subtask-new:focus {
+#subtask-new:focus,
+#p-people-new:focus {
   outline: none;
   border-color: var(--ui-accent);
 }
@@ -625,4 +627,102 @@ div.vis-tooltip {
 
 .goal > :last-child {
   margin-bottom: 0;
+}
+
+/* ------------------------------------------------------------ project dialog */
+
+.icon-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.34rem 0.5rem;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+#project .field + .field,
+#project .grid2,
+#project .roster,
+#project textarea {
+  margin-top: 0.6rem;
+}
+
+#project textarea {
+  resize: vertical;
+  min-height: 6rem;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+
+.chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.5rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+
+/* Someone holding tasks who is not on the roster: shown, but visibly not a member. */
+.chips li.absent {
+  border-style: dashed;
+  color: var(--ui-muted);
+}
+
+.chips .count {
+  color: var(--ui-muted);
+  font-size: 0.72rem;
+}
+
+.chips button {
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 0.15rem 0.25rem;
+  color: var(--ui-muted);
+  cursor: pointer;
+}
+
+.chips li:not(.absent) button:hover {
+  color: var(--task-danger);
+}
+
+.chips li.absent button:hover {
+  color: var(--ui-accent);
+}
+
+.colour-field {
+  flex: 0 0 auto;
+}
+
+.colour-field input[type='color'] {
+  width: 2.6rem;
+  height: 1.8rem;
+  padding: 0.1rem;
+  cursor: pointer;
+}
+
+#project .panel-foot {
+  align-items: flex-end;
 }

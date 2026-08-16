@@ -13,6 +13,7 @@
 const KEY_ORDER = [
   'id',
   'title',
+  'goal',
   'project',
   'people',
   'due',

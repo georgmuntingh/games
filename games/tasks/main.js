@@ -21,6 +21,7 @@ import {
   indexById,
   allPeople,
   allProjectTags,
+  projectPeople,
   uniqueSlug,
   formatDate,
   parseDate,
@@ -237,17 +238,22 @@ function updateProject(id, changes) {
   });
 }
 
-function addProject(title) {
+/** Cycled on creation so a new project has a visible stripe without anyone picking one. */
+const PROJECT_COLORS = ['#2563eb', '#c2410c', '#15803d', '#7c3aed', '#0891b2', '#be123c'];
+
+function addProject(fields = {}) {
   const taken = new Set(board().projects.map((p) => p.id));
+  const title = fields.title?.trim() || 'New project';
   const id = uniqueSlug(title, taken);
-  const start = formatDate(Date.now());
   const project = {
     id,
     title,
-    start,
-    end: formatDate(Date.now() + 90 * 86400000),
-    color: '',
-    goal: '',
+    goal: fields.goal ?? '',
+    people: fields.people ?? [],
+    start: fields.start || formatDate(Date.now()),
+    end: fields.end || formatDate(Date.now() + 90 * 86400000),
+    color: fields.color || PROJECT_COLORS[board().projects.length % PROJECT_COLORS.length],
+    context: fields.context ?? '',
   };
   ui.projectId = id;
   ui.people.clear();
@@ -347,6 +353,15 @@ function buildView() {
 
   const nowLevel = tasks.length ? bucket.level(Date.now(), window.start) - minLevel : null;
 
+  // One band per coloured project a task belongs to, in the board's project order.
+  const colorOf = new Map(board().projects.filter((p) => p.color).map((p) => [p.id, p.color]));
+  const projectColors = new Map(
+    tasks.map((task) => [
+      task.id,
+      (task.project ?? []).map((id) => colorOf.get(id)).filter(Boolean),
+    ])
+  );
+
   return {
     tasks,
     levels,
@@ -355,6 +370,7 @@ function buildView() {
     gutter,
     nowLevel,
     edges: buildEdges(tasks, levels),
+    projectColors,
     selectedId: ui.selectedId,
     project,
     bucket,
@@ -374,7 +390,7 @@ function render() {
     projects: [...new Set([...board().projects.map((p) => p.id), ...allProjectTags(board().tasks)])],
     assistantReady: Boolean(llm.getKey()),
   });
-  if ($('settings').open) renderProjectFields();
+  if ($('project').open) renderProjectDialog();
   if (!$('status-bar').textContent) renderSummary(view);
 }
 
@@ -386,7 +402,8 @@ function renderSummary(view) {
   if (overdue) parts.push(`${overdue} overdue`);
   if (hours) parts.push(`${Math.round(hours / 8)}d of work left`);
   parts.push(`scale: ${view.bucket.label.toLowerCase()}`);
-  status(parts.join(' · '));
+  const counts = parts.join(' · ');
+  status(view.project?.goal ? `${view.project.goal} — ${counts}` : counts);
 }
 
 function renderToolbar(view) {
@@ -406,7 +423,10 @@ function renderToolbar(view) {
     picker.append(option);
   }
 
-  const people = allPeople(filterTasks(board().tasks, { projectId: ui.projectId }));
+  // The roster as well as anyone assigned work, so a new teammate is selectable at once.
+  const people = projectPeople(view.project, board().tasks)
+    .map((p) => p.name)
+    .sort((a, b) => a.localeCompare(b));
   const options = $('people-options');
   options.textContent = '';
   for (const person of people) {
@@ -471,10 +491,20 @@ async function setBoardFromFiles(files, message) {
  * these files can come from an imported vault, so they are not trusted markup.
  */
 function renderGoal() {
-  const goal = currentProject()?.goal ?? '';
+  const project = currentProject();
+  const goal = project?.goal ?? '';
+  const context = project?.context ?? '';
   const element = $('assist-goal');
-  element.hidden = !goal;
+  element.hidden = !goal && !context;
   element.innerHTML = goal ? marked.parse(goal.replace(/</g, '&lt;')) : '';
+  if (context) {
+    // Say what else is going with the request, so the cost is never a surprise.
+    const words = context.trim().split(/\s+/).length;
+    const note = document.createElement('p');
+    note.className = 'muted small';
+    note.textContent = `plus ${words} word${words === 1 ? '' : 's'} of context`;
+    element.append(note);
+  }
 }
 
 function openSuggestions(title) {
@@ -596,27 +626,141 @@ function acceptSuggestion(index) {
 
 /* ------------------------------------------------------------- settings */
 
-function renderProjectFields() {
-  const project = currentProject();
-  const has = Boolean(project);
-  for (const id of ['p-title', 'p-start', 'p-end', 'p-goal']) $(id).disabled = !has;
-  $('delete-project').disabled = !has;
-  if (!has) {
-    $('p-title').value = '';
-    $('p-start').value = '';
-    $('p-end').value = '';
-    $('p-goal').value = '';
+/* -------------------------------------------------------- project dialog */
+
+/** 'edit' fills the dialog from the current project; 'create' opens it blank. */
+let projectMode = 'edit';
+/** Fields held while creating, since there is no project to write through to yet. */
+let draftProject = null;
+
+const projectFieldIds = ['p-title', 'p-goal', 'p-start', 'p-end', 'p-context', 'p-color'];
+
+function editedProject() {
+  return projectMode === 'create' ? draftProject : currentProject();
+}
+
+function renderProjectDialog() {
+  const project = editedProject();
+  const creating = projectMode === 'create';
+  $('project-heading').textContent = creating ? 'New project' : 'Project';
+  $('project-create').hidden = !creating;
+  $('project-delete').hidden = creating;
+
+  const enabled = Boolean(project);
+  for (const id of projectFieldIds) $(id).disabled = !enabled;
+  $('p-people-new').disabled = !enabled;
+  $('project-delete').disabled = !enabled;
+  if (!project) {
+    for (const id of projectFieldIds) $(id).value = '';
+    $('p-people').textContent = '';
+    $('p-people-hint').textContent = '';
     return;
   }
-  if (document.activeElement?.id !== 'p-title') $('p-title').value = project.title;
+
+  // Leave whichever field is being typed in alone, so a re-render never steals a keystroke.
+  const untouched = (id) => document.activeElement?.id !== id;
+  if (untouched('p-title')) $('p-title').value = project.title ?? '';
+  if (untouched('p-goal')) $('p-goal').value = project.goal ?? '';
+  if (untouched('p-context')) $('p-context').value = project.context ?? '';
   $('p-start').value = project.start || '';
   $('p-end').value = project.end || '';
-  if (document.activeElement?.id !== 'p-goal') $('p-goal').value = project.goal || '';
+  $('p-color').value = project.color || '#2563eb';
+  renderRoster(project);
+}
+
+function renderRoster(project) {
+  const list = $('p-people');
+  list.textContent = '';
+  const people = creatingOrSaved(project);
+
+  for (const person of people) {
+    const li = document.createElement('li');
+    if (!person.inRoster) li.className = 'absent';
+    li.title = person.inRoster
+      ? `${person.name} is on the roster`
+      : `${person.name} holds tasks here but is not on the roster`;
+
+    const name = document.createElement('span');
+    name.textContent = person.name;
+    li.append(name);
+
+    if (person.openTasks) {
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = String(person.openTasks);
+      count.title = `${person.openTasks} open task${person.openTasks === 1 ? '' : 's'}`;
+      li.append(count);
+    }
+
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.textContent = person.inRoster ? '✕' : '+';
+    action.title = person.inRoster ? 'Remove from roster' : 'Add to roster';
+    action.addEventListener('click', () =>
+      setRoster(
+        person.inRoster
+          ? roster().filter((n) => n !== person.name)
+          : [...roster(), person.name]
+      )
+    );
+    li.append(action);
+    list.append(li);
+  }
+
+  const absent = people.filter((p) => !p.inRoster).length;
+  $('p-people-hint').textContent = absent
+    ? `${absent} holding tasks but not on the roster`
+    : '';
+}
+
+/** In create mode there are no tasks yet, so the roster is all there is. */
+function creatingOrSaved(project) {
+  if (projectMode === 'create') {
+    return (project.people ?? []).map((name) => ({ name, inRoster: true, openTasks: 0 }));
+  }
+  return projectPeople(project, board().tasks);
+}
+
+const roster = () => editedProject()?.people ?? [];
+
+function setRoster(names) {
+  const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  writeProjectField('people', unique);
+}
+
+/** Route an edit to the live project, or to the draft when creating. */
+function writeProjectField(key, value) {
+  if (projectMode === 'create') {
+    draftProject = { ...draftProject, [key]: value };
+    renderProjectDialog();
+    return;
+  }
+  const project = currentProject();
+  if (project) updateProject(project.id, { [key]: value });
+  renderProjectDialog();
+}
+
+function openProject(mode = 'edit') {
+  projectMode = mode;
+  draftProject =
+    mode === 'create'
+      ? {
+          title: '',
+          goal: '',
+          people: [],
+          start: formatDate(Date.now()),
+          end: formatDate(Date.now() + 90 * 86400000),
+          color: PROJECT_COLORS[board().projects.length % PROJECT_COLORS.length],
+          context: '',
+        }
+      : null;
+  renderProjectDialog();
+  if (!$('project').open) $('project').showModal();
+  $('p-title').focus();
 }
 
 function openSettings() {
   refreshStorageState();
-  renderProjectFields();
   $('api-key').value = llm.getKey();
   if (!$('settings').open) $('settings').showModal();
   if (!$('model-picker').options.length) loadModels();
@@ -799,30 +943,42 @@ function wireEvents() {
     status('Disconnected. Saving to this browser only.');
   });
 
-  const projectField = (elementId, key) =>
-    $(elementId).addEventListener('change', (event) => {
-      const project = currentProject();
-      if (project) updateProject(project.id, { [key]: event.target.value.trim() });
-    });
+  $('project-open').addEventListener('click', () =>
+    openProject(currentProject() ? 'edit' : 'create')
+  );
+
+  const projectField = (elementId, key, transform = (v) => v.trim()) =>
+    $(elementId).addEventListener('change', (event) =>
+      writeProjectField(key, transform(event.target.value))
+    );
   projectField('p-title', 'title');
+  projectField('p-goal', 'goal');
   projectField('p-start', 'start');
   projectField('p-end', 'end');
-  projectField('p-goal', 'goal');
+  projectField('p-color', 'color');
+  projectField('p-context', 'context', (v) => v.replace(/\s+$/, ''));
 
-  $('new-project').addEventListener('click', () => {
-    const title = prompt('Name the project')?.trim();
-    if (title) {
-      addProject(title);
-      renderProjectFields();
-      $('p-goal').focus();
-    }
+  $('p-people-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = $('p-people-new').value.trim();
+    if (!name) return;
+    $('p-people-new').value = '';
+    setRoster([...roster(), name]);
   });
-  $('delete-project').addEventListener('click', () => {
+
+  $('project-create').addEventListener('click', () => {
+    addProject(draftProject);
+    projectMode = 'edit';
+    draftProject = null;
+    renderProjectDialog();
+  });
+
+  $('project-delete').addEventListener('click', () => {
     const project = currentProject();
-    if (project) {
-      deleteProject(project.id);
-      renderProjectFields();
-    }
+    if (!project) return;
+    deleteProject(project.id);
+    if (currentProject()) renderProjectDialog();
+    else $('project').close();
   });
 
   $('export-zip').addEventListener('click', exportZip);
@@ -838,8 +994,8 @@ function wireEvents() {
   );
   $('clear-board').addEventListener('click', async () => {
     await setBoardFromFiles({}, 'Board cleared. Name a project to begin.');
-    renderProjectFields();
-    $('new-project').focus();
+    $('settings').close();
+    openProject('create');
   });
 
   document.addEventListener('keydown', (event) => {

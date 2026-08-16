@@ -165,7 +165,13 @@ export function taskToMarkdown(task) {
   return serialiseFrontmatter(data, serialiseBody(task.notes, task.subtasks));
 }
 
-/** Parse a `_project-<id>.md` file. The body prose is the project's end goal. */
+/**
+ * Parse a `_project-<id>.md` file.
+ *
+ * The end goal is a one-line `goal:` scalar; the body is free-form context. A file
+ * written before the two were separated has no `goal:` key, and its body is read as
+ * context rather than guessed at — nothing is silently reinterpreted as a goal.
+ */
 export function projectFromMarkdown(filename, text) {
   const { data, body } = parseFrontmatter(text);
   const fallbackId = String(filename)
@@ -174,10 +180,12 @@ export function projectFromMarkdown(filename, text) {
   return {
     id: String(data.id || fallbackId),
     title: String(data.title || fallbackId),
+    goal: data.goal ? String(data.goal) : '',
+    people: asList(data.people),
     start: data.start ? String(data.start) : '',
     end: data.end ? String(data.end) : '',
     color: data.color ? String(data.color) : '',
-    goal: String(body).trim(),
+    context: String(body).trim(),
   };
 }
 
@@ -187,13 +195,15 @@ export function projectToMarkdown(project) {
       {
         id: project.id,
         title: project.title,
+        goal: project.goal ?? '',
+        people: project.people ?? [],
         start: project.start ?? '',
         end: project.end ?? '',
         color: project.color ?? '',
       },
       ['id', 'title']
     ),
-    project.goal ?? ''
+    project.context ?? ''
   );
 }
 
@@ -374,6 +384,25 @@ export function allPeople(tasks) {
 /** Every distinct project tag across `tasks`, sorted. */
 export function allProjectTags(tasks) {
   return [...new Set(tasks.flatMap((t) => t.project ?? []))].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Everyone connected to a project: the roster it declares, plus anyone holding one of
+ * its tasks but missing from that roster. `inRoster` lets the UI show the difference
+ * so a name can be adopted, and `openTasks` counts the incomplete work each holds.
+ */
+export function projectPeople(project, tasks) {
+  const projectTasks = filterTasks(tasks, { projectId: project?.id ?? null });
+  const roster = project?.people ?? [];
+  const names = [...new Set([...roster, ...allPeople(projectTasks)])];
+  const inRoster = new Set(roster);
+  return names
+    .map((name) => ({
+      name,
+      inRoster: inRoster.has(name),
+      openTasks: projectTasks.filter((t) => !t.done && (t.people ?? []).includes(name)).length,
+    }))
+    .sort((a, b) => Number(b.inRoster) - Number(a.inRoster) || a.name.localeCompare(b.name));
 }
 
 /**

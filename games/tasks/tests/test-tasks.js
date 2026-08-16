@@ -14,6 +14,7 @@ import {
   taskFromMarkdown,
   taskToMarkdown,
   projectFromMarkdown,
+  projectToMarkdown,
   buildBoard,
   boardToFiles,
   chooseBucket,
@@ -26,6 +27,7 @@ import {
   allProjectTags,
   filterTasks,
   buildEdges,
+  projectPeople,
 } from '../model.js';
 import { buildBrief, buildTaskBrief } from '../exporter.js';
 import { parseJsonResponse, ACTIONS } from '../prompts.js';
@@ -111,14 +113,41 @@ test('unknown keys survive a round trip', () => {
   assert(taskToMarkdown(task).includes('cssclass: kanban'), 'extra key must be written back');
 });
 
-test('a project file parses its goal out of the body', () => {
+test('a project file separates its one-line goal from its free-form context', () => {
   const project = projectFromMarkdown(
     '_project-website.md',
-    "---\nid: website\ntitle: Website relaunch\nstart: 2026-08-01\nend: 2026-11-30\ncolor: '#2563eb'\n---\nShip self-serve signup.\n"
+    "---\nid: website\ntitle: Website relaunch\ngoal: Ship self-serve signup\npeople: [georg, ada]\nstart: 2026-08-01\nend: 2026-11-30\ncolor: '#2563eb'\n---\nStripe is set up.\n\n## Open questions\n- SOC2?\n"
   );
   assertEqual(project.id, 'website');
   assertEqual(project.color, '#2563eb');
-  assertEqual(project.goal, 'Ship self-serve signup.');
+  assertEqual(project.goal, 'Ship self-serve signup');
+  assertEqual(project.people, ['georg', 'ada']);
+  assertEqual(project.context, 'Stripe is set up.\n\n## Open questions\n- SOC2?');
+});
+
+test('context keeps its own headings and lists intact', () => {
+  const src =
+    '---\nid: x\ntitle: X\ngoal: G\n---\n## Constraints\n\n- one\n- two\n\n## Open questions\n\n- three\n';
+  assertEqual(projectToMarkdown(projectFromMarkdown('_project-x.md', src)), src);
+});
+
+test('a project file written before the split keeps its body as context, not as a goal', () => {
+  const legacy = projectFromMarkdown('_project-x.md', '---\nid: x\ntitle: X\n---\nOld body prose.\n');
+  assertEqual(legacy.goal, '', 'nothing is guessed into the goal');
+  assertEqual(legacy.context, 'Old body prose.');
+});
+
+test('a goal containing a colon survives serialisation', () => {
+  const project = { id: 'x', title: 'X', goal: 'Ship it: end to end, no humans', people: [], context: '' };
+  const back = projectFromMarkdown('_project-x.md', projectToMarkdown(project));
+  assertEqual(back.goal, 'Ship it: end to end, no humans');
+});
+
+test('empty project fields are omitted rather than written blank', () => {
+  const markdown = projectToMarkdown({ id: 'x', title: 'X', goal: '', people: [], context: '' });
+  assert(!markdown.includes('goal:'), 'an empty goal must not be written');
+  assert(!markdown.includes('people:'), 'an empty roster must not be written');
+  assertEqual(markdown, '---\nid: x\ntitle: X\n---\n');
 });
 
 test('a project id falls back to the filename', () => {
@@ -333,6 +362,22 @@ test('an empty filter is the identity', () => {
   assertEqual(filterTasks(board.tasks, {}).length, board.tasks.length);
 });
 
+test('projectPeople marks roster members, task-only names and their open counts', () => {
+  const project = { id: 'p', people: ['georg', 'kim'] };
+  const tasks = [
+    { id: 'a', project: ['p'], people: ['georg'], done: false },
+    { id: 'b', project: ['p'], people: ['georg'], done: true },
+    { id: 'c', project: ['p'], people: ['ada'], done: false },
+    { id: 'd', project: ['other'], people: ['zoe'], done: false },
+  ];
+  const people = projectPeople(project, tasks);
+  assertEqual(people.map((p) => p.name), ['georg', 'kim', 'ada'], 'roster first, then adopted');
+  assertEqual(people.find((p) => p.name === 'georg'), { name: 'georg', inRoster: true, openTasks: 1 });
+  assertEqual(people.find((p) => p.name === 'kim'), { name: 'kim', inRoster: true, openTasks: 0 });
+  assertEqual(people.find((p) => p.name === 'ada'), { name: 'ada', inRoster: false, openTasks: 1 });
+  assert(!people.some((p) => p.name === 'zoe'), 'people on other projects are not listed');
+});
+
 test('people and project tags are deduplicated and sorted', () => {
   assertEqual(allPeople(board.tasks), ['ada', 'georg', 'mira', 'sam']);
   assertEqual(allProjectTags(board.tasks), ['q4-hiring', 'website']);
@@ -386,10 +431,31 @@ test('includes the goal, a task table and the dependency list', () => {
   const brief = buildBrief(project, tasks, { now: Date.UTC(2026, 7, 16) });
   assert(brief.includes('# Website relaunch'), 'title');
   assert(brief.includes('## Goal'), 'goal section');
+  assert(brief.includes('## Context'), 'context section');
   assert(brief.includes('| id | task | due | estimate | people | subtasks |'), 'table header');
   assert(brief.includes('| wireframes | Wireframes |'), 'a task row keyed by its id');
   assert(brief.includes('- wireframes blocked-by information-architecture'), 'dependency');
   assert(brief.includes('- signup-flow part-of self-serve-signup'), 'part-of dependency');
+});
+
+test('goal and context are separate labelled sections', () => {
+  const brief = buildBrief(
+    { title: 'P', goal: 'Ship it', context: 'Stripe is set up.\n\n## Open questions\n- SOC2?' },
+    []
+  );
+  assert(brief.includes('## Goal\nShip it'), 'goal section');
+  assert(brief.includes('## Context\nStripe is set up.'), 'context section');
+  assert(brief.indexOf('## Goal') < brief.indexOf('## Context'), 'goal comes first');
+  assert(brief.includes('- SOC2?'), 'context goes verbatim, headings and all');
+});
+
+test('each section is dropped cleanly when empty', () => {
+  const goalOnly = buildBrief({ title: 'P', goal: 'Ship it', context: '' }, []);
+  assert(goalOnly.includes('## Goal'), 'goal kept');
+  assert(!goalOnly.includes('## Context'), 'no empty context heading');
+  const contextOnly = buildBrief({ title: 'P', goal: '', context: 'Background.' }, []);
+  assert(!contextOnly.includes('## Goal'), 'no empty goal heading');
+  assert(contextOnly.includes('## Context'), 'context kept');
 });
 
 test('escapes pipes so a title cannot break the table', () => {

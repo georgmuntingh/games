@@ -30,7 +30,10 @@ export function buildBrief(project, tasks, { now = Date.now() } = {}) {
   const lines = [];
 
   lines.push(`# ${project?.title || 'Untitled project'}`);
+  // Goal and context are labelled separately so the model can tell the objective from
+  // the background it should reason within. Context goes verbatim, however long.
   if (project?.goal) lines.push('', '## Goal', project.goal.trim());
+  if (project?.context) lines.push('', '## Context', project.context.trim());
 
   const window = [project?.start, project?.end].filter(Boolean);
   lines.push('');
