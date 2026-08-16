@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
+    <title>Home</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main id="stage">
+      <button id="dot" type="button" aria-label="Open launcher"></button>
+      <form id="launcher" hidden>
+        <input
+          id="q"
+          type="text"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          aria-label="Launcher"
+        />
+        <div id="hint" aria-live="polite"></div>
+      </form>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
