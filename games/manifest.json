@@ -43,6 +43,12 @@
       "tags": ["puzzle", "solo"]
     },
     {
+      "id": "tasks",
+      "title": "Tasks",
+      "description": "Decompose a project into a timeline graph. Deadlines flow top to bottom, a red line marks now, and a language model suggests what you have missed.",
+      "tags": ["tool", "productivity", "visualization"]
+    },
+    {
       "id": "home",
       "title": "Home",
       "description": "A completely black browser start page. One tiny dot opens a keyboard launcher — everything else is nothing.",

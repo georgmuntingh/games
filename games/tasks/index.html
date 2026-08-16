@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tasks</title>
+    <meta
+      name="description"
+      content="Decompose a project into tasks on a timeline graph, and ask a language model what you have missed."
+    />
+    <link rel="stylesheet" href="/shared/ui.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="toolbar">
+        <a class="back-link toolbar-back" href="../../" title="Back to games">←</a>
+
+        <label class="field">
+          <span class="sr-only">Project</span>
+          <select id="project-picker" aria-label="Project"></select>
+        </label>
+
+        <details class="dropdown" id="people-filter">
+          <summary id="people-summary">Everyone</summary>
+          <div class="dropdown-body" id="people-options"></div>
+        </details>
+
+        <label class="check">
+          <input type="checkbox" id="hide-done" />
+          <span>Hide done</span>
+        </label>
+
+        <span class="toolbar-gap"></span>
+
+        <button type="button" id="add-task" title="New task (N)">+ Task</button>
+        <button type="button" id="link-mode" title="Draw a link between two tasks (E)">
+          Link: <span id="link-kind">blocks</span>
+        </button>
+        <button type="button" id="assist" title="Ask the assistant about this project">
+          Assist
+        </button>
+
+        <label class="field">
+          <span class="sr-only">Timeline scale</span>
+          <select id="bucket" aria-label="Timeline scale" title="Timeline scale">
+            <option value="auto">Auto scale</option>
+            <option value="day">Days</option>
+            <option value="week">Weeks</option>
+            <option value="month">Months</option>
+          </select>
+        </label>
+
+        <button type="button" id="fit" title="Fit to view (F)">Fit</button>
+        <button type="button" id="settings-open" title="Settings">⚙</button>
+      </header>
+
+      <main class="workspace">
+        <div id="canvas" class="canvas"></div>
+
+        <aside id="panel" class="panel" hidden aria-label="Task details">
+          <div class="panel-head">
+            <input id="t-title" class="panel-title" type="text" aria-label="Task title" />
+            <button type="button" id="panel-close" class="icon" title="Close">✕</button>
+          </div>
+
+          <label class="check panel-done">
+            <input type="checkbox" id="t-done" />
+            <span>Complete</span>
+          </label>
+
+          <div class="grid2">
+            <label class="field">
+              <span>Due</span>
+              <input id="t-due" type="date" />
+            </label>
+            <label class="field">
+              <span>Estimate</span>
+              <input id="t-estimate" type="text" list="estimate-options" placeholder="3d" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Projects</span>
+            <input id="t-projects" type="text" placeholder="website, q4-hiring" />
+          </label>
+
+          <label class="field">
+            <span>People</span>
+            <input id="t-people" type="text" placeholder="georg, ada" />
+          </label>
+
+          <div class="grid2">
+            <label class="field">
+              <span>Blocked by</span>
+              <select id="t-blocked" multiple size="4"></select>
+            </label>
+            <label class="field">
+              <span>Part of</span>
+              <select id="t-partof" multiple size="4"></select>
+            </label>
+          </div>
+
+          <section class="subtasks">
+            <div class="section-head">
+              <h2>Subtasks</h2>
+              <button type="button" id="suggest-subtasks" class="link-button">suggest</button>
+            </div>
+            <ul id="t-subtasks" class="subtask-list"></ul>
+            <form id="subtask-form">
+              <input
+                id="subtask-new"
+                type="text"
+                placeholder="Add a subtask and press Enter"
+                autocomplete="off"
+              />
+            </form>
+          </section>
+
+          <label class="field">
+            <span>Notes</span>
+            <textarea id="t-notes" rows="4" placeholder="Markdown"></textarea>
+          </label>
+
+          <div class="panel-foot">
+            <button type="button" id="suggest-estimate" class="link-button">estimate this</button>
+            <button type="button" id="t-delete" class="danger">Delete task</button>
+          </div>
+        </aside>
+      </main>
+
+      <p id="status-bar" class="status-bar" aria-live="polite"></p>
+    </div>
+
+    <datalist id="people-list"></datalist>
+    <datalist id="project-list"></datalist>
+    <datalist id="estimate-options">
+      <option value="2h"></option>
+      <option value="4h"></option>
+      <option value="1d"></option>
+      <option value="3d"></option>
+      <option value="1w"></option>
+      <option value="2w"></option>
+    </datalist>
+
+    <dialog id="settings" class="sheet">
+      <form method="dialog" class="sheet-head">
+        <h2>Settings</h2>
+        <button class="icon" title="Close">✕</button>
+      </form>
+
+      <section>
+        <h3>Storage</h3>
+        <p id="storage-state" class="muted"></p>
+        <div class="row">
+          <button type="button" id="connect-folder">Open folder…</button>
+          <button type="button" id="disconnect-folder">Use this browser only</button>
+        </div>
+        <p class="muted small">
+          Opening a folder reads and writes real <code>.md</code> files. Point it at a folder
+          inside an Obsidian vault and the notes are yours. Only files this app created are
+          ever removed.
+        </p>
+        <div class="row">
+          <button type="button" id="export-zip">Export .zip</button>
+          <button type="button" id="import-md">Import .md files…</button>
+          <button type="button" id="copy-brief">Copy project brief</button>
+        </div>
+        <input id="import-input" type="file" accept=".md,text/markdown" multiple hidden />
+      </section>
+
+      <section>
+        <h3>Assistant</h3>
+        <label class="field">
+          <span>OpenRouter API key</span>
+          <input id="api-key" type="password" placeholder="sk-or-…" autocomplete="off" />
+        </label>
+        <p class="muted small">
+          Stored in this browser only, and sent only to openrouter.ai. Nothing is uploaded
+          anywhere else.
+        </p>
+        <label class="field">
+          <span>Model</span>
+          <select id="model-picker"></select>
+        </label>
+        <div class="row">
+          <button type="button" id="refresh-models">Refresh model list</button>
+          <button type="button" id="clear-key" class="danger">Clear key</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Project</h3>
+        <label class="field">
+          <span>Name</span>
+          <input id="p-title" type="text" placeholder="Website relaunch" />
+        </label>
+        <div class="grid2">
+          <label class="field">
+            <span>Starts</span>
+            <input id="p-start" type="date" />
+          </label>
+          <label class="field">
+            <span>Ends</span>
+            <input id="p-end" type="date" />
+          </label>
+        </div>
+        <label class="field">
+          <span>End goal</span>
+          <textarea id="p-goal" rows="3" placeholder="What does done look like?"></textarea>
+        </label>
+        <p class="muted small">
+          The goal is the context the assistant uses to work out what is missing. Markdown
+          is fine.
+        </p>
+        <div class="row">
+          <button type="button" id="new-project">New project…</button>
+          <button type="button" id="delete-project" class="danger">Delete project</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Board</h3>
+        <div class="row">
+          <button type="button" id="load-demo">Reload demo project</button>
+          <button type="button" id="clear-board" class="danger">Clear demo &amp; start empty</button>
+        </div>
+      </section>
+    </dialog>
+
+    <dialog id="suggestions" class="sheet">
+      <form method="dialog" class="sheet-head">
+        <h2 id="suggest-title">Suggestions</h2>
+        <button class="icon" title="Close">✕</button>
+      </form>
+      <div id="assist-goal" class="goal" hidden></div>
+      <div class="row" id="assist-actions">
+        <button type="button" data-action="missing">Find missing tasks</button>
+      </div>
+      <p id="suggest-status" class="muted"></p>
+      <ul id="suggest-list" class="suggest-list"></ul>
+      <details id="suggest-raw" hidden>
+        <summary>Raw response</summary>
+        <pre id="suggest-raw-body"></pre>
+      </details>
+      <div class="row" id="suggest-foot" hidden>
+        <button type="button" id="accept-all">Accept all</button>
+        <button type="button" id="reject-all">Dismiss</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
