@@ -2,7 +2,7 @@
 id: signup-flow
 title: Signup flow
 project: [website]
-people: [ada]
+people: [Oliver]
 due: 2026-10-09
 estimate: 2w
 created: 2026-08-05

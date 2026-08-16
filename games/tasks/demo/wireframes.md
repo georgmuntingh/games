@@ -2,7 +2,7 @@
 id: wireframes
 title: Wireframes
 project: [website]
-people: [mira]
+people: [Oliver]
 due: 2026-08-21
 estimate: 1w
 created: 2026-07-30

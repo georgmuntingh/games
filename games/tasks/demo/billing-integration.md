@@ -2,7 +2,7 @@
 id: billing-integration
 title: Billing integration
 project: [website]
-people: [ada]
+people: [Oliver]
 due: 2026-10-16
 estimate: 1w
 created: 2026-08-05

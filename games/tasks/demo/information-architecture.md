@@ -2,7 +2,7 @@
 id: information-architecture
 title: Information architecture
 project: [website]
-people: [mira]
+people: [Oliver]
 due: 2026-08-14
 estimate: 3d
 created: 2026-07-30

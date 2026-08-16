@@ -2,7 +2,7 @@
 id: component-library
 title: Component library
 project: [website]
-people: [sam]
+people: [Sverre]
 due: 2026-09-25
 estimate: 2w
 created: 2026-08-02

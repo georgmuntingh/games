@@ -2,7 +2,7 @@
 id: q4-hiring
 title: Q4 hiring
 goal: Two engineers and one designer signed before the end of the year
-people: [georg, mira, sam, ada]
+people: [Georg, Oliver, Sverre]
 start: 2026-09-01
 end: 2026-12-15
 color: '#c2410c'

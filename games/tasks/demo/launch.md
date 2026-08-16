@@ -2,7 +2,7 @@
 id: launch
 title: Launch
 project: [website]
-people: [georg]
+people: [Georg]
 due: 2026-11-27
 estimate: 2d
 created: 2026-08-05

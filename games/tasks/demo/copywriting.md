@@ -2,7 +2,7 @@
 id: copywriting
 title: Copywriting
 project: [website]
-people: [georg]
+people: [Georg]
 due: 2026-09-18
 estimate: 1w
 created: 2026-08-02

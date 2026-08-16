@@ -2,7 +2,7 @@
 id: analytics-dashboard
 title: Analytics dashboard
 project: [website]
-people: [ada]
+people: [Oliver]
 estimate: 1w
 created: 2026-08-09
 done: false

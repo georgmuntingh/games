@@ -2,7 +2,7 @@
 id: discovery-interviews
 title: Discovery interviews
 project: [website]
-people: [georg, mira]
+people: [Georg, Oliver]
 due: 2026-08-07
 estimate: 1w
 created: 2026-07-28

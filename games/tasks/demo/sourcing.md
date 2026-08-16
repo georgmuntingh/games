@@ -2,7 +2,7 @@
 id: sourcing
 title: Sourcing
 project: [q4-hiring]
-people: [georg, mira]
+people: [Georg, Oliver]
 due: 2026-10-02
 estimate: 3w
 created: 2026-08-20

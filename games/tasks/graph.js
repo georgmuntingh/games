@@ -8,7 +8,9 @@
 
 import { DataSet, Network } from 'vis-network/standalone';
 
-const LEVEL_SEPARATION = 96;
+export const LEVEL_SEPARATION_DEFAULT = 96;
+export const LEVEL_SEPARATION_MIN = 40;
+export const LEVEL_SEPARATION_MAX = 160;
 /** Below this scale the node titles stop being legible, so `fit` refuses to go lower. */
 const MIN_FIT_SCALE = 0.72;
 const NODE_WIDTH = 176;
@@ -92,13 +94,20 @@ function drawStripe(ctx, left, top, colors) {
   ctx.restore();
 }
 
-function drawTask(ctx, x, y, { status, title, selected, theme, showHandle, colors }) {
+function drawTask(
+  ctx,
+  x,
+  y,
+  { status, title, selected, theme, showHandle, colors, dropTarget, dragging }
+) {
   const left = x - NODE_WIDTH / 2;
   const top = y - NODE_HEIGHT / 2;
 
   ctx.save();
+  // The task being dragged fades; the card it would merge into lights up.
+  if (dragging) ctx.globalAlpha = 0.45;
   ctx.shadowColor = 'rgba(0,0,0,0.10)';
-  ctx.shadowBlur = selected ? 12 : 4;
+  ctx.shadowBlur = selected || dropTarget ? 12 : 4;
   ctx.shadowOffsetY = 1;
   roundRect(ctx, left, top, NODE_WIDTH, NODE_HEIGHT, 8);
   ctx.fillStyle = status.done ? theme.surfaceDone : theme.surface;
@@ -109,17 +118,33 @@ function drawTask(ctx, x, y, { status, title, selected, theme, showHandle, color
 
   ctx.save();
   roundRect(ctx, left, top, NODE_WIDTH, NODE_HEIGHT, 8);
-  if (status.blocked) ctx.setLineDash([4, 3]);
-  ctx.lineWidth = selected ? 2.5 : 1.5;
-  ctx.strokeStyle = status.overdue
-    ? theme.danger
-    : selected
-      ? theme.accent
-      : status.done
-        ? theme.border
-        : theme.border;
+  if (status.blocked && !dropTarget) ctx.setLineDash([4, 3]);
+  ctx.lineWidth = dropTarget ? 3.5 : selected ? 2.5 : 1.5;
+  ctx.strokeStyle =
+    dropTarget || selected ? theme.accent : status.overdue ? theme.danger : theme.border;
   ctx.stroke();
   ctx.restore();
+
+  if (dropTarget) {
+    // On its own chip: edges run into the top of the card, and bare text on top of an
+    // arrowhead is unreadable exactly when it matters.
+    ctx.save();
+    ctx.font = '600 10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    const label = 'add as subtask';
+    const width = ctx.measureText(label).width + 12;
+    // Below and to the left: edges enter at the top centre and leave at the bottom
+    // centre, and the link handle owns the bottom right.
+    const chipLeft = left;
+    const chipTop = top + NODE_HEIGHT + 3;
+    roundRect(ctx, chipLeft, chipTop, width, 15, 7);
+    ctx.fillStyle = theme.accent;
+    ctx.fill();
+    ctx.fillStyle = theme.surface;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, chipLeft + width / 2, chipTop + 8);
+    ctx.restore();
+  }
 
   // Progress ring.
   const ringX = left + STRIPE_WIDTH + 18;
@@ -182,13 +207,20 @@ function drawTask(ctx, x, y, { status, title, selected, theme, showHandle, color
   }
 }
 
-export function createGraph(container, handlers = {}) {
+export function createGraph(container, handlers = {}, options = {}) {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
   let theme = readTheme(container);
   let view = null;
-  /** Maps a fractional level to a canvas y, derived from a placed node. */
+  let levelSeparation = options.levelSeparation ?? LEVEL_SEPARATION_DEFAULT;
+  /** Maps a fractional level to a canvas y, derived from a placed node, and back. */
   let levelToY = null;
+  let yToLevel = null;
+  /** The task under the cursor mid-drag, which the dragged task would merge into. */
+  let draggedId = null;
+  let dropTargetId = null;
+  /** Where inside the card the drag began, so the drop maps to the card's centre. */
+  let grabOffsetY = 0;
 
   const network = new Network(
     container,
@@ -204,8 +236,8 @@ export function createGraph(container, handlers = {}) {
           direction: 'UD',
           sortMethod: 'directed',
           shakeTowards: 'roots',
-          levelSeparation: LEVEL_SEPARATION,
-          nodeSpacing: 210,
+          levelSeparation,
+          nodeSpacing: NODE_WIDTH + 84,
           treeSpacing: 140,
           blockShifting: true,
           edgeMinimization: true,
@@ -258,6 +290,29 @@ export function createGraph(container, handlers = {}) {
       ctx.fillText(level.label, labelX, y - 10);
     }
 
+    // A collapsed stretch still has to read as elapsed time, so it gets a labelled break
+    // rather than silently vanishing.
+    for (const gap of view.gaps ?? []) {
+      const y = levelToY(gap.afterLevel + 0.5);
+      if (y < topLeft.y - 40 || y > bottomRight.y + 40) continue;
+      ctx.save();
+      ctx.strokeStyle = theme.border;
+      ctx.setLineDash([3, 5]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(topLeft.x, y);
+      ctx.lineTo(bottomRight.x, y);
+      ctx.stroke();
+      ctx.restore();
+      const unit = view.bucket?.unit ?? 'period';
+      ctx.fillStyle = theme.muted;
+      ctx.fillText(
+        `⋯ ${gap.periods} ${unit}${gap.periods === 1 ? '' : 's'} with nothing due`,
+        labelX,
+        y - 9
+      );
+    }
+
     if (view.nowLevel != null) {
       const y = levelToY(view.nowLevel);
       ctx.strokeStyle = theme.danger;
@@ -284,7 +339,23 @@ export function createGraph(container, handlers = {}) {
     }
     const anchorLevel = view.levels.get(anchorId) ?? 0;
     const anchorY = positions[anchorId].y;
-    levelToY = (level) => anchorY + (level - anchorLevel) * LEVEL_SEPARATION;
+    levelToY = (level) => anchorY + (level - anchorLevel) * levelSeparation;
+    yToLevel = (y) => anchorLevel + (y - anchorY) / levelSeparation;
+  }
+
+  /** The node whose card contains `point`, ignoring the one being dragged. */
+  function nodeAt(point, exceptId) {
+    const positions = network.getPositions();
+    for (const [id, position] of Object.entries(positions)) {
+      if (id === exceptId) continue;
+      if (
+        Math.abs(point.x - position.x) <= NODE_WIDTH / 2 &&
+        Math.abs(point.y - position.y) <= NODE_HEIGHT / 2
+      ) {
+        return id;
+      }
+    }
+    return null;
   }
 
   network.on('click', (params) => {
@@ -306,7 +377,44 @@ export function createGraph(container, handlers = {}) {
   network.on('doubleClick', (params) => {
     if (!params.nodes.length && !params.edges.length) handlers.onBlankDoubleClick?.();
   });
-  network.on('dragEnd', () => recomputeLevelScale());
+  network.on('dragStart', (params) => {
+    draggedId = params.nodes.length === 1 ? params.nodes[0] : null;
+    dropTargetId = null;
+    // vis re-applies the hierarchical layout on drop, so the node's position at
+    // `dragEnd` is where it snapped back to, not where it was released. The pointer is
+    // the only honest record of the drop — offset by wherever the card was grabbed.
+    const position = draggedId ? network.getPositions([draggedId])[draggedId] : null;
+    grabOffsetY = position ? params.pointer.canvas.y - position.y : 0;
+  });
+
+  network.on('dragging', (params) => {
+    if (!draggedId) return;
+    const next = nodeAt(params.pointer.canvas, draggedId);
+    if (next === dropTargetId) return;
+    dropTargetId = next;
+    network.redraw();
+  });
+
+  network.on('dragEnd', (params) => {
+    const dragged = draggedId;
+    const target = dropTargetId;
+    draggedId = null;
+    dropTargetId = null;
+    if (!dragged) {
+      recomputeLevelScale();
+      return;
+    }
+    if (target) {
+      handlers.onMerge?.(dragged, target);
+      return;
+    }
+    const centreY = params.pointer.canvas.y - grabOffsetY;
+    if (!yToLevel) {
+      recomputeLevelScale();
+      return;
+    }
+    handlers.onReschedule?.(dragged, yToLevel(centreY));
+  });
   network.on('stabilized', () => recomputeLevelScale());
 
   function isOnHandle(pointer, nodeId) {
@@ -366,6 +474,8 @@ export function createGraph(container, handlers = {}) {
                 theme,
                 showHandle: next.selectedId === task.id,
                 colors: next.projectColors.get(task.id) ?? [],
+                dropTarget: dropTargetId === task.id,
+                dragging: draggedId === task.id,
               }),
             nodeDimensions: { width: NODE_WIDTH, height: NODE_HEIGHT },
           }),
@@ -377,20 +487,28 @@ export function createGraph(container, handlers = {}) {
         id: edge.id,
         from: edge.from,
         to: edge.to,
-        dashes: edge.kind === 'part-of' ? [5, 4] : false,
         color: {
-          color: edge.conflict ? theme.danger : theme.edge,
+          color: edge.conflict
+            ? theme.danger
+            : next.selectedEdgeId === edge.id
+              ? theme.accent
+              : theme.edge,
           highlight: edge.conflict ? theme.danger : theme.accent,
           hover: theme.accent,
         },
-        width: edge.conflict ? 2 : 1.4,
+        width: next.selectedEdgeId === edge.id ? 3 : edge.conflict ? 2 : 1.4,
+        // Goal links are computed rather than stored, so they read as an implication
+        // rather than a constraint you drew.
+        dashes: edge.kind === 'part-of' ? [5, 4] : edge.kind === 'goal' ? [2, 4] : false,
         // `blocks` edges run blocker -> dependent; `part-of` edges run child -> parent,
         // so the two kinds read in opposite directions.
         title: edge.conflict
           ? `Scheduling conflict: ${edge.from} is due after ${edge.to}, which it blocks`
           : edge.kind === 'blocks'
             ? `${edge.to} blocked by ${edge.from}`
-            : `${edge.from} part of ${edge.to}`,
+            : edge.kind === 'goal'
+              ? `${edge.from} feeds the project goal`
+              : `${edge.from} part of ${edge.to}`,
       }))
     );
 
@@ -433,6 +551,13 @@ export function createGraph(container, handlers = {}) {
     fit,
     focus: (id) => network.focus(id, { scale: 1, animation: { duration: 300 } }),
     startLinkMode: () => network.addEdgeMode(),
+    setLevelSeparation: (px) => {
+      levelSeparation = Math.min(LEVEL_SEPARATION_MAX, Math.max(LEVEL_SEPARATION_MIN, px));
+      network.setOptions({ layout: { hierarchical: { levelSeparation } } });
+      recomputeLevelScale();
+      network.redraw();
+      return levelSeparation;
+    },
     stopLinkMode: () => network.disableEditMode(),
     refreshTheme: () => {
       theme = readTheme(container);

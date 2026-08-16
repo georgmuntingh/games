@@ -23,6 +23,7 @@
         <button type="button" id="project-open" class="icon-btn" title="Project details">
           ✎
         </button>
+        <button type="button" id="trash-open" class="icon-btn" title="Trash">🗑</button>
 
         <details class="dropdown" id="people-filter">
           <summary id="people-summary">Everyone</summary>
@@ -32,6 +33,11 @@
         <label class="check">
           <input type="checkbox" id="hide-done" />
           <span>Hide done</span>
+        </label>
+
+        <label class="check">
+          <input type="checkbox" id="collapse-empty" />
+          <span>Collapse empty</span>
         </label>
 
         <span class="toolbar-gap"></span>
@@ -53,6 +59,11 @@
             <option value="month">Months</option>
           </select>
         </label>
+
+        <span class="stepper" role="group" aria-label="Row height">
+          <button type="button" id="rows-tighter" title="Tighter rows">−</button>
+          <button type="button" id="rows-looser" title="Taller rows">+</button>
+        </span>
 
         <button type="button" id="fit" title="Fit to view (F)">Fit</button>
         <button type="button" id="settings-open" title="Settings">⚙</button>
@@ -199,6 +210,22 @@
           <button type="button" id="clear-board" class="danger">Clear demo &amp; start empty</button>
         </div>
       </section>
+    </dialog>
+
+    <dialog id="trash" class="sheet">
+      <form method="dialog" class="sheet-head">
+        <h2>Trash</h2>
+        <button class="icon" title="Close">✕</button>
+      </form>
+      <p class="muted small">
+        The last 50 deletions, newest first. Ctrl+Z undoes the most recent one; anything
+        older is restored from here.
+      </p>
+      <ul id="trash-list" class="trash-list"></ul>
+      <div class="panel-foot">
+        <span class="muted small" id="trash-count"></span>
+        <button type="button" id="trash-empty" class="danger">Empty trash</button>
+      </div>
     </dialog>
 
     <dialog id="project" class="sheet">

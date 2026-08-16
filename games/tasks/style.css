@@ -726,3 +726,102 @@ div.vis-tooltip {
 #project .panel-foot {
   align-items: flex-end;
 }
+
+/* ---------------------------------------------------- trash & suggestions */
+
+.stepper {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.stepper button {
+  font: inherit;
+  line-height: 1;
+  padding: 0.34rem 0.5rem;
+  min-width: 1.9rem;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  cursor: pointer;
+}
+
+.stepper button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.stepper button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.stepper button:hover {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+.trash-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.trash-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.trash-list li > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trash-list li > div > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-list li.muted {
+  border-bottom: none;
+  color: var(--ui-muted);
+}
+
+/* Suggestions are editable forms, so the rows are taller than a plain list. */
+#suggest-list .suggest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+#suggest-list .field span {
+  font-size: 0.66rem;
+}
+
+#suggest-list .field input,
+#suggest-list .field textarea {
+  padding: 0.3rem 0.4rem;
+  font-size: 0.86rem;
+}
+
+#suggest-list textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.suggest-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+@media (max-width: 560px) {
+  .suggest-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -2,7 +2,7 @@
 id: docs-site
 title: Docs site
 project: [website]
-people: [georg]
+people: [Georg]
 due: 2026-10-30
 estimate: 1w
 created: 2026-08-05

@@ -2,7 +2,7 @@
 id: self-serve-signup
 title: Self-serve signup
 project: [website]
-people: [sam, ada]
+people: [Sverre, Oliver]
 due: 2026-10-23
 created: 2026-08-02
 done: false

@@ -22,12 +22,16 @@ import {
   allPeople,
   allProjectTags,
   projectPeople,
+  syncGoalTasks,
+  goalTaskId,
+  mergeTaskInto,
+  pushTrash,
   uniqueSlug,
   formatDate,
   parseDate,
   totalEstimateHours,
 } from './model.js';
-import { createGraph } from './graph.js';
+import { createGraph, LEVEL_SEPARATION_DEFAULT } from './graph.js';
 import { createPanel } from './panel.js';
 import { createStorage } from './storage.js';
 import { createHistory } from './undo.js';
@@ -49,7 +53,7 @@ const DEMO_FILES = Object.fromEntries(
 /* ---------------------------------------------------------------- state */
 
 const storage = createStorage();
-const history = createHistory({ tasks: [], projects: [] });
+const history = createHistory({ tasks: [], projects: [], trash: [] });
 
 /** UI state, deliberately outside the undo history. */
 const ui = {
@@ -57,10 +61,15 @@ const ui = {
   people: new Set(),
   hideDone: false,
   bucketUnit: 'auto',
+  collapseEmpty: false,
   selectedId: null,
+  selectedEdgeId: null,
   linkArmed: false,
   linkKind: 'blocks',
 };
+
+const ROWS_KEY = 'tasks.rowHeight';
+const readRowHeight = () => Number(localStorage.getItem(ROWS_KEY)) || LEVEL_SEPARATION_DEFAULT;
 
 let graph;
 let panel;
@@ -76,9 +85,31 @@ function status(message, isError = false) {
 
 /* ------------------------------------------------------------ mutations */
 
-/** Commit a new board: record undo, persist, redraw. */
+const now = () => new Date().toISOString();
+
+/**
+ * Load a board without recording history, reconciling the goal nodes on the way in so
+ * they exist from the first paint rather than appearing after the first edit.
+ */
+function resetBoard(files) {
+  const board = buildBoard(files);
+  const { tasks } = syncGoalTasks(board);
+  return history.reset({ ...board, tasks });
+}
+
+const taskRecord = (task) => ({ kind: 'task', at: now(), label: task.title, data: task });
+
+/**
+ * Commit a new board: reconcile the goal nodes, record undo, persist, redraw.
+ *
+ * The goal sync lives here rather than at each call site so no mutation can leave a
+ * project and its goal node disagreeing. A goal node whose project no longer has a goal
+ * is binned like any other deletion.
+ */
 function commit(next, message) {
-  history.push(next);
+  const { tasks, removed } = syncGoalTasks(next);
+  const trash = removed.reduce((acc, task) => pushTrash(acc, taskRecord(task)), next.trash ?? []);
+  history.push({ ...next, tasks, trash });
   persist();
   render();
   if (message) status(message);
@@ -113,9 +144,21 @@ function shouldReslug(task, changes) {
   );
 }
 
+/**
+ * A task carrying subtasks is done exactly when all of them are.
+ *
+ * Applied only when the subtasks themselves change, so ticking a task directly still
+ * works while it has open subtasks — the rollup never overrules a deliberate act.
+ */
+function withDoneRollup(task, changes) {
+  if (!Array.isArray(changes.subtasks) || changes.subtasks.length === 0) return changes;
+  return { ...changes, done: changes.subtasks.every((s) => s.done) };
+}
+
 function updateTask(id, changes) {
   const task = board().tasks.find((t) => t.id === id);
   if (!task) return;
+  changes = withDoneRollup(task, changes);
   const newId = shouldReslug(task, changes)
     ? uniqueSlug(changes.title, new Set(board().tasks.filter((t) => t.id !== id).map((t) => t.id)))
     : id;
@@ -160,8 +203,14 @@ function defaultDue() {
 
 function deleteTask(id) {
   const task = board().tasks.find((t) => t.id === id);
+  if (!task) return;
   const next = {
     ...board(),
+    // A goal node exists because its project has a goal; clearing that is what deleting
+    // it means, otherwise the sync in `commit` would simply put it back.
+    projects: task.goal
+      ? board().projects.map((p) => (goalTaskId(p.id) === id ? { ...p, goal: '' } : p))
+      : board().projects,
     tasks: board().tasks
       .filter((t) => t.id !== id)
       .map((t) => ({
@@ -169,9 +218,92 @@ function deleteTask(id) {
         blockedBy: (t.blockedBy ?? []).filter((ref) => ref !== id),
         partOf: (t.partOf ?? []).filter((ref) => ref !== id),
       })),
+    trash: pushTrash(board().trash, taskRecord(task)),
   };
   if (ui.selectedId === id) ui.selectedId = null;
-  commit(next, `Deleted “${task?.title ?? id}”. Ctrl+Z to undo.`);
+  commit(next, `Deleted “${task.title}”. Ctrl+Z to undo, or restore from the trash.`);
+}
+
+/* ------------------------------------------------------------- edges */
+
+/** Edge ids are built by `buildEdges`: `blocks:<from>-><to>` / `part-of:<from>-><to>`. */
+function parseEdgeId(edgeId) {
+  const match = /^(blocks|part-of):(.+)->(.+)$/.exec(String(edgeId ?? ''));
+  if (!match) return null;
+  const [, kind, from, to] = match;
+  // A `blocks` edge is recorded on the dependent; a `part-of` edge on the child.
+  return kind === 'blocks'
+    ? { kind, from, to, ownerId: to, field: 'blockedBy', value: from }
+    : { kind, from, to, ownerId: from, field: 'partOf', value: to };
+}
+
+function deleteEdge(edgeId) {
+  const edge = parseEdgeId(edgeId);
+  if (!edge) {
+    status('That link is drawn from the goal and is not stored, so it cannot be deleted.');
+    return;
+  }
+  const owner = board().tasks.find((t) => t.id === edge.ownerId);
+  if (!owner) return;
+  const label =
+    edge.kind === 'blocks'
+      ? `${byIdAll().get(edge.to)?.title} blocked by ${byIdAll().get(edge.from)?.title}`
+      : `${byIdAll().get(edge.from)?.title} part of ${byIdAll().get(edge.to)?.title}`;
+  const next = {
+    ...board(),
+    tasks: board().tasks.map((t) =>
+      t.id === edge.ownerId
+        ? { ...t, [edge.field]: (t[edge.field] ?? []).filter((ref) => ref !== edge.value) }
+        : t
+    ),
+    trash: pushTrash(board().trash, {
+      kind: 'edge',
+      at: now(),
+      label,
+      data: { kind: edge.kind, from: edge.from, to: edge.to },
+    }),
+  };
+  ui.selectedEdgeId = null;
+  commit(next, `Unlinked. Ctrl+Z to undo, or restore from the trash.`);
+}
+
+/* ------------------------------------------------------------- trash */
+
+function restoreTrash(index) {
+  const record = board().trash?.[index];
+  if (!record) return;
+  const rest = board().trash.filter((_, i) => i !== index);
+
+  if (record.kind === 'task') {
+    const taken = new Set(board().tasks.map((t) => t.id));
+    const task = taken.has(record.data.id)
+      ? { ...record.data, id: uniqueSlug(record.data.title, taken) }
+      : record.data;
+    commit(
+      { ...board(), tasks: [...board().tasks, task], trash: rest },
+      `Restored “${task.title}”.`
+    );
+    return;
+  }
+
+  const edge = parseEdgeId(`${record.data.kind}:${record.data.from}->${record.data.to}`);
+  const byId = byIdAll();
+  if (!edge || !byId.has(edge.from) || !byId.has(edge.to)) {
+    status('Both ends of that link would need to exist first.', true);
+    return;
+  }
+  commit(
+    {
+      ...board(),
+      tasks: board().tasks.map((t) =>
+        t.id === edge.ownerId
+          ? { ...t, [edge.field]: [...new Set([...(t[edge.field] ?? []), edge.value])] }
+          : t
+      ),
+      trash: rest,
+    },
+    'Link restored.'
+  );
 }
 
 /** `from` blocks `to`, or `from` is part of `to`, depending on the armed link kind. */
@@ -241,6 +373,9 @@ function updateProject(id, changes) {
 /** Cycled on creation so a new project has a visible stripe without anyone picking one. */
 const PROJECT_COLORS = ['#2563eb', '#c2410c', '#15803d', '#7c3aed', '#0891b2', '#be123c'];
 
+/** Who a new project starts with, until its roster is edited. */
+const DEFAULT_PEOPLE = ['Georg', 'Oliver', 'Sverre'];
+
 function addProject(fields = {}) {
   const taken = new Set(board().projects.map((p) => p.id));
   const title = fields.title?.trim() || 'New project';
@@ -249,7 +384,7 @@ function addProject(fields = {}) {
     id,
     title,
     goal: fields.goal ?? '',
-    people: fields.people ?? [],
+    people: fields.people ?? [...DEFAULT_PEOPLE],
     start: fields.start || formatDate(Date.now()),
     end: fields.end || formatDate(Date.now() + 90 * 86400000),
     color: fields.color || PROJECT_COLORS[board().projects.length % PROJECT_COLORS.length],
@@ -332,7 +467,11 @@ function buildView() {
   const window = projectWindow(project, projectTasks);
   const bucket =
     ui.bucketUnit === 'auto' ? chooseBucket(window.start, window.end) : getBucket(ui.bucketUnit);
-  const { levels, trayLevel, minLevel } = assignLevels(tasks, { bucket, start: window.start });
+  const { levels, trayLevel, minLevel, lastLevel, levelOrigin, gaps } = assignLevels(tasks, {
+    bucket,
+    start: window.start,
+    collapse: ui.collapseEmpty,
+  });
 
   const byId = indexById(board().tasks);
   const statuses = new Map(tasks.map((t) => [t.id, deriveStatus(t, byId)]));
@@ -340,18 +479,24 @@ function buildView() {
   // Rule every level in range, not just the occupied ones, so an empty fortnight reads
   // as elapsed time rather than as a void. Thin the rules out when there are many.
   const hasTray = tasks.some((t) => !t.due);
-  const lastDated = Math.max(0, ...[...levels.entries()].filter(([id]) => byIdDue(tasks, id)).map(([, l]) => l));
-  const step = Math.ceil((lastDated + 1) / 40) || 1;
+  // Every row gets a rule when collapsing (there are few, and each is a real period);
+  // otherwise thin them out so a long project does not turn into a hatch pattern.
+  const step = ui.collapseEmpty ? 1 : Math.ceil((lastLevel + 1) / 40) || 1;
   const gutter = [];
-  for (let level = 0; level <= lastDated; level += step) {
+  for (let level = 0; level <= lastLevel; level += step) {
+    const origin = levelOrigin.get(level);
+    if (ui.collapseEmpty && origin == null) continue;
     gutter.push({
       level,
-      label: bucket.format(bucket.dateForLevel(level + minLevel, window.start)),
+      label: bucket.format(bucket.dateForLevel((origin ?? level) + minLevel, window.start)),
     });
   }
   if (hasTray) gutter.push({ level: trayLevel, label: 'unscheduled' });
 
-  const nowLevel = tasks.length ? bucket.level(Date.now(), window.start) - minLevel : null;
+  // Collapsing rewrites the level scale, so the now-line has to be placed on the row
+  // scale rather than the raw period scale or it drifts off the board entirely.
+  const rawNow = bucket.level(Date.now(), window.start) - minLevel;
+  const nowLevel = !tasks.length ? null : ui.collapseEmpty ? collapsedNow(rawNow, levelOrigin) : rawNow;
 
   // One band per coloured project a task belongs to, in the board's project order.
   const colorOf = new Map(board().projects.filter((p) => p.color).map((p) => [p.id, p.color]));
@@ -370,11 +515,41 @@ function buildView() {
     gutter,
     nowLevel,
     edges: buildEdges(tasks, levels),
+    gaps,
     projectColors,
     selectedId: ui.selectedId,
+    selectedEdgeId: ui.selectedEdgeId,
     project,
     bucket,
+    minLevel,
+    levelOrigin,
+    windowStart: window.start,
   };
+}
+
+/**
+ * Place `raw` on the collapsed row scale: inside an occupied period it sits on that
+ * row, and in a skipped stretch it rests on the break between the rows either side.
+ */
+function collapsedNow(raw, levelOrigin) {
+  const rows = [...levelOrigin.entries()].sort((a, b) => a[0] - b[0]);
+  if (!rows.length) return null;
+  const floor = Math.floor(raw);
+  for (const [row, origin] of rows) if (origin === floor) return row + (raw - floor);
+  const before = rows.filter(([, origin]) => origin < raw).pop();
+  if (!before) return rows[0][0] - 0.5;
+  const after = rows.find(([, origin]) => origin > raw);
+  return after ? before[0] + 0.5 : before[0] + 0.5;
+}
+
+/** The due date a dropped row stands for — the period's start, the date the gutter labels. */
+function dueForLevel(view, level) {
+  // Above the top of the timeline still means the earliest period, not nothing.
+  const row = Math.max(0, Math.round(level));
+  if (row >= view.trayLevel) return '';
+  const origin = view.levelOrigin.get(row);
+  if (origin == null) return '';
+  return formatDate(view.bucket.dateForLevel(origin + view.minLevel, view.windowStart));
 }
 
 /* ------------------------------------------------------------- rendering */
@@ -391,6 +566,7 @@ function render() {
     assistantReady: Boolean(llm.getKey()),
   });
   if ($('project').open) renderProjectDialog();
+  if ($('trash').open) renderTrash();
   if (!$('status-bar').textContent) renderSummary(view);
 }
 
@@ -475,7 +651,7 @@ function setLinkArmed(armed, kind) {
 /* --------------------------------------------------------------- boards */
 
 async function setBoardFromFiles(files, message) {
-  history.reset(buildBoard(files));
+  resetBoard(files);
   ui.projectId = defaultProjectId();
   ui.people.clear();
   ui.selectedId = null;
@@ -554,35 +730,93 @@ async function runAssist(actionId, taskId = null) {
   }
 }
 
+/**
+ * Every suggestion is a form, expanded and editable before it is accepted. The model's
+ * proposal is a starting point rather than a verdict, and `draft` — not the original
+ * suggestion — is what `acceptSuggestion` reads.
+ */
+function draftFor(suggestion) {
+  if (suggestion.kind === 'subtask') return { text: suggestion.label };
+  if (suggestion.kind === 'estimate') return { estimate: suggestion.estimate };
+  return {
+    title: suggestion.task?.title ?? suggestion.label,
+    notes: suggestion.task?.notes ?? '',
+    due: suggestion.task?.due ?? '',
+    estimate: suggestion.task?.estimate ?? '',
+    people: (suggestion.task?.people ?? []).join(', '),
+    blockedBy: suggestion.task?.blockedBy ?? [],
+  };
+}
+
+/** A labelled control bound straight to the draft it edits. */
+function draftField(draft, key, label, { type = 'text', list = '', rows = 0 } = {}) {
+  const wrap = document.createElement('label');
+  wrap.className = 'field';
+  const name = document.createElement('span');
+  name.textContent = label;
+  const input = document.createElement(rows ? 'textarea' : 'input');
+  if (rows) input.rows = rows;
+  else input.type = type;
+  if (list) input.setAttribute('list', list);
+  input.value = draft[key] ?? '';
+  input.addEventListener('input', () => {
+    draft[key] = input.value;
+  });
+  wrap.append(name, input);
+  return wrap;
+}
+
 function renderSuggestions() {
   const list = $('suggest-list');
   list.textContent = '';
   $('suggest-foot').hidden = !pending?.suggestions.some((s) => !s.resolved);
 
   pending?.suggestions.forEach((suggestion, index) => {
+    suggestion.draft ??= draftFor(suggestion);
+    const draft = suggestion.draft;
     const li = document.createElement('li');
     if (suggestion.resolved) li.className = 'resolved';
 
     const body = document.createElement('div');
     body.className = 'suggest-body';
-    body.textContent = suggestion.label;
+
+    if (suggestion.kind === 'subtask') {
+      body.append(draftField(draft, 'text', 'Subtask'));
+    } else if (suggestion.kind === 'estimate') {
+      body.append(draftField(draft, 'estimate', 'Estimate'));
+    } else {
+      body.append(draftField(draft, 'title', 'Task'));
+      const grid = document.createElement('div');
+      grid.className = 'suggest-grid';
+      grid.append(
+        draftField(draft, 'due', 'Due', { type: 'date' }),
+        draftField(draft, 'estimate', 'Estimate'),
+        draftField(draft, 'people', 'People', { list: 'people-list' })
+      );
+      body.append(grid, draftField(draft, 'notes', 'Notes', { rows: 2 }));
+      if (draft.blockedBy.length) {
+        const blocked = document.createElement('span');
+        blocked.className = 'why';
+        blocked.textContent = `blocked by ${draft.blockedBy.join(', ')}`;
+        body.append(blocked);
+      }
+    }
+
     if (suggestion.detail) {
       const why = document.createElement('span');
       why.className = 'why';
       why.textContent = suggestion.detail;
       body.append(why);
     }
-    if (suggestion.task?.due) {
-      const why = document.createElement('span');
-      why.className = 'why';
-      why.textContent = `due ${suggestion.task.due}${suggestion.task.estimate ? ` · ${suggestion.task.estimate}` : ''}`;
-      body.append(why);
+
+    for (const input of body.querySelectorAll('input, textarea')) {
+      input.disabled = Boolean(suggestion.resolved);
     }
 
     const accept = document.createElement('button');
     accept.type = 'button';
     accept.className = 'accept';
-    accept.textContent = '✓';
+    accept.textContent = '\u2713';
     accept.title = 'Accept';
     accept.disabled = Boolean(suggestion.resolved);
     accept.addEventListener('click', () => acceptSuggestion(index));
@@ -590,7 +824,7 @@ function renderSuggestions() {
     const reject = document.createElement('button');
     reject.type = 'button';
     reject.className = 'reject';
-    reject.textContent = '✕';
+    reject.textContent = '\u2715';
     reject.title = 'Dismiss';
     reject.disabled = Boolean(suggestion.resolved);
     reject.addEventListener('click', () => {
@@ -603,21 +837,34 @@ function renderSuggestions() {
   });
 }
 
+const splitPeople = (text) =>
+  String(text ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+
 function acceptSuggestion(index) {
   const suggestion = pending?.suggestions[index];
   if (!suggestion || suggestion.resolved) return;
+  const draft = suggestion.draft ?? draftFor(suggestion);
   const task = pending.taskId ? board().tasks.find((t) => t.id === pending.taskId) : null;
 
   if (suggestion.kind === 'subtask' && task) {
-    updateTask(task.id, { subtasks: [...task.subtasks, { done: false, text: suggestion.label }] });
+    const text = draft.text.trim();
+    if (!text) return;
+    updateTask(task.id, { subtasks: [...task.subtasks, { done: false, text }] });
   } else if (suggestion.kind === 'estimate' && task) {
-    updateTask(task.id, { estimate: suggestion.estimate });
+    updateTask(task.id, { estimate: draft.estimate.trim() });
   } else if (suggestion.kind === 'task') {
+    const title = draft.title.trim();
+    if (!title) return;
     addTask({
-      title: suggestion.task.title,
-      due: suggestion.task.due || defaultDue(),
-      estimate: suggestion.task.estimate || '',
-      blockedBy: suggestion.task.blockedBy ?? [],
+      title,
+      due: draft.due || defaultDue(),
+      estimate: draft.estimate.trim(),
+      people: splitPeople(draft.people),
+      notes: draft.notes.trim(),
+      blockedBy: draft.blockedBy,
     });
   }
   suggestion.resolved = 'accepted';
@@ -625,6 +872,51 @@ function acceptSuggestion(index) {
 }
 
 /* ------------------------------------------------------------- settings */
+
+/* ---------------------------------------------------------- trash dialog */
+
+const TRASH_LABEL = { task: 'task', edge: 'link' };
+
+function renderTrash() {
+  const list = $('trash-list');
+  list.textContent = '';
+  const trash = board().trash ?? [];
+  $('trash-count').textContent = trash.length
+    ? `${trash.length} item${trash.length === 1 ? '' : 's'}`
+    : '';
+  $('trash-empty').disabled = !trash.length;
+
+  if (!trash.length) {
+    const empty = document.createElement('li');
+    empty.className = 'muted';
+    empty.textContent = 'Nothing deleted yet.';
+    list.append(empty);
+    return;
+  }
+
+  trash.forEach((record, index) => {
+    const li = document.createElement('li');
+
+    const body = document.createElement('div');
+    const label = document.createElement('span');
+    label.textContent = record.label || '(untitled)';
+    const meta = document.createElement('span');
+    meta.className = 'why';
+    meta.textContent = `${TRASH_LABEL[record.kind] ?? record.kind} · ${record.at.slice(0, 10)}`;
+    body.append(label, meta);
+
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.textContent = 'Restore';
+    restore.addEventListener('click', () => {
+      restoreTrash(index);
+      renderTrash();
+    });
+
+    li.append(body, restore);
+    list.append(li);
+  });
+}
 
 /* -------------------------------------------------------- project dialog */
 
@@ -747,7 +1039,7 @@ function openProject(mode = 'edit') {
       ? {
           title: '',
           goal: '',
-          people: [],
+          people: [...DEFAULT_PEOPLE],
           start: formatDate(Date.now()),
           end: formatDate(Date.now() + 90 * 86400000),
           color: PROJECT_COLORS[board().projects.length % PROJECT_COLORS.length],
@@ -870,6 +1162,31 @@ function wireEvents() {
     ui.hideDone = event.target.checked;
     status('');
     render();
+  });
+
+  $('collapse-empty').addEventListener('change', (event) => {
+    ui.collapseEmpty = event.target.checked;
+    status('');
+    render();
+    graph.fit();
+  });
+
+  const stepRows = (delta) => {
+    const applied = graph.setLevelSeparation(readRowHeight() + delta);
+    localStorage.setItem(ROWS_KEY, String(applied));
+    status(`Row height ${applied}px.`);
+  };
+  $('rows-tighter').addEventListener('click', () => stepRows(-16));
+  $('rows-looser').addEventListener('click', () => stepRows(16));
+
+  $('trash-open').addEventListener('click', () => {
+    renderTrash();
+    if (!$('trash').open) $('trash').showModal();
+  });
+  $('trash-empty').addEventListener('click', () => {
+    if (!board().trash?.length) return;
+    commit({ ...board(), trash: [] }, 'Trash emptied.');
+    renderTrash();
   });
 
   $('bucket').addEventListener('change', (event) => {
@@ -1007,6 +1324,7 @@ function wireEvents() {
       event.preventDefault();
       const next = event.shiftKey ? history.redo() : history.undo();
       if (!next.tasks.some((t) => t.id === ui.selectedId)) ui.selectedId = null;
+      ui.selectedEdgeId = null;
       persist();
       render();
       status(event.shiftKey ? 'Redone.' : 'Undone.');
@@ -1015,10 +1333,18 @@ function wireEvents() {
     if (typing) return;
     if (event.key === 'Escape') {
       if (ui.linkArmed) setLinkArmed(false);
-      else if (ui.selectedId) {
+      else if (ui.selectedId || ui.selectedEdgeId) {
         ui.selectedId = null;
+        ui.selectedEdgeId = null;
         render();
       }
+      return;
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (!ui.selectedId && !ui.selectedEdgeId) return;
+      event.preventDefault();
+      if (ui.selectedEdgeId) deleteEdge(ui.selectedEdgeId);
+      else deleteTask(ui.selectedId);
       return;
     }
     if (event.key === 'n' || event.key === 'N') {
@@ -1038,20 +1364,59 @@ function wireEvents() {
 }
 
 async function boot() {
-  graph = createGraph($('canvas'), {
+  graph = createGraph(
+    $('canvas'),
+    {
     onSelect: (id) => {
       ui.selectedId = id;
+      ui.selectedEdgeId = null;
       status('');
       render();
     },
-    onLink: link,
-    onBlankDoubleClick: () => {
-      const task = addTask();
-      ui.selectedId = task.id;
+    onSelectEdge: (edgeId) => {
+      ui.selectedEdgeId = String(edgeId).startsWith('goal:') ? null : edgeId;
+      ui.selectedId = null;
+      status(ui.selectedEdgeId ? 'Link selected. Delete to remove it.' : '');
       render();
-      panel.focusTitle();
     },
-  });
+    onLink: link,
+    onReschedule: (taskId, level) => {
+      const view = buildView();
+      const task = board().tasks.find((t) => t.id === taskId);
+      const due = task ? dueForLevel(view, level) : '';
+      // Anything that does not move the task still needs a redraw, or it stays floating
+      // wherever it was dropped.
+      if (!task || task.goal || due === task.due) {
+        render();
+        if (task?.goal) status('The goal node sits at the project deadline.');
+        return;
+      }
+      updateTask(taskId, { due });
+      status(due ? `“${task.title}” moved to ${due}.` : `“${task.title}” is now unscheduled.`);
+    },
+    onMerge: (sourceId, targetId) => {
+      const result = mergeTaskInto(board().tasks, sourceId, targetId);
+      if (!result) return;
+      const target = board().tasks.find((t) => t.id === targetId);
+      ui.selectedId = targetId;
+      commit(
+        {
+          ...board(),
+          tasks: result.tasks,
+          trash: pushTrash(board().trash, taskRecord(result.merged)),
+        },
+        `“${result.merged.title}” is now a subtask of “${target.title}”. Ctrl+Z to undo.`
+      );
+    },
+      onBlankDoubleClick: () => {
+        const task = addTask();
+        ui.selectedId = task.id;
+        render();
+        panel.focusTitle();
+      },
+    },
+    { levelSeparation: readRowHeight() }
+  );
 
   panel = createPanel({
     onChange: updateTask,
@@ -1074,9 +1439,13 @@ async function boot() {
     status(`Could not read saved data: ${error.message}`, true);
   }
   const isEmpty = Object.keys(files).length === 0;
-  history.reset(buildBoard(isEmpty ? DEMO_FILES : files));
+  const before = JSON.stringify(Object.keys(files).sort());
+  resetBoard(isEmpty ? DEMO_FILES : files);
   ui.projectId = defaultProjectId();
-  if (isEmpty) await persist();
+  // Writes the demo out, and any goal node the sync had to create for an existing vault.
+  if (isEmpty || JSON.stringify(Object.keys(boardToFiles(board())).sort()) !== before) {
+    await persist();
+  }
 
   render();
   graph.fit();

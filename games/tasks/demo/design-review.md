@@ -2,7 +2,7 @@
 id: design-review
 title: Design review
 project: [website]
-people: [georg, mira, sam]
+people: [Georg, Oliver, Sverre]
 due: 2026-09-11
 estimate: 3d
 created: 2026-08-02

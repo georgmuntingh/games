@@ -2,7 +2,7 @@
 id: job-descriptions
 title: Job descriptions
 project: [q4-hiring, website]
-people: [georg]
+people: [Georg]
 due: 2026-09-11
 estimate: 3d
 created: 2026-08-20

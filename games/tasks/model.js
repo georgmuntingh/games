@@ -104,6 +104,8 @@ export function taskFromMarkdown(filename, text) {
     estimate: data.estimate ? String(data.estimate) : '',
     created: data.created ? String(data.created) : '',
     done: data.done === true,
+    // Marks the auto-managed node that carries a project's end goal.
+    goal: data.goal === true,
     blockedBy: asList(data['blocked-by']),
     partOf: asList(data['part-of']),
     notes,
@@ -121,6 +123,7 @@ export function taskFromMarkdown(filename, text) {
             'estimate',
             'created',
             'done',
+            'goal',
             'blocked-by',
             'part-of',
           ].includes(k)
@@ -156,6 +159,7 @@ export function taskToMarkdown(task) {
       estimate: task.estimate ?? '',
       created: task.created ?? '',
       done: Boolean(task.done),
+      ...(task.goal ? { goal: true } : {}),
       'blocked-by': task.blockedBy ?? [],
       'part-of': task.partOf ?? [],
       ...(task.extra ?? {}),
@@ -207,6 +211,39 @@ export function projectToMarkdown(project) {
   );
 }
 
+/* ---------------------------------------------------------------- trash */
+
+export const TRASH_FILENAME = '_trash.md';
+/** Deletions kept before the oldest falls off. */
+export const TRASH_LIMIT = 50;
+
+/**
+ * The trash holds whole deleted tasks and severed links. Those shapes nest, which the
+ * flat-YAML subset in `frontmatter.js` cannot express, so the body is one fenced JSON
+ * block — honest about the format rather than inventing a markdown encoding for it.
+ */
+export function trashFromMarkdown(text) {
+  const { body } = parseFrontmatter(text);
+  const match = /```json\s*\n([\s\S]*?)```/.exec(String(body));
+  if (!match) return [];
+  try {
+    const items = JSON.parse(match[1]);
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+export function trashToMarkdown(trash) {
+  const body = ['```json', JSON.stringify(trash ?? [], null, 2), '```'].join('\n');
+  return serialiseFrontmatter({ id: '_trash' }, body);
+}
+
+/** Newest first, oldest dropped past the cap. */
+export function pushTrash(trash, record) {
+  return [record, ...(trash ?? [])].slice(0, TRASH_LIMIT);
+}
+
 export const taskFilename = (task) => `${task.id}.md`;
 export const projectFilename = (project) => `${PROJECT_PREFIX}${project.id}.md`;
 
@@ -217,23 +254,126 @@ export const projectFilename = (project) => `${PROJECT_PREFIX}${project.id}.md`;
 export function buildBoard(files) {
   const tasks = [];
   const projects = [];
+  let trash = [];
   for (const [filename, text] of Object.entries(files)) {
     if (!/\.md$/i.test(filename)) continue;
     const base = filename.split('/').pop();
-    if (base.startsWith(PROJECT_PREFIX)) projects.push(projectFromMarkdown(base, text));
+    // The trash is board state, not a task — without this it parses as one.
+    if (base === TRASH_FILENAME) trash = trashFromMarkdown(text);
+    else if (base.startsWith(PROJECT_PREFIX)) projects.push(projectFromMarkdown(base, text));
     else tasks.push(taskFromMarkdown(base, text));
   }
   tasks.sort((a, b) => a.id.localeCompare(b.id));
   projects.sort((a, b) => a.id.localeCompare(b.id));
-  return { tasks, projects };
+  return { tasks, projects, trash };
 }
 
 /** Inverse of `buildBoard`. */
-export function boardToFiles({ tasks, projects }) {
+export function boardToFiles({ tasks, projects, trash }) {
   const files = {};
   for (const project of projects) files[projectFilename(project)] = projectToMarkdown(project);
   for (const task of tasks) files[taskFilename(task)] = taskToMarkdown(task);
+  if (trash?.length) files[TRASH_FILENAME] = trashToMarkdown(trash);
   return files;
+}
+
+/* ----------------------------------------------------------- goal tasks */
+
+/** The auto-managed node carrying a project's end goal. */
+export const goalTaskId = (projectId) => `${projectId}-goal`;
+
+/**
+ * Reconcile the goal nodes with the projects that own them: create one for every
+ * project that has a goal, keep its title and deadline in step, and hand back any whose
+ * goal was cleared so the caller can bin them like any other deletion.
+ *
+ * Returns the new task list plus the removed goal tasks, rather than mutating, so the
+ * caller stays in charge of history and the trash.
+ */
+export function syncGoalTasks({ tasks, projects }, now = Date.now()) {
+  const wanted = new Map(
+    projects.filter((p) => p.goal?.trim()).map((p) => [goalTaskId(p.id), p])
+  );
+  const removed = [];
+  let next = [];
+
+  for (const task of tasks) {
+    if (!task.goal) {
+      next.push(task);
+      continue;
+    }
+    const project = wanted.get(task.id);
+    if (!project) {
+      removed.push(task);
+      continue;
+    }
+    wanted.delete(task.id);
+    const title = project.goal.trim();
+    const due = project.end ?? '';
+    next.push(task.title === title && task.due === due ? task : { ...task, title, due });
+  }
+
+  for (const [id, project] of wanted) {
+    next.push({
+      id,
+      title: project.goal.trim(),
+      project: [project.id],
+      people: [],
+      due: project.end ?? '',
+      estimate: '',
+      created: formatDate(now),
+      done: false,
+      goal: true,
+      blockedBy: [],
+      partOf: [],
+      notes: '',
+      subtasks: [],
+      extra: {},
+    });
+  }
+
+  next.sort((a, b) => a.id.localeCompare(b.id));
+  return { tasks: next, removed };
+}
+
+/* ------------------------------------------------------------- merging */
+
+/**
+ * Fold `sourceId` into `targetId` as checklist items: its title becomes the first line,
+ * its own subtasks follow, and anything that depended on it now depends on the target.
+ * The source task ceases to exist — it is returned so the caller can bin it.
+ *
+ * The exact inverse of promoting a checklist item to a task of its own.
+ */
+export function mergeTaskInto(tasks, sourceId, targetId) {
+  const source = tasks.find((t) => t.id === sourceId);
+  const target = tasks.find((t) => t.id === targetId);
+  if (!source || !target || sourceId === targetId || source.goal || target.goal) return null;
+
+  const folded = [
+    { done: Boolean(source.done), text: source.title },
+    ...(source.subtasks ?? []),
+  ];
+
+  /** Point a reference list at the target instead, without duplicating or self-linking. */
+  const rewire = (list, ownerId) =>
+    [...new Set((list ?? []).map((ref) => (ref === sourceId ? targetId : ref)))].filter(
+      (ref) => ref !== ownerId
+    );
+
+  const next = tasks
+    .filter((t) => t.id !== sourceId)
+    .map((t) => {
+      const merged =
+        t.id === targetId ? { ...t, subtasks: [...(t.subtasks ?? []), ...folded] } : t;
+      return {
+        ...merged,
+        blockedBy: rewire(merged.blockedBy, merged.id),
+        partOf: rewire(merged.partOf, merged.id),
+      };
+    });
+
+  return { tasks: next, merged: source };
 }
 
 /* ------------------------------------------------------------- timeline */
@@ -330,7 +470,7 @@ export function projectWindow(project, tasks) {
  * single tray two levels below the last dated one. Levels are shifted so the minimum
  * is 0, which keeps vis-network's hierarchical layout well behaved.
  */
-export function assignLevels(tasks, { bucket, start }) {
+export function assignLevels(tasks, { bucket, start, collapse = false }) {
   const dated = new Map();
   for (const task of tasks) {
     const due = parseDate(task.due);
@@ -339,13 +479,40 @@ export function assignLevels(tasks, { bucket, start }) {
   const values = [...dated.values()];
   const min = values.length ? Math.min(...values) : 0;
   const max = values.length ? Math.max(...values) : 0;
-  const trayLevel = max - min + 2;
+
+  // Without collapsing, a level *is* its offset from the earliest deadline. With it,
+  // only occupied periods get a row, and `levelOrigin` remembers which period each row
+  // came from so the gutter can still label real dates.
+  const occupied = [...new Set(values)].sort((a, b) => a - b);
+  const rowOf = collapse
+    ? new Map(occupied.map((raw, index) => [raw, index]))
+    : new Map(occupied.map((raw) => [raw, raw - min]));
+  const lastRow = collapse ? Math.max(0, occupied.length - 1) : max - min;
+  const trayLevel = lastRow + 2;
 
   const levels = new Map();
   for (const task of tasks) {
-    levels.set(task.id, dated.has(task.id) ? dated.get(task.id) - min : trayLevel);
+    levels.set(task.id, dated.has(task.id) ? rowOf.get(dated.get(task.id)) : trayLevel);
   }
-  return { levels, trayLevel, minLevel: min };
+
+  // Offsets from the earliest deadline, not absolute periods, so callers can map a row
+  // back to a date with `origin + minLevel` whether or not the scale was collapsed.
+  // Uncollapsed, every row in range is a real period even with nothing due in it — only
+  // a collapsed scale can have rows that stand for no period at all.
+  const levelOrigin = collapse
+    ? new Map([...rowOf].map(([raw, row]) => [row, raw - min]))
+    : new Map(Array.from({ length: lastRow + 1 }, (_, row) => [row, row]));
+  const gaps = [];
+  if (collapse) {
+    occupied.forEach((raw, index) => {
+      const previous = occupied[index - 1];
+      if (index > 0 && raw - previous > 1) {
+        gaps.push({ afterLevel: index - 1, periods: raw - previous - 1 });
+      }
+    });
+  }
+
+  return { levels, trayLevel, minLevel: min, lastLevel: lastRow, levelOrigin, gaps };
 }
 
 /* --------------------------------------------------------------- status */
@@ -421,6 +588,37 @@ export function filterTasks(tasks, { projectId = null, people = [], hideDone = f
 }
 
 /**
+ * Every task that nothing else depends on, linked to its project's goal node.
+ *
+ * Computed on each render rather than stored: the graph always converges on the goal
+ * with no dangling ends, and no bookkeeping leaks into the vault. A task already
+ * attached to something — depended on by another task, or part of one — is left alone,
+ * since its own parent will reach the goal for it.
+ */
+export function goalLinks(tasks) {
+  const present = new Set(tasks.map((t) => t.id));
+  const goalFor = new Map();
+  for (const task of tasks) {
+    if (task.goal) for (const id of task.project ?? []) goalFor.set(id, task.id);
+  }
+  if (!goalFor.size) return [];
+
+  const attached = new Set();
+  for (const task of tasks) {
+    for (const ref of task.blockedBy ?? []) if (present.has(ref)) attached.add(ref);
+    for (const ref of task.partOf ?? []) if (present.has(ref)) attached.add(task.id);
+  }
+
+  const links = [];
+  for (const task of tasks) {
+    if (task.goal || attached.has(task.id)) continue;
+    const goalId = (task.project ?? []).map((id) => goalFor.get(id)).find(Boolean);
+    if (goalId && goalId !== task.id) links.push({ from: task.id, to: goalId });
+  }
+  return links;
+}
+
+/**
  * Graph edges for a set of tasks. `blocks` edges run from the prerequisite to the
  * dependent; `part-of` edges run from the child to its parent. Edges pointing to a
  * task outside the set are dropped, and a `blocks` edge whose prerequisite is due
@@ -428,11 +626,21 @@ export function filterTasks(tasks, { projectId = null, people = [], hideDone = f
  */
 export function buildEdges(tasks, levels) {
   const present = new Set(tasks.map((t) => t.id));
+  // Undated work sits in a tray below every scheduled row, which is a position, not a
+  // date. Calling that "due after" would be a claim the task cannot support, so a
+  // conflict needs a real deadline at both ends.
+  const dated = new Set(tasks.filter((t) => t.due).map((t) => t.id));
+  const conflicts = (from, to) =>
+    dated.has(from) && dated.has(to) && (levels?.get(from) ?? 0) > (levels?.get(to) ?? 0);
+
   const edges = [];
+  for (const { from, to } of goalLinks(tasks)) {
+    edges.push({ id: `goal:${from}->${to}`, from, to, kind: 'goal', conflict: conflicts(from, to) });
+  }
   for (const task of tasks) {
     for (const from of task.blockedBy ?? []) {
       if (!present.has(from)) continue;
-      const conflict = (levels?.get(from) ?? 0) > (levels?.get(task.id) ?? 0);
+      const conflict = conflicts(from, task.id);
       edges.push({ id: `blocks:${from}->${task.id}`, from, to: task.id, kind: 'blocks', conflict });
     }
     for (const parent of task.partOf ?? []) {

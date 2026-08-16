@@ -28,6 +28,14 @@ import {
   filterTasks,
   buildEdges,
   projectPeople,
+  syncGoalTasks,
+  goalTaskId,
+  goalLinks,
+  mergeTaskInto,
+  trashFromMarkdown,
+  trashToMarkdown,
+  pushTrash,
+  TRASH_LIMIT,
 } from '../model.js';
 import { buildBrief, buildTaskBrief } from '../exporter.js';
 import { parseJsonResponse, ACTIONS } from '../prompts.js';
@@ -379,7 +387,7 @@ test('projectPeople marks roster members, task-only names and their open counts'
 });
 
 test('people and project tags are deduplicated and sorted', () => {
-  assertEqual(allPeople(board.tasks), ['ada', 'georg', 'mira', 'sam']);
+  assertEqual(allPeople(board.tasks), ['Georg', 'Oliver', 'Sverre']);
   assertEqual(allProjectTags(board.tasks), ['q4-hiring', 'website']);
 });
 
@@ -406,9 +414,11 @@ test('edges to tasks outside the filtered set are dropped', () => {
 });
 
 test('a prerequisite due after its dependent is flagged as a conflict', () => {
+  // Both ends carry real deadlines: the levels below stand in for what those dates
+  // would produce, and a conflict is a claim about dates, not about row order.
   const tasks = [
-    { id: 'a', blockedBy: [], partOf: [] },
-    { id: 'b', blockedBy: ['a'], partOf: [] },
+    { id: 'a', due: '2026-09-05', blockedBy: [], partOf: [] },
+    { id: 'b', due: '2026-08-15', blockedBy: ['a'], partOf: [] },
   ];
   assert(buildEdges(tasks, new Map([['a', 5], ['b', 2]]))[0].conflict, 'blocker below dependent');
   assert(!buildEdges(tasks, new Map([['a', 2], ['b', 5]]))[0].conflict, 'normal order');
@@ -438,6 +448,21 @@ test('includes the goal, a task table and the dependency list', () => {
   assert(brief.includes('- signup-flow part-of self-serve-signup'), 'part-of dependency');
 });
 
+test('a task brief carries its existing subtasks and their state', () => {
+  const brief = buildTaskBrief({
+    title: 'Design review',
+    subtasks: [{ done: true, text: 'book the room' }, { done: false, text: 'collect feedback' }],
+  });
+  assert(brief.includes('Existing subtasks:'), 'the section is present');
+  assert(brief.includes('- [x] book the room'), 'ticked state survives');
+  assert(brief.includes('- [ ] collect feedback'), 'unticked state survives');
+  assert(
+    ACTIONS.subtasks.messages({ title: 'P' }, [], { title: 'Design review', subtasks: [{ done: false, text: 'collect feedback' }] })
+      .some((m) => m.content.includes('collect feedback')),
+    'and it reaches the prompt the model actually sees'
+  );
+});
+
 test('goal and context are separate labelled sections', () => {
   const brief = buildBrief(
     { title: 'P', goal: 'Ship it', context: 'Stripe is set up.\n\n## Open questions\n- SOC2?' },
@@ -456,6 +481,210 @@ test('each section is dropped cleanly when empty', () => {
   const contextOnly = buildBrief({ title: 'P', goal: '', context: 'Background.' }, []);
   assert(!contextOnly.includes('## Goal'), 'no empty goal heading');
   assert(contextOnly.includes('## Context'), 'context kept');
+});
+
+/* ---------------------------------------------------------------- goal node */
+
+const projectWithGoal = (over = {}) => ({ id: 'w', title: 'W', goal: 'Ship it', end: '2026-11-30', ...over });
+
+test('a goal node is created for every project that has a goal', () => {
+  const { tasks } = syncGoalTasks({ tasks: [], projects: [projectWithGoal()] });
+  assertEqual(tasks.length, 1);
+  assertEqual(tasks[0].id, goalTaskId('w'));
+  assertEqual(tasks[0].title, 'Ship it');
+  assertEqual(tasks[0].due, '2026-11-30', 'the goal sits at the project deadline');
+  assert(tasks[0].goal, 'and is marked as the goal node');
+});
+
+test('a goal node follows its project title and deadline', () => {
+  const first = syncGoalTasks({ tasks: [], projects: [projectWithGoal()] }).tasks;
+  const { tasks } = syncGoalTasks({
+    tasks: first,
+    projects: [projectWithGoal({ goal: 'Ship it sooner', end: '2026-10-01' })],
+  });
+  assertEqual(tasks.length, 1, 'no second node is created');
+  assertEqual(tasks[0].title, 'Ship it sooner');
+  assertEqual(tasks[0].due, '2026-10-01');
+});
+
+test('clearing the goal hands its node back for deletion', () => {
+  const first = syncGoalTasks({ tasks: [], projects: [projectWithGoal()] }).tasks;
+  const { tasks, removed } = syncGoalTasks({ tasks: first, projects: [projectWithGoal({ goal: '' })] });
+  assertEqual(tasks.length, 0);
+  assertEqual(removed.map((t) => t.id), [goalTaskId('w')]);
+});
+
+test('a goal node survives a round-trip through markdown', () => {
+  const { tasks } = syncGoalTasks({ tasks: [], projects: [projectWithGoal()] });
+  const markdown = taskToMarkdown(tasks[0]);
+  assert(markdown.includes('goal: true'), 'the marker is written');
+  assert(taskFromMarkdown('w-goal.md', markdown).goal, 'and read back');
+});
+
+test('only tasks nothing depends on feed the goal', () => {
+  const tasks = [
+    { id: 'w-goal', goal: true, project: ['w'] },
+    { id: 'a', project: ['w'], blockedBy: [] },
+    { id: 'b', project: ['w'], blockedBy: ['a'] },
+    { id: 'c', project: ['w'], partOf: ['b'] },
+  ];
+  const links = goalLinks(tasks);
+  assertEqual(links, [{ from: 'b', to: 'w-goal' }], 'a is depended on, c is part of b');
+});
+
+test('the goal node never links to itself', () => {
+  assertEqual(goalLinks([{ id: 'w-goal', goal: true, project: ['w'] }]), []);
+});
+
+test('an undated task is not a scheduling conflict', () => {
+  const bucket = getBucket('week');
+  const tasks = [
+    { id: 'g', goal: true, project: ['w'], due: '2026-09-01' },
+    { id: 'undated', project: ['w'], due: '' },
+    { id: 'late', project: ['w'], due: '2026-10-01' },
+  ];
+  const { levels } = assignLevels(tasks, { bucket, start: START });
+  const edges = buildEdges(tasks, levels);
+  const by = (from) => edges.find((e) => e.from === from);
+  assert(!by('undated').conflict, 'the tray is a position, not a date after the goal');
+  assert(by('late').conflict, 'but a real deadline past the goal still is');
+});
+
+test('buildEdges emits goal links alongside stored ones', () => {
+  const tasks = [
+    { id: 'w-goal', goal: true, project: ['w'] },
+    { id: 'a', project: ['w'] },
+  ];
+  const kinds = buildEdges(tasks, new Map()).map((e) => e.kind);
+  assert(kinds.includes('goal'), 'a goal edge is present');
+});
+
+/* ------------------------------------------------------------------ merging */
+
+test('merging folds a task into another as checklist items', () => {
+  const tasks = [
+    { id: 'src', title: 'Wireframes', done: false, subtasks: [{ done: true, text: 'lo-fi' }] },
+    { id: 'tgt', title: 'Design', subtasks: [{ done: false, text: 'existing' }] },
+  ];
+  const { tasks: next, merged } = mergeTaskInto(tasks, 'src', 'tgt');
+  assertEqual(next.map((t) => t.id), ['tgt'], 'the source is gone');
+  assertEqual(
+    next[0].subtasks,
+    [
+      { done: false, text: 'existing' },
+      { done: false, text: 'Wireframes' },
+      { done: true, text: 'lo-fi' },
+    ],
+    'title first, then its own subtasks, after what was already there'
+  );
+  assertEqual(merged.id, 'src', 'the merged task is handed back for the trash');
+});
+
+test('merging rewires dependents to the target and drops self-links', () => {
+  const tasks = [
+    { id: 'src', title: 'S', subtasks: [] },
+    { id: 'tgt', title: 'T', subtasks: [], blockedBy: ['src'] },
+    { id: 'dep', title: 'D', blockedBy: ['src'] },
+  ];
+  const { tasks: next } = mergeTaskInto(tasks, 'src', 'tgt');
+  assertEqual(next.find((t) => t.id === 'dep').blockedBy, ['tgt']);
+  assertEqual(next.find((t) => t.id === 'tgt').blockedBy, [], 'a task cannot block itself');
+});
+
+test('merging refuses a goal node or a task with itself', () => {
+  const tasks = [{ id: 'a', title: 'A', subtasks: [] }, { id: 'g', title: 'G', goal: true, subtasks: [] }];
+  assertEqual(mergeTaskInto(tasks, 'a', 'a'), null);
+  assertEqual(mergeTaskInto(tasks, 'g', 'a'), null);
+  assertEqual(mergeTaskInto(tasks, 'a', 'g'), null);
+});
+
+/* ---------------------------------------------------------------- collapsing */
+
+test('collapsing empty periods leaves consecutive rows and records the gaps', () => {
+  const bucket = getBucket('week');
+  const tasks = [{ id: 'a', due: '2026-08-01' }, { id: 'b', due: '2026-08-08' }, { id: 'c', due: '2026-09-26' }];
+  const plain = assignLevels(tasks, { bucket, start: START });
+  assertEqual([...plain.levels.values()], [0, 1, 8], 'ordinarily a level is elapsed time');
+
+  const collapsed = assignLevels(tasks, { bucket, start: START, collapse: true });
+  assertEqual([...collapsed.levels.values()], [0, 1, 2], 'occupied periods become adjacent');
+  assertEqual(collapsed.gaps, [{ afterLevel: 1, periods: 6 }], 'six empty weeks are recorded');
+});
+
+test('a row still labels its real date, collapsed or not', () => {
+  const bucket = getBucket('week');
+  // Deliberately starts three weeks into the window, so a level is not its own offset
+  // and a double-counted `minLevel` would show up.
+  const tasks = [{ id: 'a', due: '2026-08-22' }, { id: 'c', due: '2026-09-26' }];
+  const dateOf = (opts, row) => {
+    const { levelOrigin, minLevel } = assignLevels(tasks, { bucket, start: START, ...opts });
+    return formatDate(bucket.dateForLevel(levelOrigin.get(row) + minLevel, START));
+  };
+  assertEqual(dateOf({ collapse: true }, 0), '2026-08-22');
+  assertEqual(dateOf({ collapse: true }, 1), '2026-09-26', 'row 1 points at the week it came from');
+  assertEqual(dateOf({}, 0), '2026-08-22', 'and the uncollapsed scale agrees');
+  assertEqual(dateOf({}, 5), '2026-09-26');
+});
+
+test('uncollapsed, every row in range is a real period', () => {
+  const bucket = getBucket('week');
+  // Nothing is due in weeks 1 and 2; dropping a task there must still mean that week,
+  // not "unscheduled".
+  const tasks = [{ id: 'a', due: '2026-08-01' }, { id: 'b', due: '2026-08-22' }];
+  const { levelOrigin } = assignLevels(tasks, { bucket, start: START });
+  assertEqual([...levelOrigin.keys()], [0, 1, 2, 3], 'the empty weeks between are still rows');
+  assertEqual(
+    formatDate(bucket.dateForLevel(levelOrigin.get(2), START)),
+    '2026-08-15',
+    'and each maps to its own date'
+  );
+});
+
+test('collapsed, only occupied rows exist', () => {
+  const bucket = getBucket('week');
+  const tasks = [{ id: 'a', due: '2026-08-01' }, { id: 'b', due: '2026-08-22' }];
+  const { levelOrigin } = assignLevels(tasks, { bucket, start: START, collapse: true });
+  assertEqual([...levelOrigin.keys()], [0, 1], 'the empty weeks are gone entirely');
+});
+
+test('collapsing keeps undated work in its own tray below the last row', () => {
+  const bucket = getBucket('week');
+  const tasks = [{ id: 'a', due: '2026-08-01' }, { id: 'u', due: '' }];
+  const { levels, trayLevel } = assignLevels(tasks, { bucket, start: START, collapse: true });
+  assertEqual(levels.get('u'), trayLevel);
+  assert(trayLevel > levels.get('a'), 'the tray sits below the dated rows');
+});
+
+/* -------------------------------------------------------------------- trash */
+
+test('the trash round-trips through its own file', () => {
+  const records = [{ kind: 'task', at: '2026-08-16T00:00:00.000Z', label: 'A', data: { id: 'a', subtasks: [] } }];
+  assertEqual(trashFromMarkdown(trashToMarkdown(records)), records);
+});
+
+test('an empty or unreadable trash file yields no records', () => {
+  assertEqual(trashFromMarkdown('---\nid: _trash\n---\n'), []);
+  assertEqual(trashFromMarkdown('---\nid: _trash\n---\n```json\nnot json\n```\n'), []);
+});
+
+test('the trash file is not mistaken for a task', () => {
+  const built = buildBoard({ '_trash.md': trashToMarkdown([{ kind: 'task', at: '', label: 'A', data: {} }]) });
+  assertEqual(built.tasks, [], 'it is board state, not work');
+  assertEqual(built.trash.length, 1);
+});
+
+test('the trash keeps the newest and drops past the cap', () => {
+  let trash = [];
+  for (let n = 0; n < TRASH_LIMIT + 5; n += 1) {
+    trash = pushTrash(trash, { kind: 'task', at: '', label: `t${n}`, data: {} });
+  }
+  assertEqual(trash.length, TRASH_LIMIT);
+  assertEqual(trash[0].label, `t${TRASH_LIMIT + 4}`, 'newest first');
+  assert(!trash.some((r) => r.label === 't0'), 'the oldest fell off');
+});
+
+test('a board with no deletions writes no trash file', () => {
+  assert(!('_trash.md' in boardToFiles({ tasks: [], projects: [], trash: [] })));
 });
 
 test('escapes pipes so a title cannot break the table', () => {

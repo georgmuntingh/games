@@ -2,7 +2,7 @@
 id: qa-pass
 title: QA pass
 project: [website]
-people: [sam, mira]
+people: [Sverre, Oliver]
 due: 2026-11-13
 estimate: 1w
 created: 2026-08-05
