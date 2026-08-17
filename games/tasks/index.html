@@ -251,9 +251,14 @@
         </div>
         <p class="muted small">
           Opening a folder reads and writes real <code>.md</code> files. Point it at a folder
-          inside an Obsidian vault and the notes are yours. Only files this app created are
-          ever removed.
+          inside an Obsidian vault and the notes are yours. Each subfolder holding a
+          <code>_project-…</code> file is a project; every other folder is left alone, and
+          only files this app created are ever removed.
         </p>
+        <div class="row">
+          <button type="button" id="organise-folders">Organise into project folders</button>
+        </div>
+        <p id="organise-state" class="muted small"></p>
         <div class="row">
           <button type="button" id="export-zip">Export .zip</button>
           <button type="button" id="import-md">Import .md files…</button>

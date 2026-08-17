@@ -190,7 +190,7 @@ export function taskToMarkdown(task) {
 }
 
 /**
- * Parse a `_project-<id>.md` file.
+ * Parse a `_project-<id>.md` file, whose path may name the folder it lives in.
  *
  * The end goal is a one-line `goal:` scalar; the body is free-form context. A file
  * written before the two were separated has no `goal:` key, and its body is read as
@@ -198,7 +198,10 @@ export function taskToMarkdown(task) {
  */
 export function projectFromMarkdown(filename, text) {
   const { data, body } = parseFrontmatter(text);
-  const fallbackId = String(filename)
+  const path = String(filename);
+  const cut = path.lastIndexOf('/');
+  const fallbackId = path
+    .slice(cut + 1)
     .replace(/\.md$/i, '')
     .replace(new RegExp(`^${PROJECT_PREFIX}`), '');
   return {
@@ -209,6 +212,12 @@ export function projectFromMarkdown(filename, text) {
     start: data.start ? String(data.start) : '',
     end: data.end ? String(data.end) : '',
     color: data.color ? String(data.color) : '',
+    /**
+     * The folder this project's files live in; empty means the parent folder itself. Read
+     * off the path rather than out of the frontmatter — the file's own location already
+     * says it, so there is nothing to keep in step and nothing to write.
+     */
+    folder: cut === -1 ? '' : path.slice(0, cut),
     context: String(body).trim(),
   };
 }
@@ -267,6 +276,36 @@ export function pushTrash(trash, record) {
 export const taskFilename = (task) => `${task.id}.md`;
 export const projectFilename = (project) => `${PROJECT_PREFIX}${project.id}.md`;
 
+/** Join a folder to a filename. An empty folder means the parent folder itself. */
+const inFolder = (folder, name) => (folder ? `${folder}/${name}` : name);
+
+/**
+ * The folder a task's file belongs in: the one owned by the first project it is tagged
+ * with. Its other tags go on working — they simply do not get to decide where the file
+ * lives, because a file cannot be in two directories at once. A task with no tags, or one
+ * tagged with a project this board does not have, sits at the parent root.
+ */
+function homeFolder(task, folderOf) {
+  return folderOf.get(task.project?.[0]) ?? '';
+}
+
+/**
+ * Project ids claimed by more than one folder. The first read wins; this is what lets the
+ * app say so rather than quietly dropping the others.
+ */
+export function duplicateProjectIds(files) {
+  const seen = new Set();
+  const clashes = new Set();
+  for (const filename of Object.keys(files)) {
+    const base = filename.slice(filename.lastIndexOf('/') + 1);
+    if (!/\.md$/i.test(base) || !base.startsWith(PROJECT_PREFIX)) continue;
+    const id = base.replace(/\.md$/i, '').replace(new RegExp(`^${PROJECT_PREFIX}`), '');
+    if (seen.has(id)) clashes.add(id);
+    seen.add(id);
+  }
+  return [...clashes];
+}
+
 /**
  * Build a board from a `filename -> markdown text` map.
  * Files starting with `_project-` are projects; every other `.md` file is a task.
@@ -275,13 +314,20 @@ export function buildBoard(files) {
   const tasks = [];
   const projects = [];
   let trash = [];
+  const claimed = new Set();
   for (const [filename, text] of Object.entries(files)) {
     if (!/\.md$/i.test(filename)) continue;
-    const base = filename.split('/').pop();
+    const base = filename.slice(filename.lastIndexOf('/') + 1);
     // The trash is board state, not a task — without this it parses as one.
     if (base === TRASH_FILENAME) trash = trashFromMarkdown(text);
-    else if (base.startsWith(PROJECT_PREFIX)) projects.push(projectFromMarkdown(base, text));
-    else tasks.push(taskFromMarkdown(base, text));
+    else if (base.startsWith(PROJECT_PREFIX)) {
+      // The whole path here: a project file carries the folder it was found in.
+      const project = projectFromMarkdown(filename, text);
+      // Two folders claiming one id would otherwise fight over the same files forever.
+      if (claimed.has(project.id)) continue;
+      claimed.add(project.id);
+      projects.push(project);
+    } else tasks.push(taskFromMarkdown(base, text));
   }
   tasks.sort((a, b) => a.id.localeCompare(b.id));
   projects.sort((a, b) => a.id.localeCompare(b.id));
@@ -291,8 +337,14 @@ export function buildBoard(files) {
 /** Inverse of `buildBoard`. */
 export function boardToFiles({ tasks, projects, trash }) {
   const files = {};
-  for (const project of projects) files[projectFilename(project)] = projectToMarkdown(project);
-  for (const task of tasks) files[taskFilename(task)] = taskToMarkdown(task);
+  const folderOf = new Map((projects ?? []).map((p) => [p.id, p.folder ?? '']));
+  for (const project of projects) {
+    files[inFolder(project.folder, projectFilename(project))] = projectToMarkdown(project);
+  }
+  for (const task of tasks) {
+    files[inFolder(homeFolder(task, folderOf), taskFilename(task))] = taskToMarkdown(task);
+  }
+  // The trash spans every project, so it belongs to the parent rather than to any one of them.
   if (trash?.length) files[TRASH_FILENAME] = trashToMarkdown(trash);
   return files;
 }

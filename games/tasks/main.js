@@ -11,6 +11,7 @@ import { marked } from 'marked';
 import {
   buildBoard,
   boardToFiles,
+  duplicateProjectIds,
   buildEdges,
   assignLevels,
   chooseBucket,
@@ -442,6 +443,9 @@ function addProject(fields = {}) {
     start: fields.start || formatDate(Date.now()),
     end: fields.end || formatDate(Date.now() + 90 * 86400000),
     color: fields.color || PROJECT_COLORS[board().projects.length % PROJECT_COLORS.length],
+    // A project made from here gets a folder of its own, even on a board whose existing
+    // projects are still flat. Nothing that already exists moves without being asked.
+    folder: fields.folder ?? id,
     context: fields.context ?? '',
   };
   ui.projectId = id;
@@ -664,6 +668,35 @@ function setAutoLayout(enabled) {
   });
   graph.setAutoLayout(false);
   commit({ ...board(), tasks }, 'Layout frozen — cards stay where you drop them.');
+}
+
+/* ------------------------------------------------------- folder layout */
+
+/** How many files would land at a path they are not at now. */
+function pendingMoves(from, to) {
+  const before = new Set(Object.keys(boardToFiles(from)));
+  return Object.keys(boardToFiles(to)).filter((path) => !before.has(path)).length;
+}
+
+/** The board as it would be with every project in a folder named after it. */
+const organisedBoard = () => ({
+  ...board(),
+  projects: board().projects.map((project) => ({ ...project, folder: project.folder || project.id })),
+});
+
+/**
+ * Give every project a folder of its own. The files themselves move on the next save, which
+ * `commit` triggers — so the whole reorganisation is a single undo step, and Ctrl+Z moves
+ * them back.
+ */
+function organiseIntoFolders() {
+  const moves = pendingMoves(board(), organisedBoard());
+  if (!moves) {
+    status('Every project already has a folder of its own.');
+    return;
+  }
+  commit(organisedBoard(), `Moved ${moves} file${moves === 1 ? '' : 's'} into project folders.`);
+  refreshStorageState();
 }
 
 /* ------------------------------------------------------------- rendering */
@@ -999,11 +1032,16 @@ function setLinkArmed(armed, kind) {
 
 async function setBoardFromFiles(files, message) {
   resetBoard(files);
+  const clashes = duplicateProjectIds(files);
   ui.projectId = defaultProjectId();
   ui.people.clear();
   ui.selectedId = null;
   await persist();
-  status(message ?? '');
+  status(
+    clashes.length
+      ? `${message ?? ''} Two folders claim ${clashes.join(', ')} — using the first of each.`.trim()
+      : (message ?? '')
+  );
   render();
 }
 
@@ -1415,9 +1453,22 @@ function refreshStorageState() {
         : supportsFolder
           ? 'Saving to this browser only.'
           : 'Saving to this browser only — this browser cannot open folders.';
-  $('storage-state').textContent = text;
+  const foldered = board().projects.filter((p) => p.folder).length;
+  const layout =
+    mode === 'folder' && board().projects.length
+      ? foldered === board().projects.length
+        ? ' Every project has its own subfolder.'
+        : ` ${foldered} of ${board().projects.length} projects have their own subfolder.`
+      : '';
+  $('storage-state').textContent = text + layout;
   $('connect-folder').disabled = !supportsFolder;
   $('disconnect-folder').disabled = mode !== 'folder';
+
+  const moves = pendingMoves(board(), organisedBoard());
+  $('organise-folders').disabled = !moves;
+  $('organise-state').textContent = moves
+    ? `Would move ${moves} file${moves === 1 ? '' : 's'} into project folders. Nothing is deleted.`
+    : 'Nothing to move.';
 }
 
 async function loadModels() {
@@ -1573,6 +1624,7 @@ function wireEvents() {
   });
 
   wirePanelResize();
+  $('organise-folders').addEventListener('click', organiseIntoFolders);
   $('auto-layout').addEventListener('click', () => setAutoLayout(!ui.autoLayout));
   $('fit').addEventListener('click', () => graph.fit());
   $('assist').addEventListener('click', () => {

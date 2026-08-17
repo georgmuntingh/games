@@ -17,6 +17,7 @@ import {
   projectToMarkdown,
   buildBoard,
   boardToFiles,
+  duplicateProjectIds,
   chooseBucket,
   getBucket,
   projectWindow,
@@ -495,6 +496,116 @@ test('the demo board has no task that could be added to its own blockers', () =>
   for (const task of board.tasks) {
     assert(cyclicRefs(board.tasks, task.id, 'blockedBy').has(task.id), `${task.id} excludes itself`);
   }
+});
+
+/* ------------------------------------------------------- project folders */
+
+describe('project folders');
+
+const NESTED = {
+  // The folder is named nothing like the project: the id inside the file identifies it, so
+  // this is the case that proves a folder name is only a container.
+  'relaunch-2026/_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+  'relaunch-2026/wireframes.md': '---\nid: wireframes\ntitle: Wireframes\nproject: website\n---\n',
+  'kitchen/_project-kitchen.md': '---\nid: kitchen\ntitle: Kitchen\n---\n',
+  'kitchen/worktop.md': '---\nid: worktop\ntitle: Worktop\nproject: kitchen\n---\n',
+  'odd-job.md': '---\nid: odd-job\ntitle: Odd job\n---\n',
+};
+
+const pathOf = (files, id) =>
+  Object.keys(files).find((path) => path === `${id}.md` || path.endsWith(`/${id}.md`));
+
+test('a project remembers the folder it was found in', () => {
+  const { projects } = buildBoard(NESTED);
+  assertEqual(projects.find((p) => p.id === 'website').folder, 'relaunch-2026');
+  assertEqual(projects.find((p) => p.id === 'kitchen').folder, 'kitchen');
+});
+
+test('a task follows its project, not a folder named after it', () => {
+  const files = boardToFiles(buildBoard(NESTED));
+  assertEqual(pathOf(files, 'wireframes'), 'relaunch-2026/wireframes.md');
+  assertEqual(pathOf(files, 'worktop'), 'kitchen/worktop.md');
+});
+
+test('a project file lives in its own folder', () => {
+  assert(
+    'relaunch-2026/_project-website.md' in boardToFiles(buildBoard(NESTED)),
+    'the project file stays beside its tasks'
+  );
+});
+
+test('an untagged task sits at the parent root', () => {
+  assertEqual(pathOf(boardToFiles(buildBoard(NESTED)), 'odd-job'), 'odd-job.md');
+});
+
+test('the first tag decides where a task lives', () => {
+  const board = buildBoard({
+    ...NESTED,
+    'both.md': '---\nid: both\ntitle: Both\nproject: [kitchen, website]\n---\n',
+  });
+  assertEqual(pathOf(boardToFiles(board), 'both'), 'kitchen/both.md');
+  // Placement does not change what a task belongs to: the other tag is untouched.
+  assertEqual(board.tasks.find((t) => t.id === 'both').project, ['kitchen', 'website']);
+});
+
+test('a tag naming no project we have lands at the root', () => {
+  const board = buildBoard({
+    ...NESTED,
+    'stray.md': '---\nid: stray\ntitle: Stray\nproject: gardening\n---\n',
+  });
+  assertEqual(pathOf(boardToFiles(board), 'stray'), 'stray.md');
+});
+
+test('the trash belongs to the parent, not to any one project', () => {
+  const board = { ...buildBoard(NESTED), trash: [{ kind: 'task', data: { id: 'gone' } }] };
+  assert('_trash.md' in boardToFiles(board), 'the trash is at the root');
+});
+
+test('a nested board round trips to a fixed point', () => {
+  const once = boardToFiles(buildBoard(NESTED));
+  assertEqual(boardToFiles(buildBoard(once)), once);
+});
+
+const FLAT = {
+  '_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+  'wireframes.md': '---\nid: wireframes\ntitle: Wireframes\nproject: website\n---\n',
+};
+
+test('a flat board stays flat', () => {
+  assertEqual(Object.keys(boardToFiles(buildBoard(FLAT))).sort(), [
+    '_project-website.md',
+    'wireframes.md',
+  ]);
+});
+
+test('giving a flat project a folder moves its files into it', () => {
+  const flat = buildBoard(FLAT);
+  const organised = { ...flat, projects: flat.projects.map((p) => ({ ...p, folder: p.id })) };
+  assertEqual(Object.keys(boardToFiles(organised)).sort(), [
+    'website/_project-website.md',
+    'website/wireframes.md',
+  ]);
+});
+
+test('two folders claiming one id: the first is used', () => {
+  const { projects } = buildBoard({
+    'a/_project-website.md': '---\nid: website\ntitle: First\n---\n',
+    'b/_project-website.md': '---\nid: website\ntitle: Second\n---\n',
+  });
+  assertEqual(projects.length, 1);
+  assertEqual(projects[0].folder, 'a');
+});
+
+test('a clash is reported so the app can say so', () => {
+  assertEqual(
+    duplicateProjectIds({
+      'a/_project-website.md': '',
+      'b/_project-website.md': '',
+      'kitchen/_project-kitchen.md': '',
+    }),
+    ['website']
+  );
+  assertEqual(duplicateProjectIds(NESTED), []);
 });
 
 /* ------------------------------------------------------------- initials */
