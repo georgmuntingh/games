@@ -8,10 +8,10 @@
       name="description"
       content="Decompose a project into tasks on a timeline graph, and ask a language model what you have missed."
     />
-    <script type="module" crossorigin src="/games/pr-previews/pr-19/assets/games/tasks-BluseDjx.js"></script>
+    <script type="module" crossorigin src="/games/pr-previews/pr-19/assets/games/tasks-W4Hpsqwc.js"></script>
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-19/assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-19/assets/prompts-D6QDIp_X.js">
-    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-19/assets/tasks-Dgg_6rCI.css">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-19/assets/prompts-9yNhpavf.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-19/assets/tasks-COULsnQo.css">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-19/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -75,6 +75,15 @@
           <button type="button" id="rows-looser" title="Taller rows">+</button>
         </span>
 
+        <button
+          type="button"
+          id="auto-layout"
+          aria-pressed="true"
+          title="Auto-layout: the board arranges the cards. Turn it off to place them yourself and keep where you put them."
+        >
+          Auto-layout
+        </button>
+
         <button type="button" id="fit" title="Fit to view (F)">Fit</button>
         <button type="button" id="settings-open" title="Settings">⚙</button>
       </header>
@@ -88,10 +97,16 @@
             <button type="button" id="panel-close" class="icon" title="Close">✕</button>
           </div>
 
-          <label class="check panel-done">
-            <input type="checkbox" id="t-done" />
-            <span>Complete</span>
-          </label>
+          <div class="panel-flags">
+            <label class="check panel-done">
+              <input type="checkbox" id="t-done" />
+              <span>Complete</span>
+            </label>
+            <label class="check panel-working">
+              <input type="checkbox" id="t-working" />
+              <span>▶ Working on this (W)</span>
+            </label>
+          </div>
 
           <div class="grid2">
             <label class="field">
@@ -193,6 +208,11 @@
       </div>
       <div id="people-checks"></div>
     </div>
+
+    <!-- `manual`, not `auto`: a right-click opens the menu between pointerdown and
+         pointerup, and an auto popover treats that pointerup as a dismissal. menu.js
+         wires the outside-click and Escape itself. -->
+    <div id="context-menu" class="menu-panel menu-items" popover="manual"></div>
 
     <datalist id="people-list"></datalist>
     <datalist id="project-list"></datalist>
