@@ -31,6 +31,7 @@ function readTheme(element) {
     surfaceDone: value('--task-surface-done', '#f1f2f4'),
     danger: value('--task-danger', '#dc2626'),
     grid: value('--task-grid', 'rgba(128,128,128,0.16)'),
+    preview: value('--task-preview', 'rgba(37,99,235,0.10)'),
     edge: value('--task-edge', '#9aa3b2'),
   };
 }
@@ -220,7 +221,10 @@ export function createGraph(container, handlers = {}, options = {}) {
   let draggedId = null;
   let dropTargetId = null;
   /** Where inside the card the drag began, so the drop maps to the card's centre. */
+  let grabOffsetX = 0;
   let grabOffsetY = 0;
+  /** The live pointer mid-drag, which the drop preview is drawn from. */
+  let dragPointer = null;
 
   const network = new Network(
     container,
@@ -271,6 +275,19 @@ export function createGraph(container, handlers = {}, options = {}) {
       y: container.clientHeight,
     });
     const labelX = topLeft.x + GUTTER_PAD;
+
+    const previewLevel = previewRow();
+    if (previewLevel != null) {
+      ctx.save();
+      ctx.fillStyle = theme.preview;
+      ctx.fillRect(
+        topLeft.x,
+        levelToY(previewLevel) - levelSeparation / 2,
+        bottomRight.x - topLeft.x,
+        levelSeparation
+      );
+      ctx.restore();
+    }
 
     ctx.save();
     ctx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
@@ -328,6 +345,60 @@ export function createGraph(container, handlers = {}, options = {}) {
     ctx.restore();
   });
 
+  /**
+   * A dashed card on the row a release would land on, labelled with the date it would
+   * take. vis re-runs the layout on drop, so the row is the only part of the landing that
+   * can be promised: the ghost snaps in y and merely follows the cursor in x.
+   */
+  network.on('afterDrawing', (ctx) => {
+    const row = previewRow();
+    if (row == null) return;
+    const task = view.tasks.find((t) => t.id === draggedId);
+    const left = dragPointer.x - grabOffsetX - NODE_WIDTH / 2;
+    const centreY = levelToY(row);
+    const top = centreY - NODE_HEIGHT / 2;
+
+    ctx.save();
+    roundRect(ctx, left, top, NODE_WIDTH, NODE_HEIGHT, 8);
+    ctx.fillStyle = theme.preview;
+    ctx.fill();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = theme.accent;
+    ctx.stroke();
+    ctx.restore();
+
+    if (task) {
+      ctx.save();
+      ctx.font = '500 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const lines = wrap(ctx, task.title, NODE_WIDTH - 24, 2);
+      const lineHeight = 15;
+      const startY = centreY - ((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((line, i) => ctx.fillText(line, left + 12, startY + i * lineHeight));
+      ctx.restore();
+    }
+
+    // The date the row stands for, worded by the caller so this file stays out of the
+    // calendar. Beside the ghost rather than inside it: the title is already in there.
+    const label = handlers.dropLabel?.(row);
+    if (!label) return;
+    ctx.save();
+    ctx.font = '600 11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    const width = ctx.measureText(label).width + 14;
+    const pillLeft = left + NODE_WIDTH + 8;
+    roundRect(ctx, pillLeft, centreY - 9, width, 18, 9);
+    ctx.fillStyle = theme.accent;
+    ctx.fill();
+    ctx.fillStyle = theme.surface;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, pillLeft + width / 2, centreY + 0.5);
+    ctx.restore();
+  });
+
   /** Rebuild the level -> y mapping from wherever vis actually placed the nodes. */
   function recomputeLevelScale() {
     if (!view) return;
@@ -341,6 +412,18 @@ export function createGraph(container, handlers = {}, options = {}) {
     const anchorY = positions[anchorId].y;
     levelToY = (level) => anchorY + (level - anchorLevel) * levelSeparation;
     yToLevel = (y) => anchorLevel + (y - anchorY) / levelSeparation;
+  }
+
+  /**
+   * The row a release right now would drop the dragged card on, or null when there is
+   * nothing to preview. Rounded and clamped exactly as `dragEnd` rounds and clamps what it
+   * hands to `onReschedule`, so the preview cannot promise a row the drop will not honour.
+   * Merging wins outright: a card over another card is not being rescheduled.
+   */
+  function previewRow() {
+    if (!draggedId || dropTargetId || !dragPointer || !yToLevel || !view) return null;
+    const level = yToLevel(dragPointer.y - grabOffsetY);
+    return Math.min(view.trayLevel, Math.max(0, Math.round(level)));
   }
 
   /** The node whose card contains `point`, ignoring the one being dragged. */
@@ -384,11 +467,16 @@ export function createGraph(container, handlers = {}, options = {}) {
     // `dragEnd` is where it snapped back to, not where it was released. The pointer is
     // the only honest record of the drop — offset by wherever the card was grabbed.
     const position = draggedId ? network.getPositions([draggedId])[draggedId] : null;
+    grabOffsetX = position ? params.pointer.canvas.x - position.x : 0;
     grabOffsetY = position ? params.pointer.canvas.y - position.y : 0;
+    dragPointer = params.pointer.canvas;
   });
 
   network.on('dragging', (params) => {
     if (!draggedId) return;
+    // Dragging a node repaints every frame, so recording the pointer is enough to make
+    // the preview track the cursor; the redraw below is only for the merge highlight.
+    dragPointer = params.pointer.canvas;
     const next = nodeAt(params.pointer.canvas, draggedId);
     if (next === dropTargetId) return;
     dropTargetId = next;
@@ -400,6 +488,7 @@ export function createGraph(container, handlers = {}, options = {}) {
     const target = dropTargetId;
     draggedId = null;
     dropTargetId = null;
+    dragPointer = null;
     if (!dragged) {
       recomputeLevelScale();
       return;

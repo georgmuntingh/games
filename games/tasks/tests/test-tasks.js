@@ -32,6 +32,7 @@ import {
   goalTaskId,
   goalLinks,
   mergeTaskInto,
+  cyclicRefs,
   trashFromMarkdown,
   trashToMarkdown,
   pushTrash,
@@ -429,6 +430,69 @@ test('the demo project has no scheduling conflicts', () => {
   const window = projectWindow(board.projects.find((p) => p.id === 'website'), tasks);
   const { levels } = assignLevels(tasks, { bucket: chooseBucket(window.start, window.end), start: window.start });
   assertEqual(buildEdges(tasks, levels).filter((e) => e.conflict), []);
+});
+
+/* ----------------------------------------------------------- relations */
+
+describe('relations');
+
+/** a <- b <- c: c waits on b, which waits on a. */
+const chain = () => [
+  { id: 'a', blockedBy: [], partOf: [] },
+  { id: 'b', blockedBy: ['a'], partOf: [] },
+  { id: 'c', blockedBy: ['b'], partOf: [] },
+  { id: 'loner', blockedBy: [], partOf: [] },
+];
+
+test('a task can never wait on itself', () => {
+  assert(cyclicRefs(chain(), 'a', 'blockedBy').has('a'), 'a is forbidden to itself');
+});
+
+test('anything downstream would close a loop', () => {
+  const forbidden = cyclicRefs(chain(), 'a', 'blockedBy');
+  // b waits on a, and c waits on b, so neither can be something a waits on.
+  assert(forbidden.has('b'), 'direct dependent');
+  assert(forbidden.has('c'), 'dependent two steps out');
+});
+
+test('an unrelated task is always available', () => {
+  assert(!cyclicRefs(chain(), 'a', 'blockedBy').has('loner'), 'loner is fine');
+  assert(!cyclicRefs(chain(), 'c', 'blockedBy').has('a'), 'c already waits on a upstream');
+});
+
+test('upstream tasks stay available, so the chain can be tightened', () => {
+  // c waits on b which waits on a: adding a to c's blockers is redundant, not a loop.
+  assert(!cyclicRefs(chain(), 'c', 'blockedBy').has('b'), 'b is already a blocker of c');
+});
+
+test('part-of loops are refused the same way', () => {
+  const tasks = [
+    { id: 'parent', blockedBy: [], partOf: [] },
+    { id: 'child', blockedBy: [], partOf: ['parent'] },
+    { id: 'grandchild', blockedBy: [], partOf: ['child'] },
+  ];
+  const forbidden = cyclicRefs(tasks, 'parent', 'partOf');
+  assertEqual([...forbidden].sort(), ['child', 'grandchild', 'parent']);
+});
+
+test('the two relations are judged independently', () => {
+  const tasks = [
+    { id: 'a', blockedBy: [], partOf: [] },
+    { id: 'b', blockedBy: ['a'], partOf: [] },
+  ];
+  // b waits on a, but nothing is part of anything, so part-of is still wide open.
+  assert(!cyclicRefs(tasks, 'a', 'partOf').has('b'), 'blocking does not constrain part-of');
+});
+
+test('a missing reference cannot make a loop', () => {
+  const tasks = [{ id: 'a', blockedBy: ['ghost'], partOf: [] }];
+  assertEqual([...cyclicRefs(tasks, 'a', 'blockedBy')], ['a']);
+});
+
+test('the demo board has no task that could be added to its own blockers', () => {
+  for (const task of board.tasks) {
+    assert(cyclicRefs(board.tasks, task.id, 'blockedBy').has(task.id), `${task.id} excludes itself`);
+  }
 });
 
 /* --------------------------------------------------------------- brief */

@@ -376,6 +376,34 @@ export function mergeTaskInto(tasks, sourceId, targetId) {
   return { tasks: next, merged: source };
 }
 
+/* ----------------------------------------------------------- relations */
+
+/**
+ * Every task that transitively depends on `id` through `field`, `id` itself included:
+ * exactly the references that cannot be added to `id`'s own `field` without closing a
+ * loop.
+ *
+ * Both relations are acyclic by nature — work cannot wait on itself, and nothing is part
+ * of its own part — and the timeline layout assumes as much, so the loop has to be
+ * refused rather than drawn.
+ */
+export function cyclicRefs(tasks, id, field) {
+  const forbidden = new Set([id]);
+  // A fixed point rather than a walk: the relation is stored on the dependent, so the
+  // only way to find what depends on `id` is to keep sweeping until nothing new turns up.
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const task of tasks) {
+      if (forbidden.has(task.id)) continue;
+      if ((task[field] ?? []).some((ref) => forbidden.has(ref))) {
+        forbidden.add(task.id);
+        grew = true;
+      }
+    }
+  }
+  return forbidden;
+}
+
 /* ------------------------------------------------------------- timeline */
 
 /**

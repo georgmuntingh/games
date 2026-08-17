@@ -25,6 +25,7 @@ import {
   syncGoalTasks,
   goalTaskId,
   mergeTaskInto,
+  cyclicRefs,
   pushTrash,
   uniqueSlug,
   formatDate,
@@ -33,6 +34,7 @@ import {
 } from './model.js';
 import { createGraph, LEVEL_SEPARATION_DEFAULT } from './graph.js';
 import { createPanel } from './panel.js';
+import { createMenu } from './menu.js';
 import { createStorage } from './storage.js';
 import { createHistory } from './undo.js';
 import { createZip } from './zip.js';
@@ -73,6 +75,9 @@ const readRowHeight = () => Number(localStorage.getItem(ROWS_KEY)) || LEVEL_SEPA
 
 let graph;
 let panel;
+let peopleMenu;
+/** The view behind what is currently on the canvas, read by the drop preview. */
+let currentView = null;
 let pending = null; // the suggestion batch currently under review
 
 const board = () => history.current;
@@ -316,6 +321,14 @@ function link(from, to) {
     setLinkArmed(false);
     return;
   }
+  if (cyclicRefs(board().tasks, target, field).has(value)) {
+    setLinkArmed(false);
+    status(
+      `That would put “${byIdAll().get(target)?.title}” in a loop with “${byIdAll().get(value)?.title}”.`,
+      true
+    );
+    return;
+  }
   updateTask(target, { [field]: [...(task[field] ?? []), value] });
   setLinkArmed(false);
   status(
@@ -552,17 +565,61 @@ function dueForLevel(view, level) {
   return formatDate(view.bucket.dateForLevel(origin + view.minLevel, view.windowStart));
 }
 
+/**
+ * What can still be added to `task`'s `field`: the project's tasks, less whatever is
+ * already referenced and anything that would close a loop.
+ */
+function eligibleRefs(task, field, projectTasks) {
+  const forbidden = cyclicRefs(board().tasks, task.id, field);
+  const already = new Set(task[field] ?? []);
+  return projectTasks.filter((t) => !forbidden.has(t.id) && !already.has(t.id));
+}
+
+/**
+ * Assign someone and put them on the project in one act, because typing a name into a
+ * task is how a teammate joins in practice. One commit, so one Ctrl+Z takes back both.
+ */
+function addPersonToTask(taskId, name) {
+  const task = board().tasks.find((t) => t.id === taskId);
+  if (!task || !name) return;
+  const project = currentProject();
+  const add = (list) => [...new Set([...(list ?? []), name])];
+  commit(
+    {
+      ...board(),
+      projects: project
+        ? board().projects.map((p) => (p.id === project.id ? { ...p, people: add(p.people) } : p))
+        : board().projects,
+      tasks: board().tasks.map((t) => (t.id === taskId ? { ...t, people: add(t.people) } : t)),
+    },
+    project
+      ? `${name} joined “${project.title}” and holds “${task.title}”.`
+      : `${name} holds “${task.title}”. No project to add them to.`
+  );
+}
+
 /* ------------------------------------------------------------- rendering */
 
 function render() {
   const view = buildView();
+  currentView = view;
   graph.render(view);
   renderToolbar(view);
+  const selected = board().tasks.find((t) => t.id === ui.selectedId) ?? null;
+  const projectTasks = filterTasks(board().tasks, { projectId: ui.projectId });
   panel.render({
-    task: board().tasks.find((t) => t.id === ui.selectedId) ?? null,
-    tasks: filterTasks(board().tasks, { projectId: ui.projectId }),
+    task: selected,
+    tasks: projectTasks,
+    allTasks: board().tasks,
+    roster: projectPeople(view.project, board().tasks),
     people: allPeople(board().tasks),
     projects: [...new Set([...board().projects.map((p) => p.id), ...allProjectTags(board().tasks)])],
+    eligible: selected
+      ? {
+          blockedBy: eligibleRefs(selected, 'blockedBy', projectTasks),
+          partOf: eligibleRefs(selected, 'partOf', projectTasks),
+        }
+      : null,
     assistantReady: Boolean(llm.getKey()),
   });
   if ($('project').open) renderProjectDialog();
@@ -599,31 +656,7 @@ function renderToolbar(view) {
     picker.append(option);
   }
 
-  // The roster as well as anyone assigned work, so a new teammate is selectable at once.
-  const people = projectPeople(view.project, board().tasks)
-    .map((p) => p.name)
-    .sort((a, b) => a.localeCompare(b));
-  const options = $('people-options');
-  options.textContent = '';
-  for (const person of people) {
-    const label = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = ui.people.has(person);
-    input.addEventListener('change', () => {
-      if (input.checked) ui.people.add(person);
-      else ui.people.delete(person);
-      status('');
-      render();
-    });
-    label.append(input, document.createTextNode(person));
-    options.append(label);
-  }
-  $('people-summary').textContent = ui.people.size
-    ? [...ui.people].join(', ')
-    : people.length
-      ? 'Everyone'
-      : 'No people';
+  renderPeopleMenu(view);
 
   const linkButton = $('link-mode');
   linkButton.setAttribute('aria-pressed', String(ui.linkArmed));
@@ -631,6 +664,60 @@ function renderToolbar(view) {
   linkButton.title = ui.linkArmed
     ? 'Drag from one task to another. Click to switch link type, Esc to cancel.'
     : 'Draw a link between two tasks (E)';
+}
+
+/**
+ * The people filter: one checkbox per name, and a button that says what the filter is
+ * doing. No selection means no filter at all, which is every task including the ones
+ * nobody holds — so the button reads "People" rather than claiming to name anyone.
+ */
+function renderPeopleMenu(view) {
+  // The roster as well as anyone assigned work, so a new teammate is selectable at once.
+  const people = projectPeople(view.project, board().tasks)
+    .map((p) => p.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  // Every checkbox is rebuilt, so the one just clicked is a different element: without
+  // this, keyboard focus falls back to the body after each change.
+  const focused = document.activeElement?.dataset?.person;
+  const checks = $('people-checks');
+  checks.textContent = '';
+  for (const person of people) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = ui.people.has(person);
+    input.dataset.person = person;
+    input.addEventListener('change', () => {
+      if (input.checked) ui.people.add(person);
+      else ui.people.delete(person);
+      status('');
+      render();
+    });
+    label.append(input, document.createTextNode(person));
+    checks.append(label);
+    if (person === focused) input.focus();
+  }
+
+  if (!people.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted small';
+    empty.textContent = 'Nobody on this project yet.';
+    checks.append(empty);
+  }
+
+  const chosen = [...ui.people];
+  const button = $('people-menu');
+  button.textContent = !chosen.length
+    ? 'People'
+    : chosen.length <= 2
+      ? chosen.join(', ')
+      : `${chosen.length} people`;
+  button.title = chosen.length
+    ? `Showing work held by ${chosen.join(', ')}`
+    : 'Filter the board by person';
+  // Nothing to open, and nothing the filter could usefully do.
+  button.disabled = !people.length && !chosen.length;
 }
 
 /* ---------------------------------------------------------- link arming */
@@ -1152,11 +1239,25 @@ async function copyBrief() {
 function wireEvents() {
   $('project-picker').addEventListener('change', (event) => {
     ui.projectId = event.target.value;
+    peopleMenu?.close();
     ui.people.clear();
     ui.selectedId = null;
     status('');
     render();
   });
+
+  peopleMenu = createMenu($('people-menu'), $('people-options'));
+
+  const setPeopleFilter = (names) => {
+    ui.people.clear();
+    for (const name of names) ui.people.add(name);
+    status('');
+    render();
+  };
+  $('people-all').addEventListener('click', () =>
+    setPeopleFilter(projectPeople(currentProject(), board().tasks).map((p) => p.name))
+  );
+  $('people-none').addEventListener('click', () => setPeopleFilter([]));
 
   $('hide-done').addEventListener('change', (event) => {
     ui.hideDone = event.target.checked;
@@ -1263,6 +1364,7 @@ function wireEvents() {
   $('project-open').addEventListener('click', () =>
     openProject(currentProject() ? 'edit' : 'create')
   );
+  $('project-new').addEventListener('click', () => openProject('create'));
 
   const projectField = (elementId, key, transform = (v) => v.trim()) =>
     $(elementId).addEventListener('change', (event) =>
@@ -1380,6 +1482,12 @@ async function boot() {
       render();
     },
     onLink: link,
+    // The row the gutter would label, so the preview and the gutter never disagree.
+    dropLabel: (row) => {
+      if (!currentView) return '';
+      const due = dueForLevel(currentView, row);
+      return due ? currentView.bucket.format(parseDate(due)) : 'unscheduled';
+    },
     onReschedule: (taskId, level) => {
       const view = buildView();
       const task = board().tasks.find((t) => t.id === taskId);
@@ -1427,6 +1535,8 @@ async function boot() {
     },
     onPromote: promoteSubtask,
     onSuggest: runAssist,
+    onAddPerson: addPersonToTask,
+    onMessage: (message) => status(message, true),
   });
 
   wireEvents();

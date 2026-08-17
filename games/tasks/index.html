@@ -23,12 +23,19 @@
         <button type="button" id="project-open" class="icon-btn" title="Project details">
           ✎
         </button>
+        <button type="button" id="project-new" class="icon-btn" title="New project">+</button>
         <button type="button" id="trash-open" class="icon-btn" title="Trash">🗑</button>
 
-        <details class="dropdown" id="people-filter">
-          <summary id="people-summary">Everyone</summary>
-          <div class="dropdown-body" id="people-options"></div>
-        </details>
+        <button
+          type="button"
+          id="people-menu"
+          class="menu-button"
+          aria-expanded="false"
+          aria-haspopup="true"
+          title="Filter the board by person"
+        >
+          People
+        </button>
 
         <label class="check">
           <input type="checkbox" id="hide-done" />
@@ -99,20 +106,46 @@
             <input id="t-projects" type="text" placeholder="website, q4-hiring" />
           </label>
 
-          <label class="field">
+          <div class="field">
             <span>People</span>
-            <input id="t-people" type="text" placeholder="georg, ada" />
-          </label>
+            <ul id="t-people" class="chips chips-toggle"></ul>
+            <form id="t-people-form">
+              <input
+                id="t-people-new"
+                type="text"
+                list="people-list"
+                placeholder="Add someone and press Enter"
+                autocomplete="off"
+              />
+            </form>
+          </div>
 
-          <div class="grid2">
-            <label class="field">
-              <span>Blocked by</span>
-              <select id="t-blocked" multiple size="4"></select>
-            </label>
-            <label class="field">
-              <span>Part of</span>
-              <select id="t-partof" multiple size="4"></select>
-            </label>
+          <div class="field">
+            <span>Blocked by</span>
+            <ul id="t-blocked" class="chips"></ul>
+            <form id="t-blocked-form">
+              <input
+                id="t-blocked-new"
+                type="text"
+                list="blocked-options"
+                placeholder="Add a blocker and press Enter"
+                autocomplete="off"
+              />
+            </form>
+          </div>
+
+          <div class="field">
+            <span>Part of</span>
+            <ul id="t-partof" class="chips"></ul>
+            <form id="t-partof-form">
+              <input
+                id="t-partof-new"
+                type="text"
+                list="partof-options"
+                placeholder="Add a parent and press Enter"
+                autocomplete="off"
+              />
+            </form>
           </div>
 
           <section class="subtasks">
@@ -146,8 +179,22 @@
       <p id="status-bar" class="status-bar" aria-live="polite"></p>
     </div>
 
+    <div id="people-options" class="menu-panel" popover>
+      <div class="menu-actions">
+        <button type="button" id="people-all" class="link-button" title="Tick everyone, which hides tasks with nobody on them">
+          All
+        </button>
+        <button type="button" id="people-none" class="link-button" title="Clear the filter">
+          None
+        </button>
+      </div>
+      <div id="people-checks"></div>
+    </div>
+
     <datalist id="people-list"></datalist>
     <datalist id="project-list"></datalist>
+    <datalist id="blocked-options"></datalist>
+    <datalist id="partof-options"></datalist>
     <datalist id="estimate-options">
       <option value="2h"></option>
       <option value="4h"></option>
