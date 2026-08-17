@@ -26,6 +26,7 @@ import {
   goalTaskId,
   mergeTaskInto,
   cyclicRefs,
+  markWorking,
   pushTrash,
   uniqueSlug,
   formatDate,
@@ -34,7 +35,7 @@ import {
 } from './model.js';
 import { createGraph, LEVEL_SEPARATION_DEFAULT } from './graph.js';
 import { createPanel } from './panel.js';
-import { createMenu } from './menu.js';
+import { createMenu, createContextMenu } from './menu.js';
 import { createStorage } from './storage.js';
 import { createHistory } from './undo.js';
 import { createZip } from './zip.js';
@@ -68,14 +69,21 @@ const ui = {
   selectedEdgeId: null,
   linkArmed: false,
   linkKind: 'blocks',
+  autoLayout: true,
 };
 
 const ROWS_KEY = 'tasks.rowHeight';
 const readRowHeight = () => Number(localStorage.getItem(ROWS_KEY)) || LEVEL_SEPARATION_DEFAULT;
 
+// Which mode the board is in is a preference of this browser, like the row height. Where
+// each card sits is not: that belongs to the tasks themselves.
+const LAYOUT_KEY = 'tasks.autoLayout';
+const readAutoLayout = () => localStorage.getItem(LAYOUT_KEY) !== 'false';
+
 let graph;
 let panel;
 let peopleMenu;
+let contextMenu;
 /** The view behind what is currently on the canvas, read by the drop preview. */
 let currentView = null;
 let pending = null; // the suggestion batch currently under review
@@ -160,10 +168,16 @@ function withDoneRollup(task, changes) {
   return { ...changes, done: changes.subtasks.every((s) => s.done) };
 }
 
+/** Finishing the task you are on means you are no longer on it. */
+function withWorkingRelease(task, changes) {
+  if (changes.done === true && task.working) return { ...changes, working: false };
+  return changes;
+}
+
 function updateTask(id, changes) {
   const task = board().tasks.find((t) => t.id === id);
   if (!task) return;
-  changes = withDoneRollup(task, changes);
+  changes = withWorkingRelease(task, withDoneRollup(task, changes));
   const newId = shouldReslug(task, changes)
     ? uniqueSlug(changes.title, new Set(board().tasks.filter((t) => t.id !== id).map((t) => t.id)))
     : id;
@@ -182,6 +196,9 @@ function addTask(fields = {}) {
   const task = {
     id,
     title,
+    working: false,
+    // Only meaningful once the layout is manual, and harmless before then.
+    x: fields.x ?? null,
     project: fields.project ?? (ui.projectId ? [ui.projectId] : []),
     people: fields.people ?? [],
     due: fields.due ?? defaultDue(),
@@ -370,6 +387,20 @@ function promoteSubtask(taskId, index) {
   };
   ui.selectedId = id;
   commit(next, `“${subtask.text}” is now a task of its own.`);
+}
+
+/**
+ * Set or release the task in hand. `markWorking` enforces the "one at a time" rule, and
+ * doing it in a single commit means one Ctrl+Z takes back both the release and the set.
+ */
+function setWorking(taskId) {
+  const task = taskId ? board().tasks.find((t) => t.id === taskId) : null;
+  // Ticking the one already set is how you release it.
+  const next = task && !task.working ? task.id : null;
+  commit(
+    { ...board(), tasks: markWorking(board().tasks, next) },
+    next ? `Working on “${task.title}”.` : 'Not working on anything in particular.'
+  );
 }
 
 const byIdAll = () => indexById(board().tasks);
@@ -598,6 +629,33 @@ function addPersonToTask(taskId, name) {
   );
 }
 
+/**
+ * Switch between the board arranging itself and you arranging it.
+ *
+ * Freezing records where every card currently is, so the board holds still exactly as you
+ * see it rather than collapsing into a column — and because those positions are the tasks'
+ * own data, one commit makes the whole freeze a single undo step.
+ */
+function setAutoLayout(enabled) {
+  ui.autoLayout = enabled;
+  localStorage.setItem(LAYOUT_KEY, String(enabled));
+
+  if (enabled) {
+    graph.setAutoLayout(true);
+    render();
+    status('Auto-layout on — the board arranges the cards again.');
+    return;
+  }
+
+  const positions = graph.positions();
+  const tasks = board().tasks.map((task) => {
+    const position = positions[task.id];
+    return position ? { ...task, x: Math.round(position.x) } : task;
+  });
+  graph.setAutoLayout(false);
+  commit({ ...board(), tasks }, 'Layout frozen — cards stay where you drop them.');
+}
+
 /* ------------------------------------------------------------- rendering */
 
 function render() {
@@ -628,6 +686,7 @@ function render() {
 }
 
 function renderSummary(view) {
+  const working = board().tasks.find((t) => t.working);
   const open = view.tasks.filter((t) => !t.done).length;
   const overdue = [...view.statuses.values()].filter((s) => s.overdue).length;
   const hours = totalEstimateHours(view.tasks.filter((t) => !t.done));
@@ -636,7 +695,9 @@ function renderSummary(view) {
   if (hours) parts.push(`${Math.round(hours / 8)}d of work left`);
   parts.push(`scale: ${view.bucket.label.toLowerCase()}`);
   const counts = parts.join(' · ');
-  status(view.project?.goal ? `${view.project.goal} — ${counts}` : counts);
+  // What you are on leads, since that is the one thing you want to see without looking.
+  const goal = view.project?.goal ? `${view.project.goal} — ${counts}` : counts;
+  status(working ? `▶ ${working.title} · ${goal}` : goal);
 }
 
 function renderToolbar(view) {
@@ -657,6 +718,10 @@ function renderToolbar(view) {
   }
 
   renderPeopleMenu(view);
+
+  const layoutButton = $('auto-layout');
+  layoutButton.setAttribute('aria-pressed', String(ui.autoLayout));
+  layoutButton.textContent = ui.autoLayout ? 'Auto-layout' : 'Manual layout';
 
   const linkButton = $('link-mode');
   linkButton.setAttribute('aria-pressed', String(ui.linkArmed));
@@ -718,6 +783,119 @@ function renderPeopleMenu(view) {
     : 'Filter the board by person';
   // Nothing to open, and nothing the filter could usefully do.
   button.disabled = !people.length && !chosen.length;
+}
+
+/* --------------------------------------------------------- context menu */
+
+/** The date a point on the canvas stands for, worded as the gutter words it. */
+function labelForLevel(level) {
+  if (!currentView || level == null) return '';
+  const due = dueForLevel(currentView, level);
+  return due ? currentView.bucket.format(parseDate(due)) : 'unscheduled';
+}
+
+/**
+ * Flip a link between its two meanings while leaving the arrow pointing the same way: a
+ * `blocks` edge from A to B becomes "A is part of B", which is the same claim about
+ * direction and a different one about kind.
+ */
+function flipEdge(edgeId) {
+  const edge = parseEdgeId(edgeId);
+  if (!edge) return;
+  const kind = edge.kind === 'blocks' ? 'part-of' : 'blocks';
+  const owner = kind === 'blocks' ? edge.to : edge.from;
+  const field = kind === 'blocks' ? 'blockedBy' : 'partOf';
+  const value = kind === 'blocks' ? edge.from : edge.to;
+  if (cyclicRefs(board().tasks, owner, field).has(value)) {
+    status('Flipping that link would put the two tasks in a loop.', true);
+    return;
+  }
+  const stripped = board().tasks.map((t) =>
+    t.id === edge.ownerId
+      ? { ...t, [edge.field]: (t[edge.field] ?? []).filter((ref) => ref !== edge.value) }
+      : t
+  );
+  ui.selectedEdgeId = null;
+  commit(
+    {
+      ...board(),
+      tasks: stripped.map((t) =>
+        t.id === owner ? { ...t, [field]: [...new Set([...(t[field] ?? []), value])] } : t
+      ),
+    },
+    `Now a ${kind} link. Ctrl+Z to undo.`
+  );
+}
+
+/** What right-clicking each kind of thing offers. */
+function contextItems(target) {
+  if (target.kind === 'node') {
+    const task = board().tasks.find((t) => t.id === target.id);
+    if (!task) return [];
+    return [
+      {
+        label: task.working ? 'Stop working on this' : '▶ Working on this',
+        run: () => setWorking(task.id),
+      },
+      {
+        label: task.done ? 'Reopen' : 'Mark complete',
+        run: () => updateTask(task.id, { done: !task.done }),
+      },
+      ...(task.due ? [{ label: 'Unschedule', run: () => updateTask(task.id, { due: '' }) }] : []),
+      { label: 'Delete task', run: () => deleteTask(task.id), danger: true },
+    ];
+  }
+
+  if (target.kind === 'edge') {
+    const edge = parseEdgeId(target.id);
+    if (!edge) return [{ label: 'This link is drawn from the goal and is not stored', run: null }];
+    return [
+      {
+        label: edge.kind === 'blocks' ? 'Make it a part-of link' : 'Make it a blocks link',
+        run: () => flipEdge(target.id),
+      },
+      { label: 'Delete link', run: () => deleteEdge(target.id), danger: true },
+    ];
+  }
+
+  const label = labelForLevel(target.level);
+  return [
+    {
+      label: label === 'unscheduled' ? 'New unscheduled task here' : `New task here — ${label}`,
+      run: () => addTaskAt(target),
+    },
+    { label: 'New unscheduled task', run: () => addTaskAt({ ...target, level: null }) },
+  ];
+}
+
+/** A task on the row that was clicked, and at the x that was clicked when that is ours. */
+function addTaskAt(target) {
+  const due = target.level == null || !currentView ? '' : dueForLevel(currentView, target.level);
+  const task = addTask({ due, x: ui.autoLayout ? null : target.x });
+  ui.selectedId = task.id;
+  render();
+  panel.focusTitle();
+}
+
+function openContextMenu(target) {
+  const items = contextItems(target);
+  const panelEl = $('context-menu');
+  panelEl.textContent = '';
+  if (!items.length) return;
+
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = item.danger ? 'menu-item danger' : 'menu-item';
+    button.textContent = item.label;
+    button.disabled = !item.run;
+    button.addEventListener('click', () => {
+      contextMenu.close();
+      item.run?.();
+    });
+    panelEl.append(button);
+  }
+  contextMenu.openAt(target.client.x, target.client.y);
 }
 
 /* ---------------------------------------------------------- link arming */
@@ -1247,6 +1425,7 @@ function wireEvents() {
   });
 
   peopleMenu = createMenu($('people-menu'), $('people-options'));
+  contextMenu = createContextMenu($('context-menu'));
 
   const setPeopleFilter = (names) => {
     ui.people.clear();
@@ -1275,6 +1454,9 @@ function wireEvents() {
   const stepRows = (delta) => {
     const applied = graph.setLevelSeparation(readRowHeight() + delta);
     localStorage.setItem(ROWS_KEY, String(applied));
+    // vis re-spaces the rows itself while it owns the layout; off auto-layout the y of
+    // every card is ours to restate, which a render does from the board's own data.
+    if (!ui.autoLayout) render();
     status(`Row height ${applied}px.`);
   };
   $('rows-tighter').addEventListener('click', () => stepRows(-16));
@@ -1308,6 +1490,7 @@ function wireEvents() {
     else setLinkArmed(true);
   });
 
+  $('auto-layout').addEventListener('click', () => setAutoLayout(!ui.autoLayout));
   $('fit').addEventListener('click', () => graph.fit());
   $('assist').addEventListener('click', () => {
     openSuggestions('Assistant');
@@ -1455,6 +1638,9 @@ function wireEvents() {
       ui.selectedId = task.id;
       render();
       panel.focusTitle();
+    } else if (event.key === 'w' || event.key === 'W') {
+      if (ui.selectedId) setWorking(ui.selectedId);
+      else status('Select a task first, then W to mark it the one you are on.');
     } else if (event.key === 'e' || event.key === 'E') {
       setLinkArmed(!ui.linkArmed);
     } else if (event.key === 'f' || event.key === 'F') {
@@ -1466,6 +1652,7 @@ function wireEvents() {
 }
 
 async function boot() {
+  ui.autoLayout = readAutoLayout();
   graph = createGraph(
     $('canvas'),
     {
@@ -1483,24 +1670,35 @@ async function boot() {
     },
     onLink: link,
     // The row the gutter would label, so the preview and the gutter never disagree.
-    dropLabel: (row) => {
-      if (!currentView) return '';
-      const due = dueForLevel(currentView, row);
-      return due ? currentView.bucket.format(parseDate(due)) : 'unscheduled';
-    },
-    onReschedule: (taskId, level) => {
+    dropLabel: labelForLevel,
+    onContext: openContextMenu,
+    onReschedule: (taskId, level, x) => {
       const view = buildView();
       const task = board().tasks.find((t) => t.id === taskId);
-      const due = task ? dueForLevel(view, level) : '';
       // Anything that does not move the task still needs a redraw, or it stays floating
       // wherever it was dropped.
-      if (!task || task.goal || due === task.due) {
+      if (!task || task.goal) {
         render();
         if (task?.goal) status('The goal node sits at the project deadline.');
         return;
       }
-      updateTask(taskId, { due });
-      status(due ? `“${task.title}” moved to ${due}.` : `“${task.title}” is now unscheduled.`);
+      // Rows, not dates: a row stands for a whole period, and `dueForLevel` names its
+      // first day. Comparing the dates would read "due 07 Aug, row starts 01 Aug" as a
+      // move and quietly re-date a task that never left its row.
+      const fromRow = view.levels.get(taskId);
+      const toRow = Math.max(0, Math.round(level));
+      const rescheduled = fromRow != null && toRow !== fromRow;
+      const moved = x != null && x !== task.x;
+      if (!rescheduled && !moved) {
+        render();
+        return;
+      }
+
+      const due = rescheduled ? dueForLevel(view, toRow) : task.due;
+      // Off auto-layout a drop says both when the task is due and where its card lives.
+      updateTask(taskId, { ...(rescheduled ? { due } : {}), ...(moved ? { x } : {}) });
+      if (!rescheduled) status(`“${task.title}” moved.`);
+      else status(due ? `“${task.title}” moved to ${due}.` : `“${task.title}” is now unscheduled.`);
     },
     onMerge: (sourceId, targetId) => {
       const result = mergeTaskInto(board().tasks, sourceId, targetId);
@@ -1516,14 +1714,10 @@ async function boot() {
         `“${result.merged.title}” is now a subtask of “${target.title}”. Ctrl+Z to undo.`
       );
     },
-      onBlankDoubleClick: () => {
-        const task = addTask();
-        ui.selectedId = task.id;
-        render();
-        panel.focusTitle();
-      },
+      // Double-click and right-click both create a task on the row you aimed at.
+      onBlankDoubleClick: addTaskAt,
     },
-    { levelSeparation: readRowHeight() }
+    { levelSeparation: readRowHeight(), autoLayout: ui.autoLayout }
   );
 
   panel = createPanel({
@@ -1536,6 +1730,7 @@ async function boot() {
     onPromote: promoteSubtask,
     onSuggest: runAssist,
     onAddPerson: addPersonToTask,
+    onWorking: setWorking,
     onMessage: (message) => status(message, true),
   });
 

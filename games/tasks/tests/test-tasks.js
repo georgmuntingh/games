@@ -33,6 +33,8 @@ import {
   goalLinks,
   mergeTaskInto,
   cyclicRefs,
+  initialsOf,
+  markWorking,
   trashFromMarkdown,
   trashToMarkdown,
   pushTrash,
@@ -493,6 +495,135 @@ test('the demo board has no task that could be added to its own blockers', () =>
   for (const task of board.tasks) {
     assert(cyclicRefs(board.tasks, task.id, 'blockedBy').has(task.id), `${task.id} excludes itself`);
   }
+});
+
+/* ------------------------------------------------------------- initials */
+
+describe('initials');
+
+test('one word gives one letter, two give two', () => {
+  assertEqual(initialsOf('Georg'), 'G');
+  assertEqual(initialsOf('Georg Muntingh'), 'GM');
+});
+
+test('only the first two words count', () => {
+  assertEqual(initialsOf('Ada Byron King Lovelace'), 'AB');
+});
+
+test('separators other than spaces still split', () => {
+  assertEqual(initialsOf('ada-lovelace'), 'AL');
+  assertEqual(initialsOf('ada.lovelace'), 'AL');
+  assertEqual(initialsOf('ada_lovelace'), 'AL');
+});
+
+test('punctuation and stray whitespace are ignored', () => {
+  assertEqual(initialsOf('  georg   '), 'G');
+  assertEqual(initialsOf("O'Brien"), 'O');
+});
+
+test('a name with no letters still yields something drawable', () => {
+  assertEqual(initialsOf(''), '?');
+  assertEqual(initialsOf('   '), '?');
+  assertEqual(initialsOf(null), '?');
+});
+
+test('initials come back upper case whatever the name looks like', () => {
+  assertEqual(initialsOf('georg muntingh'), 'GM');
+});
+
+/* ------------------------------------------------------- the task in hand */
+
+describe('working');
+
+const three = () => [
+  { id: 'a', working: false },
+  { id: 'b', working: true },
+  { id: 'c', working: false },
+];
+
+const workingIds = (tasks) => tasks.filter((t) => t.working).map((t) => t.id);
+
+test('setting one releases whatever held it', () => {
+  assertEqual(workingIds(markWorking(three(), 'c')), ['c']);
+});
+
+test('null releases without setting another', () => {
+  assertEqual(workingIds(markWorking(three(), null)), []);
+});
+
+test('an id that is not on the board leaves nothing marked', () => {
+  assertEqual(workingIds(markWorking(three(), 'ghost')), []);
+});
+
+test('there is never more than one, whatever the input claimed', () => {
+  const confused = [
+    { id: 'a', working: true },
+    { id: 'b', working: true },
+  ];
+  assertEqual(workingIds(markWorking(confused, 'b')), ['b']);
+});
+
+test('tasks that do not change are returned by identity', () => {
+  const tasks = three();
+  const next = markWorking(tasks, 'b');
+  assert(next[0] === tasks[0], 'untouched task is the same object');
+  assert(next[1] === tasks[1], 'the one already set is untouched too');
+});
+
+test('nothing else about a task is disturbed', () => {
+  const tasks = [{ id: 'a', title: 'Wireframes', people: ['Georg'], working: false }];
+  assertEqual(markWorking(tasks, 'a'), [
+    { id: 'a', title: 'Wireframes', people: ['Georg'], working: true },
+  ]);
+});
+
+/* ------------------------------------------------- layout and flags on disk */
+
+describe('placement and flags');
+
+test('a stored x comes back as a number, not the string yaml gives', () => {
+  const task = taskFromMarkdown('w.md', ['---', 'id: w', 'title: W', 'x: 412', '---', ''].join('\n'));
+  assertEqual(task.x, 412);
+  assert(typeof task.x === 'number', 'x is a number');
+});
+
+test('an unparseable or missing x is null rather than NaN', () => {
+  const bad = taskFromMarkdown('w.md', ['---', 'id: w', 'x: over there', '---', ''].join('\n'));
+  assertEqual(bad.x, null);
+  assertEqual(taskFromMarkdown('w.md', ['---', 'id: w', '---', ''].join('\n')).x, null);
+});
+
+test('x survives a round trip, including x: 0', () => {
+  const task = taskFromMarkdown('w.md', ['---', 'id: w', 'title: W', 'x: 0', '---', ''].join('\n'));
+  assertEqual(task.x, 0);
+  assert(/^x: 0$/m.test(taskToMarkdown(task)), 'x: 0 is written, not dropped as empty');
+});
+
+test('no x means no x line', () => {
+  const written = taskToMarkdown(taskFromMarkdown('w.md', ['---', 'id: w', '---', ''].join('\n')));
+  assert(!/^x:/m.test(written), 'nothing to say about placement, so nothing written');
+});
+
+test('working is written only when it is set', () => {
+  const on = taskFromMarkdown('w.md', ['---', 'id: w', 'working: true', '---', ''].join('\n'));
+  assertEqual(on.working, true);
+  assert(/^working: true$/m.test(taskToMarkdown(on)), 'set, so written');
+  assert(!/working/.test(taskToMarkdown({ ...on, working: false })), 'released, so absent');
+});
+
+test('the two new keys round trip to a fixed point', () => {
+  const text = taskToMarkdown(
+    taskFromMarkdown(
+      'w.md',
+      ['---', 'id: w', 'title: W', 'due: 2026-08-15', 'working: true', 'x: 412', '---', '', 'Body', ''].join('\n')
+    )
+  );
+  assertEqual(taskToMarkdown(taskFromMarkdown('w.md', text)), text);
+});
+
+test('placement and flags do not leak into extra', () => {
+  const task = taskFromMarkdown('w.md', ['---', 'id: w', 'x: 5', 'working: true', '---', ''].join('\n'));
+  assertEqual(task.extra, {});
 });
 
 /* --------------------------------------------------------------- brief */

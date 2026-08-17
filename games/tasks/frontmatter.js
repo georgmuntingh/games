@@ -20,8 +20,11 @@ const KEY_ORDER = [
   'estimate',
   'created',
   'done',
+  'working',
   'blocked-by',
   'part-of',
+  // A canvas coordinate, last because it is the least interesting line in the file.
+  'x',
 ];
 
 /** Keys that are always serialised as a list, even when they hold a single value. */

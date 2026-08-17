@@ -19,6 +19,7 @@ export function createPanel(handlers = {}) {
   const els = {
     title: $('t-title'),
     done: $('t-done'),
+    working: $('t-working'),
     due: $('t-due'),
     estimate: $('t-estimate'),
     projects: $('t-projects'),
@@ -56,6 +57,9 @@ export function createPanel(handlers = {}) {
 
   els.title.addEventListener('change', () => patch({ title: els.title.value.trim() }));
   els.done.addEventListener('change', () => patch({ done: els.done.checked }));
+  // Routed to the board rather than patched: only one task can be the one in hand, which
+  // is a fact about every task and not just this one.
+  els.working.addEventListener('change', () => current && handlers.onWorking?.(current.id));
   els.due.addEventListener('change', () => patch({ due: els.due.value }));
   els.estimate.addEventListener('change', () => patch({ estimate: els.estimate.value.trim() }));
   els.projects.addEventListener('change', () => patch({ project: splitList(els.projects.value) }));
@@ -266,6 +270,7 @@ export function createPanel(handlers = {}) {
       eligible = options ?? { blockedBy: [], partOf: [] };
       if (document.activeElement !== els.title) els.title.value = task.title;
       els.done.checked = Boolean(task.done);
+      els.working.checked = Boolean(task.working);
       els.due.value = task.due || '';
       els.estimate.value = task.estimate || '';
       els.estimate.setAttribute('list', 'estimate-options');

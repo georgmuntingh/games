@@ -6,6 +6,10 @@
   --task-danger: #dc2626;
   --task-grid: rgba(120, 130, 145, 0.18);
   --task-preview: rgba(37, 99, 235, 0.11);
+  --task-working: rgba(217, 119, 6, 0.16);
+  --task-working-ink: #b45309;
+  /* Saturation and lightness of the initial discs; each hue comes from the name. */
+  --task-disc: 52% 45%;
   --task-edge: #9aa3b2;
   --task-panel: #ffffff;
   --toolbar-h: 3rem;
@@ -18,6 +22,9 @@
     --task-danger: #f87171;
     --task-grid: rgba(160, 170, 190, 0.14);
     --task-preview: rgba(96, 165, 250, 0.16);
+    --task-working: rgba(251, 191, 36, 0.18);
+    --task-working-ink: #fbbf24;
+    --task-disc: 50% 58%;
     --task-edge: #5b6472;
     --task-panel: #151920;
   }
@@ -149,6 +156,41 @@ body {
 
 .menu-panel label:hover {
   background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+}
+
+.menu-items {
+  padding: 0.25rem;
+  min-width: 11rem;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--ui-fg);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  padding: 0.32rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menu-item:not(:disabled):hover {
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+.menu-item.danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--task-danger) 12%, transparent);
+  color: var(--task-danger);
+}
+
+.menu-item:disabled {
+  color: var(--ui-muted);
+  cursor: default;
+  white-space: normal;
 }
 
 .menu-actions {
@@ -295,8 +337,24 @@ body {
   gap: 0.5rem;
 }
 
+.panel-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+}
+
 .panel-done {
   color: var(--ui-fg);
+}
+
+/* The task in hand, tinted to match the card on the canvas. */
+.panel-working {
+  color: var(--ui-fg);
+}
+
+.panel-working:has(:checked) {
+  color: var(--task-working-ink);
+  font-weight: 600;
 }
 
 .section-head {

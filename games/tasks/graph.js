@@ -8,6 +8,8 @@
 
 import { DataSet, Network } from 'vis-network/standalone';
 
+import { initialsOf } from './model.js';
+
 export const LEVEL_SEPARATION_DEFAULT = 96;
 export const LEVEL_SEPARATION_MIN = 40;
 export const LEVEL_SEPARATION_MAX = 160;
@@ -17,6 +19,13 @@ const NODE_WIDTH = 176;
 const NODE_HEIGHT = 46;
 const STRIPE_WIDTH = 4;
 const GUTTER_PAD = 12;
+/** The ▶ that marks the task in hand, and the room it takes from the title. */
+const BADGE_WIDTH = 11;
+/** Initial discs along the bottom-right: how big, how many, and how far from the edge. */
+const DISC_RADIUS = 7.5;
+const DISC_GAP = 3;
+const DISC_INSET = 7;
+const MAX_DISCS = 3;
 
 /** Pull the live theme values so the canvas follows light/dark like the rest of the page. */
 function readTheme(element) {
@@ -32,6 +41,10 @@ function readTheme(element) {
     danger: value('--task-danger', '#dc2626'),
     grid: value('--task-grid', 'rgba(128,128,128,0.16)'),
     preview: value('--task-preview', 'rgba(37,99,235,0.10)'),
+    working: value('--task-working', 'rgba(217,119,6,0.16)'),
+    workingInk: value('--task-working-ink', '#b45309'),
+    // Saturation and lightness for the initial discs; the hue comes from the name.
+    disc: value('--task-disc', '52% 45%'),
     edge: value('--task-edge', '#9aa3b2'),
   };
 }
@@ -95,11 +108,67 @@ function drawStripe(ctx, left, top, colors) {
   ctx.restore();
 }
 
+/**
+ * Hues for the initial discs. A curated set rather than the whole wheel: hue is
+ * perceptually lumpy — greens sprawl, oranges crowd — so hashing a name to any of 360
+ * degrees puts two people in near-identical colours often enough to defeat the point of
+ * colouring them at all. Eight well-separated hues collide sometimes and are always
+ * telling apart, which is the better trade on a 15px disc.
+ */
+const DISC_HUES = [210, 152, 25, 275, 335, 190, 95, 45];
+
+/** A stable hue per name: the same person is the same colour on every card, every reload. */
+function hueOf(name) {
+  let hash = 0;
+  for (const ch of String(name)) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return DISC_HUES[hash % DISC_HUES.length];
+}
+
+/** How much width `drawPeople` will want, so the title can be wrapped clear of it. */
+function discsWidth(count) {
+  const shown = Math.min(count, MAX_DISCS) + (count > MAX_DISCS ? 1 : 0);
+  if (!shown) return 0;
+  return shown * DISC_RADIUS * 2 + (shown - 1) * DISC_GAP + DISC_INSET;
+}
+
+/**
+ * Who holds the card: one initial disc per person along the bottom-right, coloured from
+ * the name so nobody needs a colour stored for them. Past three, the rest become a `+n`.
+ */
+function drawPeople(ctx, left, top, people, theme) {
+  if (!people?.length) return;
+  const shown = people.slice(0, MAX_DISCS);
+  const overflow = people.length - shown.length;
+  const discs = [
+    ...shown.map((name) => ({ text: initialsOf(name), hue: hueOf(name), title: name })),
+    ...(overflow ? [{ text: `+${overflow}`, hue: null }] : []),
+  ];
+
+  const step = DISC_RADIUS * 2 + DISC_GAP;
+  const right = left + NODE_WIDTH - DISC_INSET;
+  const cy = top + NODE_HEIGHT - DISC_RADIUS - 4;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  discs.forEach((disc, index) => {
+    const cx = right - DISC_RADIUS - (discs.length - 1 - index) * step;
+    ctx.beginPath();
+    ctx.arc(cx, cy, DISC_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = disc.hue == null ? theme.muted : `hsl(${disc.hue} ${theme.disc})`;
+    ctx.fill();
+    ctx.fillStyle = theme.surface;
+    ctx.font = `600 ${disc.text.length > 1 ? 8 : 9}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    ctx.fillText(disc.text, cx, cy + 0.5);
+  });
+  ctx.restore();
+}
+
 function drawTask(
   ctx,
   x,
   y,
-  { status, title, selected, theme, showHandle, colors, dropTarget, dragging }
+  { status, title, people, selected, theme, showHandle, colors, dropTarget, dragging }
 ) {
   const left = x - NODE_WIDTH / 2;
   const top = y - NODE_HEIGHT / 2;
@@ -113,6 +182,12 @@ function drawTask(
   roundRect(ctx, left, top, NODE_WIDTH, NODE_HEIGHT, 8);
   ctx.fillStyle = status.done ? theme.surfaceDone : theme.surface;
   ctx.fill();
+  // The task in hand is tinted rather than outlined, leaving the border free to go on
+  // saying overdue, blocked or selected.
+  if (status.working) {
+    ctx.fillStyle = theme.working;
+    ctx.fill();
+  }
   ctx.restore();
 
   drawStripe(ctx, left, top, colors ?? []);
@@ -147,8 +222,23 @@ function drawTask(
     ctx.restore();
   }
 
+  // The ▶ marking the task in hand, ahead of the progress ring.
+  const badge = status.working ? BADGE_WIDTH : 0;
+  if (status.working) {
+    const bx = left + STRIPE_WIDTH + 6;
+    ctx.save();
+    ctx.fillStyle = theme.workingInk;
+    ctx.beginPath();
+    ctx.moveTo(bx, y - 5);
+    ctx.lineTo(bx + 7, y);
+    ctx.lineTo(bx, y + 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Progress ring.
-  const ringX = left + STRIPE_WIDTH + 18;
+  const ringX = left + STRIPE_WIDTH + 18 + badge;
   const ringY = y;
   const radius = 9;
   ctx.save();
@@ -181,16 +271,24 @@ function drawTask(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const textLeft = ringX + radius + 9;
-  const lines = wrap(ctx, title, NODE_WIDTH - (textLeft - left) - 12, 2);
+  const lines = wrap(
+    ctx,
+    title,
+    NODE_WIDTH - (textLeft - left) - 12 - discsWidth(people?.length ?? 0),
+    2
+  );
   const lineHeight = 15;
   const startY = y - ((lines.length - 1) * lineHeight) / 2;
   lines.forEach((line, i) => ctx.fillText(line, textLeft, startY + i * lineHeight));
   ctx.restore();
 
-  // Link handle on the selected node.
+  drawPeople(ctx, left, top, people, theme);
+
+  // Link handle on the selected node, on the right edge rather than the bottom-right
+  // corner, which now belongs to the discs.
   if (showHandle) {
     const hx = left + NODE_WIDTH;
-    const hy = top + NODE_HEIGHT;
+    const hy = y;
     ctx.save();
     ctx.beginPath();
     ctx.arc(hx, hy, 9, 0, Math.PI * 2);
@@ -214,6 +312,19 @@ export function createGraph(container, handlers = {}, options = {}) {
   let theme = readTheme(container);
   let view = null;
   let levelSeparation = options.levelSeparation ?? LEVEL_SEPARATION_DEFAULT;
+  /**
+   * With auto-layout on, vis owns every card's x and re-packs the board on each edit.
+   * With it off, the board owns x and vis is told where each card goes.
+   */
+  let autoLayout = options.autoLayout ?? true;
+  /** The last x vis reported per card, so one with none stored keeps its place. */
+  const lastX = new Map();
+  /**
+   * The canvas y that level 0 sits at once we are placing cards ourselves. Captured from
+   * the mapping it replaces, so turning auto-layout off holds the board still instead of
+   * shifting every card to a new origin.
+   */
+  let manualOriginY = 0;
   /** Maps a fractional level to a canvas y, derived from a placed node, and back. */
   let levelToY = null;
   let yToLevel = null;
@@ -236,7 +347,7 @@ export function createGraph(container, handlers = {}, options = {}) {
       layout: {
         randomSeed: 7,
         hierarchical: {
-          enabled: true,
+          enabled: autoLayout,
           direction: 'UD',
           sortMethod: 'directed',
           shakeTowards: 'roots',
@@ -403,6 +514,16 @@ export function createGraph(container, handlers = {}, options = {}) {
   function recomputeLevelScale() {
     if (!view) return;
     const positions = network.getPositions();
+    for (const [id, position] of Object.entries(positions)) lastX.set(id, position.x);
+
+    // Off auto-layout the nodes are placed by `render` from the board's own data, so the
+    // scale is a statement rather than something to infer from where vis put an anchor.
+    if (!autoLayout) {
+      levelToY = (level) => manualOriginY + level * levelSeparation;
+      yToLevel = (canvasY) => (canvasY - manualOriginY) / levelSeparation;
+      return;
+    }
+
     const anchorId = Object.keys(positions)[0];
     if (!anchorId) {
       levelToY = null;
@@ -458,7 +579,34 @@ export function createGraph(container, handlers = {}, options = {}) {
     }
   });
   network.on('doubleClick', (params) => {
-    if (!params.nodes.length && !params.edges.length) handlers.onBlankDoubleClick?.();
+    if (!params.nodes.length && !params.edges.length) {
+      handlers.onBlankDoubleClick?.(pointOf(params.pointer));
+    }
+  });
+
+  /**
+   * Where a click landed, in the terms the board thinks in: which row, and which x. The
+   * row comes from the same `yToLevel` the drop uses, so a menu, a drag and the gutter
+   * cannot disagree about what a point on the canvas means.
+   */
+  function pointOf(pointer) {
+    return {
+      level: yToLevel ? yToLevel(pointer.canvas.y) : null,
+      x: Math.round(pointer.canvas.x),
+    };
+  }
+
+  network.on('oncontext', (params) => {
+    params.event.preventDefault();
+    const dom = params.pointer.DOM;
+    const nodeId = network.getNodeAt(dom);
+    const edgeId = nodeId == null ? network.getEdgeAt(dom) : null;
+    handlers.onContext?.({
+      kind: nodeId != null ? 'node' : edgeId != null ? 'edge' : 'canvas',
+      id: nodeId ?? edgeId ?? null,
+      ...pointOf(params.pointer),
+      client: { x: params.event.clientX, y: params.event.clientY },
+    });
   });
   network.on('dragStart', (params) => {
     draggedId = params.nodes.length === 1 ? params.nodes[0] : null;
@@ -502,7 +650,11 @@ export function createGraph(container, handlers = {}, options = {}) {
       recomputeLevelScale();
       return;
     }
-    handlers.onReschedule?.(dragged, yToLevel(centreY));
+    handlers.onReschedule?.(
+      dragged,
+      yToLevel(centreY),
+      autoLayout ? null : Math.round(params.pointer.canvas.x - grabOffsetX)
+    );
   });
   network.on('stabilized', () => recomputeLevelScale());
 
@@ -548,17 +700,22 @@ export function createGraph(container, handlers = {}, options = {}) {
     nodes.clear();
     edges.clear();
     nodes.add(
-      next.tasks.map((task) => {
+      next.tasks.map((task, index) => {
         const status = next.statuses.get(task.id);
+        const level = next.levels.get(task.id) ?? 0;
         return {
           id: task.id,
-          level: next.levels.get(task.id) ?? 0,
+          level,
+          // Off auto-layout, every card is placed outright: x from the board, y from the
+          // deadline, so a frozen arrangement is reproduced exactly on every render.
+          ...(autoLayout ? {} : { x: manualX(task, index), y: yForLevel(level) }),
           title: tooltipFor(task, status),
           ctxRenderer: ({ ctx, x, y, state }) => ({
             drawNode: () =>
               drawTask(ctx, x, y, {
                 status,
                 title: task.title,
+                people: task.people ?? [],
                 selected: state.selected || next.selectedId === task.id,
                 theme,
                 showHandle: next.selectedId === task.id,
@@ -606,6 +763,22 @@ export function createGraph(container, handlers = {}, options = {}) {
   }
 
   /**
+   * Where a card sits when the layout is not deciding: what its file says, else wherever
+   * it last was, else spread across a band so a new one never hides behind another.
+   */
+  /** Canvas y for a level, usable before vis has placed anything to measure. */
+  function yForLevel(level) {
+    return levelToY ? levelToY(level) : manualOriginY + level * levelSeparation;
+  }
+
+  function manualX(task, index) {
+    if (task.x != null) return task.x;
+    const remembered = lastX.get(task.id);
+    if (remembered != null) return remembered;
+    return ((index % 6) - 2.5) * (NODE_WIDTH + 24);
+  }
+
+  /**
    * Fit the graph, but never below the legibility floor. A long project is mostly
    * empty weeks, so when fitting would shrink it too far we hold the scale and centre
    * on the now-line (or the top of the graph) instead.
@@ -640,9 +813,23 @@ export function createGraph(container, handlers = {}, options = {}) {
     fit,
     focus: (id) => network.focus(id, { scale: 1, animation: { duration: 300 } }),
     startLinkMode: () => network.addEdgeMode(),
+    /** Where every card currently is, so the board can record an arrangement it likes. */
+    positions: () => network.getPositions(),
+    setAutoLayout: (enabled) => {
+      // Inherit the origin the layout was using, so the cards do not jump on the way out
+      // of auto-layout — the arrangement being frozen is the one on screen.
+      if (!enabled && levelToY) manualOriginY = levelToY(0);
+      autoLayout = enabled;
+      // Row height may have been changed while the layout was ours, so restate it here.
+      network.setOptions({ layout: { hierarchical: { enabled, levelSeparation } } });
+      recomputeLevelScale();
+    },
     setLevelSeparation: (px) => {
       levelSeparation = Math.min(LEVEL_SEPARATION_MAX, Math.max(LEVEL_SEPARATION_MIN, px));
-      network.setOptions({ layout: { hierarchical: { levelSeparation } } });
+      // `enabled` goes with every hierarchical change: handed a bare options object, vis
+      // switches the layout back on, which off auto-layout would take the board back
+      // without being asked.
+      network.setOptions({ layout: { hierarchical: { enabled: autoLayout, levelSeparation } } });
       recomputeLevelScale();
       network.redraw();
       return levelSeparation;

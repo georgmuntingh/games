@@ -90,6 +90,16 @@ function asList(value) {
   return (Array.isArray(value) ? value : [value]).map((v) => String(v).trim()).filter(Boolean);
 }
 
+/**
+ * Frontmatter scalars are read as strings, so a stored coordinate has to be coerced back.
+ * Anything unparseable becomes null rather than NaN, which would poison the layout.
+ */
+function asNumber(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Parse one task `.md` file. `filename` is the fallback id when frontmatter lacks one. */
 export function taskFromMarkdown(filename, text) {
   const { data, body } = parseFrontmatter(text);
@@ -106,6 +116,11 @@ export function taskFromMarkdown(filename, text) {
     done: data.done === true,
     // Marks the auto-managed node that carries a project's end goal.
     goal: data.goal === true,
+    // The one task in hand. At most one file carries it; `markWorking` is what enforces that.
+    working: data.working === true,
+    // Where the card sits horizontally once auto-layout is off. Null means "wherever the
+    // layout puts it", which is every task until the board is frozen.
+    x: asNumber(data.x),
     blockedBy: asList(data['blocked-by']),
     partOf: asList(data['part-of']),
     notes,
@@ -124,6 +139,8 @@ export function taskFromMarkdown(filename, text) {
             'created',
             'done',
             'goal',
+            'working',
+            'x',
             'blocked-by',
             'part-of',
           ].includes(k)
@@ -160,8 +177,11 @@ export function taskToMarkdown(task) {
       created: task.created ?? '',
       done: Boolean(task.done),
       ...(task.goal ? { goal: true } : {}),
+      // Written only when set, like `goal`, so no file gains a `working: false` line.
+      ...(task.working ? { working: true } : {}),
       'blocked-by': task.blockedBy ?? [],
       'part-of': task.partOf ?? [],
+      x: task.x ?? '',
       ...(task.extra ?? {}),
     },
     ['id', 'title', 'done']
@@ -324,6 +344,8 @@ export function syncGoalTasks({ tasks, projects }, now = Date.now()) {
       created: formatDate(now),
       done: false,
       goal: true,
+      working: false,
+      x: null,
       blockedBy: [],
       partOf: [],
       notes: '',
@@ -387,6 +409,35 @@ export function mergeTaskInto(tasks, sourceId, targetId) {
  * of its own part — and the timeline layout assumes as much, so the loop has to be
  * refused rather than drawn.
  */
+/**
+ * A person's initials for the card: one letter per word, at most two. `Georg` -> `G`,
+ * `Georg Muntingh` -> `GM`, so a roster of first names and one of full names both read.
+ */
+export function initialsOf(name) {
+  const words = String(name ?? '')
+    .split(/[\s._-]+/)
+    .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
+  if (!words.length) return '?';
+  return words
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join('');
+}
+
+/**
+ * Set the one task in hand, releasing whatever held it before; `null` releases without
+ * setting another. Unchanged tasks are returned by identity, so this is cheap to apply.
+ *
+ * "Currently working on" is singular, and this is the only place that is enforced.
+ */
+export function markWorking(tasks, id) {
+  return tasks.map((task) => {
+    const working = id != null && task.id === id;
+    return Boolean(task.working) === working ? task : { ...task, working };
+  });
+}
+
 export function cyclicRefs(tasks, id, field) {
   const forbidden = new Set([id]);
   // A fixed point rather than a walk: the relation is stored on the dependent, so the
@@ -556,6 +607,7 @@ export function deriveStatus(task, byId, now = Date.now()) {
   const blockers = (task.blockedBy ?? []).filter((id) => byId.has(id) && !byId.get(id).done);
   return {
     done: Boolean(task.done),
+    working: Boolean(task.working),
     total,
     checked,
     ratio: task.done ? 1 : total === 0 ? 0 : checked / total,
