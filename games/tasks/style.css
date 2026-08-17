@@ -219,11 +219,47 @@ body {
   outline: none;
 }
 
+/* ------------------------------------------------- sidebar resize handle */
+
+.panel-resize {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  /* Transparent by default: the panel's own left border is the divider, and this only
+     shows itself when reached for. */
+  background: transparent;
+  /* So a touch drag resizes the sidebar rather than scrolling the page. */
+  touch-action: none;
+}
+
+.panel-resize:hover,
+.panel-resize:focus-visible {
+  background: var(--ui-accent);
+  outline: none;
+}
+
+/* Nothing to drag while the panel is shut, and no stray 5px gap either. */
+.panel-resize:has(+ .panel[hidden]) {
+  display: none;
+}
+
+/* Set for the duration of a drag, so crossing the panel does not select its text. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 /* --------------------------------------------------------------- panel */
 
 .panel {
-  flex: 0 0 20rem;
-  max-width: 90vw;
+  /* Width is a preference of this browser, held in `--panel-w` by the drag handle.
+     Sized border-box so that number is the width on screen rather than the width inside
+     the padding, which is what both the drag and the ceiling below have to reason about.
+     350px is what the sidebar measured before it could be dragged. */
+  box-sizing: border-box;
+  flex: 0 0 var(--panel-w, 350px);
+  /* The half-window ceiling, enforced here rather than in script: a stored width too wide
+     for a window that has since been narrowed is capped without a resize listener. */
+  max-width: 50vw;
   border-left: 1px solid var(--ui-border);
   background: var(--task-panel);
   overflow-y: auto;
@@ -665,6 +701,11 @@ div.vis-tooltip {
 /* ------------------------------------------------------------- narrow */
 
 @media (max-width: 640px) {
+  /* The panel covers the whole workspace here, so there is no boundary to drag. */
+  .panel-resize {
+    display: none;
+  }
+
   .panel {
     position: absolute;
     inset: var(--toolbar-h) 0 1.8rem 0;

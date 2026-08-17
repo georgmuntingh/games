@@ -88,6 +88,18 @@
       <main class="workspace">
         <div id="canvas" class="canvas"></div>
 
+        <!-- A flex sibling, not a strip inside the panel: the panel scrolls, and an
+             inset strip would scroll away with the notes. -->
+        <div
+          id="panel-resize"
+          class="panel-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Sidebar width"
+          title="Drag to resize the sidebar, or double-click to reset"
+          tabindex="0"
+        ></div>
+
         <aside id="panel" class="panel" hidden aria-label="Task details">
           <div class="panel-head">
             <input id="t-title" class="panel-title" type="text" aria-label="Task title" />

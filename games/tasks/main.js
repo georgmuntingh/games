@@ -80,6 +80,16 @@ const readRowHeight = () => Number(localStorage.getItem(ROWS_KEY)) || LEVEL_SEPA
 const LAYOUT_KEY = 'tasks.autoLayout';
 const readAutoLayout = () => localStorage.getItem(LAYOUT_KEY) !== 'false';
 
+const PANEL_KEY = 'tasks.panelWidth';
+/** Matches the CSS fallback in `.panel`: the width the sidebar had before it could move. */
+const PANEL_WIDTH_DEFAULT = 350;
+/**
+ * 18rem. Below this the two-column DUE/ESTIMATE row starts costing the date field its year:
+ * at 256px it renders as `08/07/202` with the picker icon over the rest.
+ */
+const PANEL_WIDTH_MIN = 288;
+const readPanelWidth = () => Number(localStorage.getItem(PANEL_KEY)) || PANEL_WIDTH_DEFAULT;
+
 let graph;
 let panel;
 let peopleMenu;
@@ -898,6 +908,78 @@ function openContextMenu(target) {
   contextMenu.openAt(target.client.x, target.client.y);
 }
 
+/* --------------------------------------------------------- sidebar width */
+
+/** Never past half the workspace, so the board always keeps the other half. */
+function panelWidthRange() {
+  const workspace = document.querySelector('.workspace').getBoundingClientRect().width;
+  return { min: PANEL_WIDTH_MIN, max: Math.max(PANEL_WIDTH_MIN, Math.round(workspace / 2)) };
+}
+
+/**
+ * Apply a sidebar width, clamped, and tell assistive tech what it became. Returns the width
+ * actually used so callers can report it.
+ */
+function setPanelWidth(px, { persist = true } = {}) {
+  const { min, max } = panelWidthRange();
+  const width = Math.round(Math.min(Math.max(px, min), max));
+
+  $('panel').style.setProperty('--panel-w', `${width}px`);
+  const handle = $('panel-resize');
+  handle.setAttribute('aria-valuenow', String(width));
+  handle.setAttribute('aria-valuemin', String(min));
+  handle.setAttribute('aria-valuemax', String(max));
+  if (persist) localStorage.setItem(PANEL_KEY, String(width));
+  return width;
+}
+
+function wirePanelResize() {
+  const handle = $('panel-resize');
+  const panel = $('panel');
+  // Read back from the box rather than from what was last asked for: `max-width: 50vw` can
+  // have clamped it, and a drag should carry on from where the sidebar actually is.
+  const currentWidth = () => panel.getBoundingClientRect().width;
+  const report = (width) => status(`Sidebar ${width}px.`);
+  let startX = 0;
+  let startWidth = 0;
+
+  handle.addEventListener('pointerdown', (event) => {
+    startX = event.clientX;
+    startWidth = currentWidth();
+    // Capturing the pointer keeps the drag alive over the canvas, with no document-level
+    // listeners to add and remove around it.
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing');
+    event.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    // Leftwards widens. Not persisted per frame — the drop is what settles it.
+    setPanelWidth(startWidth + (startX - event.clientX), { persist: false });
+  });
+
+  const finish = (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    handle.releasePointerCapture(event.pointerId);
+    document.body.classList.remove('resizing');
+    report(setPanelWidth(currentWidth()));
+  };
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
+
+  // A separator only a mouse can move is no separator at all.
+  handle.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 64 : 16;
+    const delta = event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0;
+    if (!delta) return;
+    event.preventDefault();
+    report(setPanelWidth(currentWidth() + delta));
+  });
+
+  handle.addEventListener('dblclick', () => report(setPanelWidth(PANEL_WIDTH_DEFAULT)));
+}
+
 /* ---------------------------------------------------------- link arming */
 
 function setLinkArmed(armed, kind) {
@@ -1490,6 +1572,7 @@ function wireEvents() {
     else setLinkArmed(true);
   });
 
+  wirePanelResize();
   $('auto-layout').addEventListener('click', () => setAutoLayout(!ui.autoLayout));
   $('fit').addEventListener('click', () => graph.fit());
   $('assist').addEventListener('click', () => {
@@ -1653,6 +1736,7 @@ function wireEvents() {
 
 async function boot() {
   ui.autoLayout = readAutoLayout();
+  setPanelWidth(readPanelWidth(), { persist: false });
   graph = createGraph(
     $('canvas'),
     {
