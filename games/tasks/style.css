@@ -1,0 +1,827 @@
+/* Tasks — a timeline graph board. Builds on the tokens in /shared/ui.css. */
+
+:root {
+  --task-surface: #ffffff;
+  --task-surface-done: #f1f2f4;
+  --task-danger: #dc2626;
+  --task-grid: rgba(120, 130, 145, 0.18);
+  --task-edge: #9aa3b2;
+  --task-panel: #ffffff;
+  --toolbar-h: 3rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --task-surface: #1a1e26;
+    --task-surface-done: #14171d;
+    --task-danger: #f87171;
+    --task-grid: rgba(160, 170, 190, 0.14);
+    --task-edge: #5b6472;
+    --task-panel: #151920;
+  }
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Several rules below set `display`, which would otherwise defeat the attribute. */
+[hidden] {
+  display: none !important;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: var(--toolbar-h);
+  padding: 0 0.6rem;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.toolbar-back {
+  margin: 0 0.2rem 0 0;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.toolbar-gap {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
+}
+
+.toolbar button,
+.toolbar select,
+.dropdown > summary {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ui-fg);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.28rem 0.6rem;
+  white-space: nowrap;
+}
+
+.toolbar button:hover,
+.dropdown > summary:hover {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+  cursor: pointer;
+}
+
+.toolbar button[aria-pressed='true'] {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--ui-muted);
+  white-space: nowrap;
+}
+
+.dropdown {
+  position: relative;
+}
+
+.dropdown > summary {
+  list-style: none;
+  display: inline-block;
+}
+
+.dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dropdown > summary::after {
+  content: ' ▾';
+  color: var(--ui-muted);
+}
+
+.dropdown-body {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 12rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.4rem;
+  background: var(--task-panel);
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.dropdown-body label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.dropdown-body label:hover {
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+}
+
+/* ----------------------------------------------------------- workspace */
+
+.workspace {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--ui-bg);
+}
+
+.canvas:focus-visible {
+  outline: none;
+}
+
+/* --------------------------------------------------------------- panel */
+
+.panel {
+  flex: 0 0 20rem;
+  max-width: 90vw;
+  border-left: 1px solid var(--ui-border);
+  background: var(--task-panel);
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ui-fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+}
+
+.panel-title:hover {
+  border-color: var(--ui-border);
+}
+
+.panel-title:focus {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+
+.icon {
+  font: inherit;
+  background: transparent;
+  border: none;
+  color: var(--ui-muted);
+  cursor: pointer;
+  padding: 0.3rem;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.icon:hover {
+  color: var(--ui-fg);
+  background: color-mix(in srgb, var(--ui-fg) 8%, transparent);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.field > span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ui-muted);
+}
+
+.field input,
+.field textarea,
+.field select,
+#subtask-new,
+#p-people-new {
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--ui-fg);
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.35rem 0.45rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus,
+#subtask-new:focus,
+#p-people-new:focus {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.panel-done {
+  color: var(--ui-fg);
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.section-head h2 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ui-muted);
+  margin: 0;
+  font-weight: 600;
+}
+
+.link-button {
+  font: inherit;
+  font-size: 0.78rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ui-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button[disabled] {
+  color: var(--ui-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+.subtask-list {
+  list-style: none;
+  margin: 0.35rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.subtask-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+}
+
+.subtask-list input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.86rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.15rem 0.25rem;
+  color: var(--ui-fg);
+}
+
+.subtask-list input[type='text']:hover {
+  border-color: var(--ui-border);
+}
+
+.subtask-list input[type='text']:focus {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+
+.subtask-list li.done input[type='text'] {
+  color: var(--ui-muted);
+  text-decoration: line-through;
+}
+
+.panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--ui-border);
+}
+
+button.danger {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--task-danger);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.28rem 0.6rem;
+  cursor: pointer;
+}
+
+button.danger:hover {
+  border-color: var(--task-danger);
+}
+
+/* ---------------------------------------------------------- status bar */
+
+.status-bar {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.3rem 0.75rem;
+  min-height: 1.5rem;
+  font-size: 0.78rem;
+  color: var(--ui-muted);
+  border-top: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-bar.error {
+  color: var(--task-danger);
+}
+
+/* ------------------------------------------------------------- dialogs */
+
+.sheet {
+  width: min(30rem, 92vw);
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--task-panel);
+  color: var(--ui-fg);
+  padding: 0 1.1rem 1.1rem;
+  max-height: 86vh;
+}
+
+.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 0 0.6rem;
+  margin-bottom: 0.3rem;
+  background: var(--task-panel);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.sheet h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.sheet h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ui-muted);
+}
+
+.sheet section + section {
+  border-top: 1px solid var(--ui-border);
+}
+
+.sheet .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+.sheet .row button {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--ui-fg);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+}
+
+.sheet .row button:hover:not([disabled]) {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+
+.sheet .row button[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.muted {
+  color: var(--ui-muted);
+  font-size: 0.85rem;
+}
+
+.muted.small {
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.sheet code {
+  background: color-mix(in srgb, var(--ui-fg) 8%, transparent);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}
+
+.suggest-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.suggest-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+}
+
+.suggest-list li.resolved {
+  opacity: 0.45;
+}
+
+.suggest-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.86rem;
+}
+
+.suggest-body .why {
+  display: block;
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+}
+
+.suggest-list button {
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  color: var(--ui-muted);
+}
+
+.suggest-list button.accept:hover {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+.suggest-list button.reject:hover {
+  color: var(--task-danger);
+  border-color: var(--task-danger);
+}
+
+#suggest-raw pre {
+  max-height: 12rem;
+  overflow: auto;
+  font-size: 0.72rem;
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------- vis tooltip */
+
+div.vis-tooltip {
+  font-family: inherit !important;
+  font-size: 0.8rem !important;
+  background: var(--task-panel) !important;
+  color: var(--ui-fg) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: 8px !important;
+  padding: 0.5rem 0.6rem !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2) !important;
+  white-space: normal !important;
+  max-width: 18rem !important;
+}
+
+.task-tip-title {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.task-tip-label {
+  color: var(--ui-muted);
+}
+
+/* ------------------------------------------------------------- narrow */
+
+@media (max-width: 640px) {
+  .panel {
+    position: absolute;
+    inset: var(--toolbar-h) 0 1.8rem 0;
+    flex-basis: auto;
+    max-width: none;
+    z-index: 10;
+  }
+
+  .workspace {
+    position: relative;
+  }
+}
+
+.goal {
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 7%, transparent);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.83rem;
+  color: var(--ui-muted);
+}
+
+.goal > :first-child {
+  margin-top: 0;
+}
+
+.goal > :last-child {
+  margin-bottom: 0;
+}
+
+/* ------------------------------------------------------------ project dialog */
+
+.icon-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.34rem 0.5rem;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+#project .field + .field,
+#project .grid2,
+#project .roster,
+#project textarea {
+  margin-top: 0.6rem;
+}
+
+#project textarea {
+  resize: vertical;
+  min-height: 6rem;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+
+.chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.5rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+
+/* Someone holding tasks who is not on the roster: shown, but visibly not a member. */
+.chips li.absent {
+  border-style: dashed;
+  color: var(--ui-muted);
+}
+
+.chips .count {
+  color: var(--ui-muted);
+  font-size: 0.72rem;
+}
+
+.chips button {
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 0.15rem 0.25rem;
+  color: var(--ui-muted);
+  cursor: pointer;
+}
+
+.chips li:not(.absent) button:hover {
+  color: var(--task-danger);
+}
+
+.chips li.absent button:hover {
+  color: var(--ui-accent);
+}
+
+.colour-field {
+  flex: 0 0 auto;
+}
+
+.colour-field input[type='color'] {
+  width: 2.6rem;
+  height: 1.8rem;
+  padding: 0.1rem;
+  cursor: pointer;
+}
+
+#project .panel-foot {
+  align-items: flex-end;
+}
+
+/* ---------------------------------------------------- trash & suggestions */
+
+.stepper {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.stepper button {
+  font: inherit;
+  line-height: 1;
+  padding: 0.34rem 0.5rem;
+  min-width: 1.9rem;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  cursor: pointer;
+}
+
+.stepper button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.stepper button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.stepper button:hover {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+.trash-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.trash-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.trash-list li > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trash-list li > div > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-list li.muted {
+  border-bottom: none;
+  color: var(--ui-muted);
+}
+
+/* Suggestions are editable forms, so the rows are taller than a plain list. */
+#suggest-list .suggest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+#suggest-list .field span {
+  font-size: 0.66rem;
+}
+
+#suggest-list .field input,
+#suggest-list .field textarea {
+  padding: 0.3rem 0.4rem;
+  font-size: 0.86rem;
+}
+
+#suggest-list textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.suggest-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+@media (max-width: 560px) {
+  .suggest-grid {
+    grid-template-columns: 1fr;
+  }
+}
