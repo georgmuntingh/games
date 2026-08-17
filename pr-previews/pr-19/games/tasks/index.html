@@ -8,10 +8,10 @@
       name="description"
       content="Decompose a project into tasks on a timeline graph, and ask a language model what you have missed."
     />
-    <script type="module" crossorigin src="/games/pr-previews/pr-19/assets/games/tasks-W4Hpsqwc.js"></script>
+    <script type="module" crossorigin src="/games/pr-previews/pr-19/assets/games/tasks-D6pyxKgQ.js"></script>
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-19/assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-19/assets/prompts-9yNhpavf.js">
-    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-19/assets/tasks-COULsnQo.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-19/assets/tasks-Dox_imQ7.css">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-19/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -90,6 +90,18 @@
 
       <main class="workspace">
         <div id="canvas" class="canvas"></div>
+
+        <!-- A flex sibling, not a strip inside the panel: the panel scrolls, and an
+             inset strip would scroll away with the notes. -->
+        <div
+          id="panel-resize"
+          class="panel-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Sidebar width"
+          title="Drag to resize the sidebar, or double-click to reset"
+          tabindex="0"
+        ></div>
 
         <aside id="panel" class="panel" hidden aria-label="Task details">
           <div class="panel-head">
