@@ -90,6 +90,16 @@ function asList(value) {
   return (Array.isArray(value) ? value : [value]).map((v) => String(v).trim()).filter(Boolean);
 }
 
+/**
+ * Frontmatter scalars are read as strings, so a stored coordinate has to be coerced back.
+ * Anything unparseable becomes null rather than NaN, which would poison the layout.
+ */
+function asNumber(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Parse one task `.md` file. `filename` is the fallback id when frontmatter lacks one. */
 export function taskFromMarkdown(filename, text) {
   const { data, body } = parseFrontmatter(text);
@@ -106,6 +116,11 @@ export function taskFromMarkdown(filename, text) {
     done: data.done === true,
     // Marks the auto-managed node that carries a project's end goal.
     goal: data.goal === true,
+    // The one task in hand. At most one file carries it; `markWorking` is what enforces that.
+    working: data.working === true,
+    // Where the card sits horizontally once auto-layout is off. Null means "wherever the
+    // layout puts it", which is every task until the board is frozen.
+    x: asNumber(data.x),
     blockedBy: asList(data['blocked-by']),
     partOf: asList(data['part-of']),
     notes,
@@ -124,6 +139,8 @@ export function taskFromMarkdown(filename, text) {
             'created',
             'done',
             'goal',
+            'working',
+            'x',
             'blocked-by',
             'part-of',
           ].includes(k)
@@ -160,8 +177,11 @@ export function taskToMarkdown(task) {
       created: task.created ?? '',
       done: Boolean(task.done),
       ...(task.goal ? { goal: true } : {}),
+      // Written only when set, like `goal`, so no file gains a `working: false` line.
+      ...(task.working ? { working: true } : {}),
       'blocked-by': task.blockedBy ?? [],
       'part-of': task.partOf ?? [],
+      x: task.x ?? '',
       ...(task.extra ?? {}),
     },
     ['id', 'title', 'done']
@@ -170,7 +190,7 @@ export function taskToMarkdown(task) {
 }
 
 /**
- * Parse a `_project-<id>.md` file.
+ * Parse a `_project-<id>.md` file, whose path may name the folder it lives in.
  *
  * The end goal is a one-line `goal:` scalar; the body is free-form context. A file
  * written before the two were separated has no `goal:` key, and its body is read as
@@ -178,7 +198,10 @@ export function taskToMarkdown(task) {
  */
 export function projectFromMarkdown(filename, text) {
   const { data, body } = parseFrontmatter(text);
-  const fallbackId = String(filename)
+  const path = String(filename);
+  const cut = path.lastIndexOf('/');
+  const fallbackId = path
+    .slice(cut + 1)
     .replace(/\.md$/i, '')
     .replace(new RegExp(`^${PROJECT_PREFIX}`), '');
   return {
@@ -188,7 +211,17 @@ export function projectFromMarkdown(filename, text) {
     people: asList(data.people),
     start: data.start ? String(data.start) : '',
     end: data.end ? String(data.end) : '',
+    /** Pinned to the top of the picker, and preferred when the board opens. */
+    starred: data.starred === true,
+    /** Shelved: out of the picker and the suggestion lists, but untouched on disk. */
+    archived: data.archived === true,
     color: data.color ? String(data.color) : '',
+    /**
+     * The folder this project's files live in; empty means the parent folder itself. Read
+     * off the path rather than out of the frontmatter — the file's own location already
+     * says it, so there is nothing to keep in step and nothing to write.
+     */
+    folder: cut === -1 ? '' : path.slice(0, cut),
     context: String(body).trim(),
   };
 }
@@ -200,6 +233,9 @@ export function projectToMarkdown(project) {
         id: project.id,
         title: project.title,
         goal: project.goal ?? '',
+        // Written only when set, like `goal` on a task: no file gains a `starred: false`.
+        ...(project.starred ? { starred: true } : {}),
+        ...(project.archived ? { archived: true } : {}),
         people: project.people ?? [],
         start: project.start ?? '',
         end: project.end ?? '',
@@ -239,6 +275,59 @@ export function trashToMarkdown(trash) {
   return serialiseFrontmatter({ id: '_trash' }, body);
 }
 
+/** Starred first, and otherwise the order they already had. */
+export function sortProjects(projects) {
+  return [...(projects ?? [])].sort(
+    (a, b) => Number(Boolean(b.starred)) - Number(Boolean(a.starred)) || a.id.localeCompare(b.id)
+  );
+}
+
+/** The projects worth showing in the picker: everything, or everything unshelved. */
+export function visibleProjects(projects, showArchived = false) {
+  return showArchived ? [...(projects ?? [])] : (projects ?? []).filter((p) => !p.archived);
+}
+
+/**
+ * What deleting a project does to the board, and what of it is worth keeping in the trash.
+ *
+ * `deleteTasks` decides the tasks' fate, with one rule that cannot be guessed: a task that
+ * belongs to another project as well is not this project's to delete. It loses only this
+ * tag, which under the first-tag-wins placement rule files it in that other project instead.
+ *
+ * The project's goal node is derived from the project rather than written by anyone, so it
+ * goes quietly in both cases and `syncGoalTasks` mints it again if the project comes back.
+ */
+export function deleteProjectPlan(board, id, { deleteTasks = false } = {}) {
+  const project = (board.projects ?? []).find((p) => p.id === id);
+  if (!project) return null;
+
+  const tags = (task) => task.project ?? [];
+  const without = (task) => tags(task).filter((tag) => tag !== id);
+  const mine = (task) => tags(task).includes(id);
+  const onlyMine = (task) => mine(task) && without(task).length === 0;
+
+  const removed = deleteTasks ? board.tasks.filter((t) => !t.goal && onlyMine(t)) : [];
+  const dropped = new Set([
+    ...removed.map((t) => t.id),
+    ...board.tasks.filter((t) => t.goal && mine(t)).map((t) => t.id),
+  ]);
+
+  return {
+    project,
+    removed,
+    /**
+     * Tasks that survive but lose the tag. Remembered so that restoring the project puts
+     * them back in it — without this, restoring after "keep the tasks" hands back an empty
+     * project, which looks like the restore failed.
+     */
+    untagged: board.tasks.filter((t) => !t.goal && mine(t) && !dropped.has(t.id)).map((t) => t.id),
+    projects: (board.projects ?? []).filter((p) => p.id !== id),
+    tasks: board.tasks
+      .filter((t) => !dropped.has(t.id))
+      .map((t) => (mine(t) ? { ...t, project: without(t) } : t)),
+  };
+}
+
 /** Newest first, oldest dropped past the cap. */
 export function pushTrash(trash, record) {
   return [record, ...(trash ?? [])].slice(0, TRASH_LIMIT);
@@ -246,6 +335,36 @@ export function pushTrash(trash, record) {
 
 export const taskFilename = (task) => `${task.id}.md`;
 export const projectFilename = (project) => `${PROJECT_PREFIX}${project.id}.md`;
+
+/** Join a folder to a filename. An empty folder means the parent folder itself. */
+const inFolder = (folder, name) => (folder ? `${folder}/${name}` : name);
+
+/**
+ * The folder a task's file belongs in: the one owned by the first project it is tagged
+ * with. Its other tags go on working — they simply do not get to decide where the file
+ * lives, because a file cannot be in two directories at once. A task with no tags, or one
+ * tagged with a project this board does not have, sits at the parent root.
+ */
+function homeFolder(task, folderOf) {
+  return folderOf.get(task.project?.[0]) ?? '';
+}
+
+/**
+ * Project ids claimed by more than one folder. The first read wins; this is what lets the
+ * app say so rather than quietly dropping the others.
+ */
+export function duplicateProjectIds(files) {
+  const seen = new Set();
+  const clashes = new Set();
+  for (const filename of Object.keys(files)) {
+    const base = filename.slice(filename.lastIndexOf('/') + 1);
+    if (!/\.md$/i.test(base) || !base.startsWith(PROJECT_PREFIX)) continue;
+    const id = base.replace(/\.md$/i, '').replace(new RegExp(`^${PROJECT_PREFIX}`), '');
+    if (seen.has(id)) clashes.add(id);
+    seen.add(id);
+  }
+  return [...clashes];
+}
 
 /**
  * Build a board from a `filename -> markdown text` map.
@@ -255,13 +374,20 @@ export function buildBoard(files) {
   const tasks = [];
   const projects = [];
   let trash = [];
+  const claimed = new Set();
   for (const [filename, text] of Object.entries(files)) {
     if (!/\.md$/i.test(filename)) continue;
-    const base = filename.split('/').pop();
+    const base = filename.slice(filename.lastIndexOf('/') + 1);
     // The trash is board state, not a task — without this it parses as one.
     if (base === TRASH_FILENAME) trash = trashFromMarkdown(text);
-    else if (base.startsWith(PROJECT_PREFIX)) projects.push(projectFromMarkdown(base, text));
-    else tasks.push(taskFromMarkdown(base, text));
+    else if (base.startsWith(PROJECT_PREFIX)) {
+      // The whole path here: a project file carries the folder it was found in.
+      const project = projectFromMarkdown(filename, text);
+      // Two folders claiming one id would otherwise fight over the same files forever.
+      if (claimed.has(project.id)) continue;
+      claimed.add(project.id);
+      projects.push(project);
+    } else tasks.push(taskFromMarkdown(base, text));
   }
   tasks.sort((a, b) => a.id.localeCompare(b.id));
   projects.sort((a, b) => a.id.localeCompare(b.id));
@@ -271,8 +397,14 @@ export function buildBoard(files) {
 /** Inverse of `buildBoard`. */
 export function boardToFiles({ tasks, projects, trash }) {
   const files = {};
-  for (const project of projects) files[projectFilename(project)] = projectToMarkdown(project);
-  for (const task of tasks) files[taskFilename(task)] = taskToMarkdown(task);
+  const folderOf = new Map((projects ?? []).map((p) => [p.id, p.folder ?? '']));
+  for (const project of projects) {
+    files[inFolder(project.folder, projectFilename(project))] = projectToMarkdown(project);
+  }
+  for (const task of tasks) {
+    files[inFolder(homeFolder(task, folderOf), taskFilename(task))] = taskToMarkdown(task);
+  }
+  // The trash spans every project, so it belongs to the parent rather than to any one of them.
   if (trash?.length) files[TRASH_FILENAME] = trashToMarkdown(trash);
   return files;
 }
@@ -324,6 +456,8 @@ export function syncGoalTasks({ tasks, projects }, now = Date.now()) {
       created: formatDate(now),
       done: false,
       goal: true,
+      working: false,
+      x: null,
       blockedBy: [],
       partOf: [],
       notes: '',
@@ -374,6 +508,63 @@ export function mergeTaskInto(tasks, sourceId, targetId) {
     });
 
   return { tasks: next, merged: source };
+}
+
+/* ----------------------------------------------------------- relations */
+
+/**
+ * Every task that transitively depends on `id` through `field`, `id` itself included:
+ * exactly the references that cannot be added to `id`'s own `field` without closing a
+ * loop.
+ *
+ * Both relations are acyclic by nature — work cannot wait on itself, and nothing is part
+ * of its own part — and the timeline layout assumes as much, so the loop has to be
+ * refused rather than drawn.
+ */
+/**
+ * A person's initials for the card: one letter per word, at most two. `Georg` -> `G`,
+ * `Georg Muntingh` -> `GM`, so a roster of first names and one of full names both read.
+ */
+export function initialsOf(name) {
+  const words = String(name ?? '')
+    .split(/[\s._-]+/)
+    .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
+  if (!words.length) return '?';
+  return words
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join('');
+}
+
+/**
+ * Set the one task in hand, releasing whatever held it before; `null` releases without
+ * setting another. Unchanged tasks are returned by identity, so this is cheap to apply.
+ *
+ * "Currently working on" is singular, and this is the only place that is enforced.
+ */
+export function markWorking(tasks, id) {
+  return tasks.map((task) => {
+    const working = id != null && task.id === id;
+    return Boolean(task.working) === working ? task : { ...task, working };
+  });
+}
+
+export function cyclicRefs(tasks, id, field) {
+  const forbidden = new Set([id]);
+  // A fixed point rather than a walk: the relation is stored on the dependent, so the
+  // only way to find what depends on `id` is to keep sweeping until nothing new turns up.
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const task of tasks) {
+      if (forbidden.has(task.id)) continue;
+      if ((task[field] ?? []).some((ref) => forbidden.has(ref))) {
+        forbidden.add(task.id);
+        grew = true;
+      }
+    }
+  }
+  return forbidden;
 }
 
 /* ------------------------------------------------------------- timeline */
@@ -528,6 +719,7 @@ export function deriveStatus(task, byId, now = Date.now()) {
   const blockers = (task.blockedBy ?? []).filter((id) => byId.has(id) && !byId.get(id).done);
   return {
     done: Boolean(task.done),
+    working: Boolean(task.working),
     total,
     checked,
     ratio: task.done ? 1 : total === 0 ? 0 : checked / total,

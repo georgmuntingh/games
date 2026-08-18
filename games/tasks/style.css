@@ -5,6 +5,11 @@
   --task-surface-done: #f1f2f4;
   --task-danger: #dc2626;
   --task-grid: rgba(120, 130, 145, 0.18);
+  --task-preview: rgba(37, 99, 235, 0.11);
+  --task-working: rgba(217, 119, 6, 0.16);
+  --task-working-ink: #b45309;
+  /* Saturation and lightness of the initial discs; each hue comes from the name. */
+  --task-disc: 52% 45%;
   --task-edge: #9aa3b2;
   --task-panel: #ffffff;
   --toolbar-h: 3rem;
@@ -16,6 +21,10 @@
     --task-surface-done: #14171d;
     --task-danger: #f87171;
     --task-grid: rgba(160, 170, 190, 0.14);
+    --task-preview: rgba(96, 165, 250, 0.16);
+    --task-working: rgba(251, 191, 36, 0.18);
+    --task-working-ink: #fbbf24;
+    --task-disc: 50% 58%;
     --task-edge: #5b6472;
     --task-panel: #151920;
   }
@@ -75,8 +84,7 @@ body {
 }
 
 .toolbar button,
-.toolbar select,
-.dropdown > summary {
+.toolbar select {
   font: inherit;
   font-size: 0.85rem;
   color: var(--ui-fg);
@@ -87,8 +95,7 @@ body {
   white-space: nowrap;
 }
 
-.toolbar button:hover,
-.dropdown > summary:hover {
+.toolbar button:not(:disabled):hover {
   border-color: var(--ui-accent);
   color: var(--ui-accent);
   cursor: pointer;
@@ -109,40 +116,35 @@ body {
   white-space: nowrap;
 }
 
-.dropdown {
-  position: relative;
+.toolbar button:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-.dropdown > summary {
-  list-style: none;
-  display: inline-block;
-}
-
-.dropdown > summary::-webkit-details-marker {
-  display: none;
-}
-
-.dropdown > summary::after {
+/* A menu button and its panel. The panel is positioned by menu.js and opens in the top
+   layer, since the toolbar scrolls and would otherwise clip it to its own height. */
+.menu-button::after {
   content: ' ▾';
   color: var(--ui-muted);
 }
 
-.dropdown-body {
-  position: absolute;
+.menu-panel {
+  position: fixed;
+  inset: auto;
+  margin: 0;
   z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
   min-width: 12rem;
-  max-height: 60vh;
+  max-height: min(60vh, 24rem);
   overflow-y: auto;
   padding: 0.4rem;
   background: var(--task-panel);
+  color: var(--ui-fg);
   border: 1px solid var(--ui-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
-.dropdown-body label {
+.menu-panel label {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -152,8 +154,123 @@ body {
   cursor: pointer;
 }
 
-.dropdown-body label:hover {
+.menu-panel label:hover {
   background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+}
+
+/* ------------------------------------------------------ managing projects */
+
+.manage-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.manage-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.2rem;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.manage-list li:last-child {
+  border-bottom: none;
+}
+
+/* Shelved projects stay legible but recede, so the live ones read first. */
+.manage-list li.archived .name {
+  color: var(--ui-muted);
+}
+
+.manage-list .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-list .why {
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.manage-list .star {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem 0.2rem;
+  color: var(--ui-muted);
+}
+
+.manage-list .star[aria-pressed='true'] {
+  color: #f59e0b;
+}
+
+.manage-list button:not(.star) {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.45rem;
+}
+
+/* The three-way delete question, which is the only place this app asks before acting. */
+.sheet.narrow {
+  max-width: 26rem;
+}
+
+.pd-actions {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.menu-items {
+  padding: 0.25rem;
+  min-width: 11rem;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--ui-fg);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  padding: 0.32rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menu-item:not(:disabled):hover {
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+.menu-item.danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--task-danger) 12%, transparent);
+  color: var(--task-danger);
+}
+
+.menu-item:disabled {
+  color: var(--ui-muted);
+  cursor: default;
+  white-space: normal;
+}
+
+.menu-actions {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.1rem 0.35rem 0.35rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 /* ----------------------------------------------------------- workspace */
@@ -174,11 +291,47 @@ body {
   outline: none;
 }
 
+/* ------------------------------------------------- sidebar resize handle */
+
+.panel-resize {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  /* Transparent by default: the panel's own left border is the divider, and this only
+     shows itself when reached for. */
+  background: transparent;
+  /* So a touch drag resizes the sidebar rather than scrolling the page. */
+  touch-action: none;
+}
+
+.panel-resize:hover,
+.panel-resize:focus-visible {
+  background: var(--ui-accent);
+  outline: none;
+}
+
+/* Nothing to drag while the panel is shut, and no stray 5px gap either. */
+.panel-resize:has(+ .panel[hidden]) {
+  display: none;
+}
+
+/* Set for the duration of a drag, so crossing the panel does not select its text. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 /* --------------------------------------------------------------- panel */
 
 .panel {
-  flex: 0 0 20rem;
-  max-width: 90vw;
+  /* Width is a preference of this browser, held in `--panel-w` by the drag handle.
+     Sized border-box so that number is the width on screen rather than the width inside
+     the padding, which is what both the drag and the ceiling below have to reason about.
+     350px is what the sidebar measured before it could be dragged. */
+  box-sizing: border-box;
+  flex: 0 0 var(--panel-w, 350px);
+  /* The half-window ceiling, enforced here rather than in script: a stored width too wide
+     for a window that has since been narrowed is capped without a resize listener. */
+  max-width: 50vw;
   border-left: 1px solid var(--ui-border);
   background: var(--task-panel);
   overflow-y: auto;
@@ -254,7 +407,10 @@ body {
 .field textarea,
 .field select,
 #subtask-new,
-#p-people-new {
+#p-people-new,
+#t-people-new,
+#t-blocked-new,
+#t-partof-new {
   font: inherit;
   font-size: 0.86rem;
   color: var(--ui-fg);
@@ -275,7 +431,10 @@ body {
 .field textarea:focus,
 .field select:focus,
 #subtask-new:focus,
-#p-people-new:focus {
+#p-people-new:focus,
+#t-people-new:focus,
+#t-blocked-new:focus,
+#t-partof-new:focus {
   outline: none;
   border-color: var(--ui-accent);
 }
@@ -286,8 +445,24 @@ body {
   gap: 0.5rem;
 }
 
+.panel-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+}
+
 .panel-done {
   color: var(--ui-fg);
+}
+
+/* The task in hand, tinted to match the card on the canvas. */
+.panel-working {
+  color: var(--ui-fg);
+}
+
+.panel-working:has(:checked) {
+  color: var(--task-working-ink);
+  font-weight: 600;
 }
 
 .section-head {
@@ -598,6 +773,11 @@ div.vis-tooltip {
 /* ------------------------------------------------------------- narrow */
 
 @media (max-width: 640px) {
+  /* The panel covers the whole workspace here, so there is no boundary to drag. */
+  .panel-resize {
+    display: none;
+  }
+
   .panel {
     position: absolute;
     inset: var(--toolbar-h) 0 1.8rem 0;
@@ -704,12 +884,72 @@ div.vis-tooltip {
   cursor: pointer;
 }
 
-.chips li:not(.absent) button:hover {
+.roster .chips li:not(.absent) button:hover {
   color: var(--task-danger);
 }
 
-.chips li.absent button:hover {
+.roster .chips li.absent button:hover {
   color: var(--ui-accent);
+}
+
+.panel .chips {
+  margin: 0.1rem 0 0.15rem;
+}
+
+/* Not a chip but a note about their absence, so it carries no pill. */
+.chips li.empty {
+  border: none;
+  padding: 0.1rem 0;
+  font-size: 0.78rem;
+  color: var(--ui-muted);
+}
+
+.chips .chip-remove:hover {
+  color: var(--task-danger);
+}
+
+/* A toggle chip *is* its button, so the padding lives on the control that gets clicked. */
+.chips-toggle li:has(button) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.chips-toggle li.on {
+  border-color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+.chips-toggle .chip-toggle {
+  font-size: 0.82rem;
+  color: inherit;
+  padding: 0.15rem 0.55rem;
+}
+
+.chips-toggle li.on .chip-toggle {
+  color: var(--ui-accent);
+}
+
+.chips-toggle li:not(.on) .chip-toggle:hover {
+  color: var(--ui-fg);
+}
+
+.chips .chip-link {
+  font-size: 0.82rem;
+  color: inherit;
+  padding: 0;
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chips .chip-link:not(:disabled):hover {
+  color: var(--ui-accent);
+}
+
+.chips .chip-link:disabled {
+  color: var(--ui-muted);
+  cursor: default;
 }
 
 .colour-field {

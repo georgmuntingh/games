@@ -11,6 +11,10 @@ import { marked } from 'marked';
 import {
   buildBoard,
   boardToFiles,
+  duplicateProjectIds,
+  sortProjects,
+  visibleProjects,
+  deleteProjectPlan,
   buildEdges,
   assignLevels,
   chooseBucket,
@@ -25,6 +29,8 @@ import {
   syncGoalTasks,
   goalTaskId,
   mergeTaskInto,
+  cyclicRefs,
+  markWorking,
   pushTrash,
   uniqueSlug,
   formatDate,
@@ -33,6 +39,7 @@ import {
 } from './model.js';
 import { createGraph, LEVEL_SEPARATION_DEFAULT } from './graph.js';
 import { createPanel } from './panel.js';
+import { createMenu, createContextMenu } from './menu.js';
 import { createStorage } from './storage.js';
 import { createHistory } from './undo.js';
 import { createZip } from './zip.js';
@@ -66,13 +73,38 @@ const ui = {
   selectedEdgeId: null,
   linkArmed: false,
   linkKind: 'blocks',
+  autoLayout: true,
+  showArchived: false,
 };
 
 const ROWS_KEY = 'tasks.rowHeight';
 const readRowHeight = () => Number(localStorage.getItem(ROWS_KEY)) || LEVEL_SEPARATION_DEFAULT;
 
+// Which mode the board is in is a preference of this browser, like the row height. Where
+// each card sits is not: that belongs to the tasks themselves.
+const LAYOUT_KEY = 'tasks.autoLayout';
+const readAutoLayout = () => localStorage.getItem(LAYOUT_KEY) !== 'false';
+
+// What is shelved lives in the vault; whether you are currently looking at it does not.
+const ARCHIVED_KEY = 'tasks.showArchived';
+const readShowArchived = () => localStorage.getItem(ARCHIVED_KEY) === 'true';
+
+const PANEL_KEY = 'tasks.panelWidth';
+/** Matches the CSS fallback in `.panel`: the width the sidebar had before it could move. */
+const PANEL_WIDTH_DEFAULT = 350;
+/**
+ * 18rem. Below this the two-column DUE/ESTIMATE row starts costing the date field its year:
+ * at 256px it renders as `08/07/202` with the picker icon over the rest.
+ */
+const PANEL_WIDTH_MIN = 288;
+const readPanelWidth = () => Number(localStorage.getItem(PANEL_KEY)) || PANEL_WIDTH_DEFAULT;
+
 let graph;
 let panel;
+let peopleMenu;
+let contextMenu;
+/** The view behind what is currently on the canvas, read by the drop preview. */
+let currentView = null;
 let pending = null; // the suggestion batch currently under review
 
 const board = () => history.current;
@@ -155,10 +187,16 @@ function withDoneRollup(task, changes) {
   return { ...changes, done: changes.subtasks.every((s) => s.done) };
 }
 
+/** Finishing the task you are on means you are no longer on it. */
+function withWorkingRelease(task, changes) {
+  if (changes.done === true && task.working) return { ...changes, working: false };
+  return changes;
+}
+
 function updateTask(id, changes) {
   const task = board().tasks.find((t) => t.id === id);
   if (!task) return;
-  changes = withDoneRollup(task, changes);
+  changes = withWorkingRelease(task, withDoneRollup(task, changes));
   const newId = shouldReslug(task, changes)
     ? uniqueSlug(changes.title, new Set(board().tasks.filter((t) => t.id !== id).map((t) => t.id)))
     : id;
@@ -177,6 +215,9 @@ function addTask(fields = {}) {
   const task = {
     id,
     title,
+    working: false,
+    // Only meaningful once the layout is manual, and harmless before then.
+    x: fields.x ?? null,
     project: fields.project ?? (ui.projectId ? [ui.projectId] : []),
     people: fields.people ?? [],
     due: fields.due ?? defaultDue(),
@@ -286,6 +327,52 @@ function restoreTrash(index) {
     return;
   }
 
+  if (record.kind === 'project') {
+    const original = record.data.project;
+    const takenProjects = new Set(board().projects.map((p) => p.id));
+    const project = takenProjects.has(original.id)
+      ? { ...original, id: uniqueSlug(original.title, takenProjects) }
+      : original;
+
+    const taken = new Set(board().tasks.map((t) => t.id));
+    const tasks = (record.data.tasks ?? []).map((task) => {
+      const id = taken.has(task.id) ? uniqueSlug(task.title, taken) : task.id;
+      taken.add(id);
+      return {
+        ...task,
+        id,
+        // If the project had to come back under a new id, its tasks must point at that one
+        // or they would file themselves under a project nothing owns.
+        project: (task.project ?? []).map((tag) => (tag === original.id ? project.id : tag)),
+      };
+    });
+
+    // Tasks that merely lost the tag get it back, appended: a task that has since been
+    // filed under another project stays where it is now rather than jumping folders.
+    const regained = new Set(record.data.untagged ?? []);
+    const rejoined = board().tasks.map((task) =>
+      regained.has(task.id) && !(task.project ?? []).includes(project.id)
+        ? { ...task, project: [...(task.project ?? []), project.id] }
+        : task
+    );
+
+    commit(
+      {
+        ...board(),
+        projects: [...board().projects, project],
+        tasks: [...rejoined, ...tasks],
+        trash: rest,
+      },
+      tasks.length
+        ? `Restored “${project.title}” and ${tasks.length} task${tasks.length === 1 ? '' : 's'}.`
+        : `Restored “${project.title}”.`
+    );
+    ui.projectId = project.id;
+    render();
+    graph.fit();
+    return;
+  }
+
   const edge = parseEdgeId(`${record.data.kind}:${record.data.from}->${record.data.to}`);
   const byId = byIdAll();
   if (!edge || !byId.has(edge.from) || !byId.has(edge.to)) {
@@ -314,6 +401,14 @@ function link(from, to) {
   const task = board().tasks.find((t) => t.id === target);
   if (!task || (task[field] ?? []).includes(value)) {
     setLinkArmed(false);
+    return;
+  }
+  if (cyclicRefs(board().tasks, target, field).has(value)) {
+    setLinkArmed(false);
+    status(
+      `That would put “${byIdAll().get(target)?.title}” in a loop with “${byIdAll().get(value)?.title}”.`,
+      true
+    );
     return;
   }
   updateTask(target, { [field]: [...(task[field] ?? []), value] });
@@ -359,6 +454,20 @@ function promoteSubtask(taskId, index) {
   commit(next, `“${subtask.text}” is now a task of its own.`);
 }
 
+/**
+ * Set or release the task in hand. `markWorking` enforces the "one at a time" rule, and
+ * doing it in a single commit means one Ctrl+Z takes back both the release and the set.
+ */
+function setWorking(taskId) {
+  const task = taskId ? board().tasks.find((t) => t.id === taskId) : null;
+  // Ticking the one already set is how you release it.
+  const next = task && !task.working ? task.id : null;
+  commit(
+    { ...board(), tasks: markWorking(board().tasks, next) },
+    next ? `Working on “${task.title}”.` : 'Not working on anything in particular.'
+  );
+}
+
 const byIdAll = () => indexById(board().tasks);
 
 /* -------------------------------------------------------------- projects */
@@ -388,34 +497,68 @@ function addProject(fields = {}) {
     start: fields.start || formatDate(Date.now()),
     end: fields.end || formatDate(Date.now() + 90 * 86400000),
     color: fields.color || PROJECT_COLORS[board().projects.length % PROJECT_COLORS.length],
+    // A project made from here gets a folder of its own, even on a board whose existing
+    // projects are still flat. Nothing that already exists moves without being asked.
+    folder: fields.folder ?? id,
     context: fields.context ?? '',
   };
   ui.projectId = id;
   ui.people.clear();
   ui.selectedId = null;
   commit({ ...board(), projects: [...board().projects, project] }, `Created “${title}”.`);
+  // A new project holds one card at most, which is precisely when a stale viewport looks
+  // like nothing was created.
+  graph.fit();
   return project;
 }
 
-/** Remove a project. Its tasks keep existing; they just lose the tag. */
-function deleteProject(id) {
-  const project = board().projects.find((p) => p.id === id);
-  if (!project) return;
-  const next = {
-    projects: board().projects.filter((p) => p.id !== id),
-    tasks: board().tasks.map((t) => ({
-      ...t,
-      project: (t.project ?? []).filter((tag) => tag !== id),
-    })),
-  };
-  history.push(next);
+/**
+ * Remove a project, keeping or binning its tasks. Whichever way, the whole thing is one
+ * trash entry, so it comes back as it went: the project and the tasks that went with it.
+ */
+function deleteProject(id, { deleteTasks = false } = {}) {
+  const plan = deleteProjectPlan(board(), id, { deleteTasks });
+  if (!plan) return;
+
   ui.projectId = null;
-  ui.projectId = defaultProjectId();
   ui.people.clear();
   ui.selectedId = null;
-  persist();
+  const record = {
+    kind: 'project',
+    at: now(),
+    label: plan.project.title,
+    data: { project: plan.project, tasks: plan.removed, untagged: plan.untagged },
+  };
+  // Through `commit` like every other mutation, rather than pushing history directly: that
+  // bypassed the goal sync, so a deleted project's goal card stayed on the board with
+  // nothing behind it, and it dropped the trash off the board state entirely.
+  commit(
+    {
+      ...board(),
+      projects: plan.projects,
+      tasks: plan.tasks,
+      trash: pushTrash(board().trash, record),
+    },
+    plan.removed.length
+      ? `Deleted “${plan.project.title}” and ${plan.removed.length} task${plan.removed.length === 1 ? '' : 's'}. Ctrl+Z, or restore it from the trash.`
+      : `Deleted “${plan.project.title}”. Its tasks kept, untagged. Ctrl+Z, or restore it from the trash.`
+  );
+  // Chosen from the board as it is now, with this project gone.
+  ui.projectId = defaultProjectId();
   render();
-  status(`Deleted “${project.title}”. Its tasks kept, untagged. Ctrl+Z to undo.`);
+  graph.fit();
+}
+
+/**
+ * Tasks worth suggesting elsewhere: a task whose every project is shelved is shelved too.
+ * An untagged task belongs to nothing and so is always in play.
+ */
+function unshelvedTasks() {
+  const shelved = new Set(board().projects.filter((p) => p.archived).map((p) => p.id));
+  if (!shelved.size) return board().tasks;
+  return board().tasks.filter(
+    (task) => !task.project?.length || task.project.some((tag) => !shelved.has(tag))
+  );
 }
 
 /* ------------------------------------------------------------- view model */
@@ -431,10 +574,14 @@ function defaultProjectId() {
       if (counts.has(id)) counts.set(id, counts.get(id) + 1);
     }
   }
+  // A starred project is the one you said you work in; the busiest is only a guess. Shelved
+  // projects are skipped entirely unless there is nothing else left to open.
+  const live = board().projects.filter((p) => !p.archived);
   return (
-    [...board().projects]
+    [...(live.length ? live : board().projects)]
       .sort(
         (a, b) =>
+          Number(Boolean(b.starred)) - Number(Boolean(a.starred)) ||
           counts.get(b.id) - counts.get(a.id) ||
           (parseDate(a.start) ?? Infinity) - (parseDate(b.start) ?? Infinity)
       )
@@ -552,25 +699,132 @@ function dueForLevel(view, level) {
   return formatDate(view.bucket.dateForLevel(origin + view.minLevel, view.windowStart));
 }
 
+/**
+ * What can still be added to `task`'s `field`: the project's tasks, less whatever is
+ * already referenced and anything that would close a loop.
+ */
+function eligibleRefs(task, field, projectTasks) {
+  const forbidden = cyclicRefs(board().tasks, task.id, field);
+  const already = new Set(task[field] ?? []);
+  return projectTasks.filter((t) => !forbidden.has(t.id) && !already.has(t.id));
+}
+
+/**
+ * Assign someone and put them on the project in one act, because typing a name into a
+ * task is how a teammate joins in practice. One commit, so one Ctrl+Z takes back both.
+ */
+function addPersonToTask(taskId, name) {
+  const task = board().tasks.find((t) => t.id === taskId);
+  if (!task || !name) return;
+  const project = currentProject();
+  const add = (list) => [...new Set([...(list ?? []), name])];
+  commit(
+    {
+      ...board(),
+      projects: project
+        ? board().projects.map((p) => (p.id === project.id ? { ...p, people: add(p.people) } : p))
+        : board().projects,
+      tasks: board().tasks.map((t) => (t.id === taskId ? { ...t, people: add(t.people) } : t)),
+    },
+    project
+      ? `${name} joined “${project.title}” and holds “${task.title}”.`
+      : `${name} holds “${task.title}”. No project to add them to.`
+  );
+}
+
+/**
+ * Switch between the board arranging itself and you arranging it.
+ *
+ * Freezing records where every card currently is, so the board holds still exactly as you
+ * see it rather than collapsing into a column — and because those positions are the tasks'
+ * own data, one commit makes the whole freeze a single undo step.
+ */
+function setAutoLayout(enabled) {
+  ui.autoLayout = enabled;
+  localStorage.setItem(LAYOUT_KEY, String(enabled));
+
+  if (enabled) {
+    graph.setAutoLayout(true);
+    render();
+    status('Auto-layout on — the board arranges the cards again.');
+    return;
+  }
+
+  const positions = graph.positions();
+  const tasks = board().tasks.map((task) => {
+    const position = positions[task.id];
+    return position ? { ...task, x: Math.round(position.x) } : task;
+  });
+  graph.setAutoLayout(false);
+  commit({ ...board(), tasks }, 'Layout frozen — cards stay where you drop them.');
+}
+
+/* ------------------------------------------------------- folder layout */
+
+/** How many files would land at a path they are not at now. */
+function pendingMoves(from, to) {
+  const before = new Set(Object.keys(boardToFiles(from)));
+  return Object.keys(boardToFiles(to)).filter((path) => !before.has(path)).length;
+}
+
+/** The board as it would be with every project in a folder named after it. */
+const organisedBoard = () => ({
+  ...board(),
+  projects: board().projects.map((project) => ({ ...project, folder: project.folder || project.id })),
+});
+
+/**
+ * Give every project a folder of its own. The files themselves move on the next save, which
+ * `commit` triggers — so the whole reorganisation is a single undo step, and Ctrl+Z moves
+ * them back.
+ */
+function organiseIntoFolders() {
+  const moves = pendingMoves(board(), organisedBoard());
+  if (!moves) {
+    status('Every project already has a folder of its own.');
+    return;
+  }
+  commit(organisedBoard(), `Moved ${moves} file${moves === 1 ? '' : 's'} into project folders.`);
+  refreshStorageState();
+}
+
 /* ------------------------------------------------------------- rendering */
 
 function render() {
   const view = buildView();
+  currentView = view;
   graph.render(view);
   renderToolbar(view);
+  const selected = board().tasks.find((t) => t.id === ui.selectedId) ?? null;
+  const projectTasks = filterTasks(board().tasks, { projectId: ui.projectId });
   panel.render({
-    task: board().tasks.find((t) => t.id === ui.selectedId) ?? null,
-    tasks: filterTasks(board().tasks, { projectId: ui.projectId }),
-    people: allPeople(board().tasks),
-    projects: [...new Set([...board().projects.map((p) => p.id), ...allProjectTags(board().tasks)])],
+    task: selected,
+    tasks: projectTasks,
+    allTasks: board().tasks,
+    roster: projectPeople(view.project, board().tasks),
+    people: allPeople(unshelvedTasks()),
+    projects: [
+      ...new Set([
+        ...board().projects.filter((p) => !p.archived).map((p) => p.id),
+        ...allProjectTags(unshelvedTasks()),
+      ]),
+    ],
+    eligible: selected
+      ? {
+          blockedBy: eligibleRefs(selected, 'blockedBy', projectTasks),
+          partOf: eligibleRefs(selected, 'partOf', projectTasks),
+        }
+      : null,
     assistantReady: Boolean(llm.getKey()),
   });
   if ($('project').open) renderProjectDialog();
+  if ($('projects').open) renderManageProjects();
   if ($('trash').open) renderTrash();
   if (!$('status-bar').textContent) renderSummary(view);
 }
 
 function renderSummary(view) {
+  const working = board().tasks.find((t) => t.working);
   const open = view.tasks.filter((t) => !t.done).length;
   const overdue = [...view.statuses.values()].filter((s) => s.overdue).length;
   const hours = totalEstimateHours(view.tasks.filter((t) => !t.done));
@@ -579,17 +833,24 @@ function renderSummary(view) {
   if (hours) parts.push(`${Math.round(hours / 8)}d of work left`);
   parts.push(`scale: ${view.bucket.label.toLowerCase()}`);
   const counts = parts.join(' · ');
-  status(view.project?.goal ? `${view.project.goal} — ${counts}` : counts);
+  // What you are on leads, since that is the one thing you want to see without looking.
+  const goal = view.project?.goal ? `${view.project.goal} — ${counts}` : counts;
+  status(working ? `▶ ${working.title} · ${goal}` : goal);
 }
 
 function renderToolbar(view) {
   const picker = $('project-picker');
-  const projects = board().projects;
+  // Starred to the top, shelved out of sight — but never hide the one being looked at.
+  const projects = sortProjects(
+    visibleProjects(board().projects, ui.showArchived).concat(
+      view.project && view.project.archived && !ui.showArchived ? [view.project] : []
+    )
+  );
   picker.textContent = '';
   for (const project of projects) {
     const option = document.createElement('option');
     option.value = project.id;
-    option.textContent = project.title;
+    option.textContent = project.starred ? `★ ${project.title}` : project.title;
     option.selected = project.id === view.project?.id;
     picker.append(option);
   }
@@ -599,31 +860,11 @@ function renderToolbar(view) {
     picker.append(option);
   }
 
-  // The roster as well as anyone assigned work, so a new teammate is selectable at once.
-  const people = projectPeople(view.project, board().tasks)
-    .map((p) => p.name)
-    .sort((a, b) => a.localeCompare(b));
-  const options = $('people-options');
-  options.textContent = '';
-  for (const person of people) {
-    const label = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = ui.people.has(person);
-    input.addEventListener('change', () => {
-      if (input.checked) ui.people.add(person);
-      else ui.people.delete(person);
-      status('');
-      render();
-    });
-    label.append(input, document.createTextNode(person));
-    options.append(label);
-  }
-  $('people-summary').textContent = ui.people.size
-    ? [...ui.people].join(', ')
-    : people.length
-      ? 'Everyone'
-      : 'No people';
+  renderPeopleMenu(view);
+
+  const layoutButton = $('auto-layout');
+  layoutButton.setAttribute('aria-pressed', String(ui.autoLayout));
+  layoutButton.textContent = ui.autoLayout ? 'Auto-layout' : 'Manual layout';
 
   const linkButton = $('link-mode');
   linkButton.setAttribute('aria-pressed', String(ui.linkArmed));
@@ -631,6 +872,361 @@ function renderToolbar(view) {
   linkButton.title = ui.linkArmed
     ? 'Drag from one task to another. Click to switch link type, Esc to cancel.'
     : 'Draw a link between two tasks (E)';
+}
+
+/**
+ * The people filter: one checkbox per name, and a button that says what the filter is
+ * doing. No selection means no filter at all, which is every task including the ones
+ * nobody holds — so the button reads "People" rather than claiming to name anyone.
+ */
+function renderPeopleMenu(view) {
+  // The roster as well as anyone assigned work, so a new teammate is selectable at once.
+  const people = projectPeople(view.project, board().tasks)
+    .map((p) => p.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  // Every checkbox is rebuilt, so the one just clicked is a different element: without
+  // this, keyboard focus falls back to the body after each change.
+  const focused = document.activeElement?.dataset?.person;
+  const checks = $('people-checks');
+  checks.textContent = '';
+  for (const person of people) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = ui.people.has(person);
+    input.dataset.person = person;
+    input.addEventListener('change', () => {
+      if (input.checked) ui.people.add(person);
+      else ui.people.delete(person);
+      status('');
+      render();
+    });
+    label.append(input, document.createTextNode(person));
+    checks.append(label);
+    if (person === focused) input.focus();
+  }
+
+  if (!people.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted small';
+    empty.textContent = 'Nobody on this project yet.';
+    checks.append(empty);
+  }
+
+  const chosen = [...ui.people];
+  const button = $('people-menu');
+  button.textContent = !chosen.length
+    ? 'People'
+    : chosen.length <= 2
+      ? chosen.join(', ')
+      : `${chosen.length} people`;
+  button.title = chosen.length
+    ? `Showing work held by ${chosen.join(', ')}`
+    : 'Filter the board by person';
+  // Nothing to open, and nothing the filter could usefully do.
+  button.disabled = !people.length && !chosen.length;
+}
+
+/* --------------------------------------------------------- context menu */
+
+/** The date a point on the canvas stands for, worded as the gutter words it. */
+function labelForLevel(level) {
+  if (!currentView || level == null) return '';
+  const due = dueForLevel(currentView, level);
+  return due ? currentView.bucket.format(parseDate(due)) : 'unscheduled';
+}
+
+/**
+ * Flip a link between its two meanings while leaving the arrow pointing the same way: a
+ * `blocks` edge from A to B becomes "A is part of B", which is the same claim about
+ * direction and a different one about kind.
+ */
+function flipEdge(edgeId) {
+  const edge = parseEdgeId(edgeId);
+  if (!edge) return;
+  const kind = edge.kind === 'blocks' ? 'part-of' : 'blocks';
+  const owner = kind === 'blocks' ? edge.to : edge.from;
+  const field = kind === 'blocks' ? 'blockedBy' : 'partOf';
+  const value = kind === 'blocks' ? edge.from : edge.to;
+  if (cyclicRefs(board().tasks, owner, field).has(value)) {
+    status('Flipping that link would put the two tasks in a loop.', true);
+    return;
+  }
+  const stripped = board().tasks.map((t) =>
+    t.id === edge.ownerId
+      ? { ...t, [edge.field]: (t[edge.field] ?? []).filter((ref) => ref !== edge.value) }
+      : t
+  );
+  ui.selectedEdgeId = null;
+  commit(
+    {
+      ...board(),
+      tasks: stripped.map((t) =>
+        t.id === owner ? { ...t, [field]: [...new Set([...(t[field] ?? []), value])] } : t
+      ),
+    },
+    `Now a ${kind} link. Ctrl+Z to undo.`
+  );
+}
+
+/** What right-clicking each kind of thing offers. */
+function contextItems(target) {
+  if (target.kind === 'node') {
+    const task = board().tasks.find((t) => t.id === target.id);
+    if (!task) return [];
+    return [
+      {
+        label: task.working ? 'Stop working on this' : '▶ Working on this',
+        run: () => setWorking(task.id),
+      },
+      {
+        label: task.done ? 'Reopen' : 'Mark complete',
+        run: () => updateTask(task.id, { done: !task.done }),
+      },
+      ...(task.due ? [{ label: 'Unschedule', run: () => updateTask(task.id, { due: '' }) }] : []),
+      { label: 'Delete task', run: () => deleteTask(task.id), danger: true },
+    ];
+  }
+
+  if (target.kind === 'edge') {
+    const edge = parseEdgeId(target.id);
+    if (!edge) return [{ label: 'This link is drawn from the goal and is not stored', run: null }];
+    return [
+      {
+        label: edge.kind === 'blocks' ? 'Make it a part-of link' : 'Make it a blocks link',
+        run: () => flipEdge(target.id),
+      },
+      { label: 'Delete link', run: () => deleteEdge(target.id), danger: true },
+    ];
+  }
+
+  const label = labelForLevel(target.level);
+  return [
+    {
+      label: label === 'unscheduled' ? 'New unscheduled task here' : `New task here — ${label}`,
+      run: () => addTaskAt(target),
+    },
+    { label: 'New unscheduled task', run: () => addTaskAt({ ...target, level: null }) },
+  ];
+}
+
+/** A task on the row that was clicked, and at the x that was clicked when that is ours. */
+function addTaskAt(target) {
+  const due = target.level == null || !currentView ? '' : dueForLevel(currentView, target.level);
+  const task = addTask({ due, x: ui.autoLayout ? null : target.x });
+  ui.selectedId = task.id;
+  render();
+  panel.focusTitle();
+}
+
+function openContextMenu(target) {
+  const items = contextItems(target);
+  const panelEl = $('context-menu');
+  panelEl.textContent = '';
+  if (!items.length) return;
+
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = item.danger ? 'menu-item danger' : 'menu-item';
+    button.textContent = item.label;
+    button.disabled = !item.run;
+    button.addEventListener('click', () => {
+      contextMenu.close();
+      item.run?.();
+    });
+    panelEl.append(button);
+  }
+  contextMenu.openAt(target.client.x, target.client.y);
+}
+
+/* --------------------------------------------------------- sidebar width */
+
+/** Never past half the workspace, so the board always keeps the other half. */
+function panelWidthRange() {
+  const workspace = document.querySelector('.workspace').getBoundingClientRect().width;
+  return { min: PANEL_WIDTH_MIN, max: Math.max(PANEL_WIDTH_MIN, Math.round(workspace / 2)) };
+}
+
+/**
+ * Apply a sidebar width, clamped, and tell assistive tech what it became. Returns the width
+ * actually used so callers can report it.
+ */
+function setPanelWidth(px, { persist = true } = {}) {
+  const { min, max } = panelWidthRange();
+  const width = Math.round(Math.min(Math.max(px, min), max));
+
+  $('panel').style.setProperty('--panel-w', `${width}px`);
+  const handle = $('panel-resize');
+  handle.setAttribute('aria-valuenow', String(width));
+  handle.setAttribute('aria-valuemin', String(min));
+  handle.setAttribute('aria-valuemax', String(max));
+  if (persist) localStorage.setItem(PANEL_KEY, String(width));
+  return width;
+}
+
+function wirePanelResize() {
+  const handle = $('panel-resize');
+  const panel = $('panel');
+  // Read back from the box rather than from what was last asked for: `max-width: 50vw` can
+  // have clamped it, and a drag should carry on from where the sidebar actually is.
+  const currentWidth = () => panel.getBoundingClientRect().width;
+  const report = (width) => status(`Sidebar ${width}px.`);
+  let startX = 0;
+  let startWidth = 0;
+
+  handle.addEventListener('pointerdown', (event) => {
+    startX = event.clientX;
+    startWidth = currentWidth();
+    // Capturing the pointer keeps the drag alive over the canvas, with no document-level
+    // listeners to add and remove around it.
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing');
+    event.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    // Leftwards widens. Not persisted per frame — the drop is what settles it.
+    setPanelWidth(startWidth + (startX - event.clientX), { persist: false });
+  });
+
+  const finish = (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    handle.releasePointerCapture(event.pointerId);
+    document.body.classList.remove('resizing');
+    report(setPanelWidth(currentWidth()));
+  };
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
+
+  // A separator only a mouse can move is no separator at all.
+  handle.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 64 : 16;
+    const delta = event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0;
+    if (!delta) return;
+    event.preventDefault();
+    report(setPanelWidth(currentWidth() + delta));
+  });
+
+  handle.addEventListener('dblclick', () => report(setPanelWidth(PANEL_WIDTH_DEFAULT)));
+}
+
+/* ------------------------------------------------------- managing projects */
+
+/** Tasks a project actually holds, goal nodes aside — they are the project's own doing. */
+const projectTaskCount = (id) =>
+  board().tasks.filter((t) => !t.goal && (t.project ?? []).includes(id)).length;
+
+function renderManageProjects() {
+  const list = $('manage-list');
+  list.textContent = '';
+  $('show-archived').checked = ui.showArchived;
+
+  const projects = sortProjects(board().projects);
+  if (!projects.length) {
+    const empty = document.createElement('li');
+    empty.className = 'muted';
+    empty.textContent = 'No projects yet.';
+    list.append(empty);
+    return;
+  }
+
+  for (const project of projects) {
+    const li = document.createElement('li');
+    if (project.archived) li.className = 'archived';
+
+    const star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'star';
+    star.textContent = project.starred ? '★' : '☆';
+    star.title = project.starred ? 'Starred — shown first' : 'Star to keep it at the top';
+    star.setAttribute('aria-pressed', String(Boolean(project.starred)));
+    star.addEventListener('click', () => {
+      updateProject(project.id, { starred: !project.starred });
+      renderManageProjects();
+    });
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = project.title;
+
+    const count = document.createElement('span');
+    count.className = 'why';
+    const tasks = projectTaskCount(project.id);
+    count.textContent = `${tasks} task${tasks === 1 ? '' : 's'}${project.archived ? ' · archived' : ''}`;
+
+    const archive = document.createElement('button');
+    archive.type = 'button';
+    archive.textContent = project.archived ? 'Unarchive' : 'Archive';
+    archive.addEventListener('click', () => {
+      updateProject(project.id, { archived: !project.archived });
+      // Never leave the board on a project that was just put away.
+      if (!project.archived && ui.projectId === project.id) {
+        ui.projectId = defaultProjectId();
+        render();
+        graph.fit();
+      }
+      renderManageProjects();
+      status(project.archived ? `“${project.title}” is back.` : `Archived “${project.title}”.`);
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'danger';
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', () => askDeleteProject(project.id));
+
+    li.append(star, name, count, archive, remove);
+    list.append(li);
+  }
+}
+
+/** Which projects would keep a task alive if this one were deleted, and how many. */
+function rescuedByOthers(id) {
+  const rescued = board().tasks.filter(
+    (t) => !t.goal && (t.project ?? []).includes(id) && (t.project ?? []).some((tag) => tag !== id)
+  );
+  const others = new Set(rescued.flatMap((t) => (t.project ?? []).filter((tag) => tag !== id)));
+  const titles = [...others]
+    .map((tag) => board().projects.find((p) => p.id === tag)?.title ?? tag)
+    .sort((a, b) => a.localeCompare(b));
+  return { count: rescued.length, titles };
+}
+
+/** The project awaiting an answer in the delete dialog. */
+let pendingDelete = null;
+
+function askDeleteProject(id) {
+  const project = board().projects.find((p) => p.id === id);
+  if (!project) return;
+  pendingDelete = id;
+
+  const tasks = projectTaskCount(id);
+  const { count, titles } = rescuedByOthers(id);
+  $('pd-heading').textContent = `Delete “${project.title}”?`;
+  $('pd-detail').textContent = !tasks
+    ? 'It holds no tasks.'
+    : count
+      ? // The part of the rule nobody could guess: shared tasks are not this project's to bin.
+        `${tasks} task${tasks === 1 ? '' : 's'} here, ${count} of them also in ${titles.join(', ')} — those stay, and move there.`
+      : `${tasks} task${tasks === 1 ? '' : 's'} here, in this project only.`;
+  // With no tasks, or none this project alone holds, there is no choice left to offer.
+  const nothingToBin = tasks === count;
+  $('pd-delete').hidden = nothingToBin;
+  $('pd-keep').textContent = nothingToBin ? 'Delete project' : 'Keep the tasks';
+  if (!$('delete-confirm').open) $('delete-confirm').showModal();
+}
+
+function finishDeleteProject(deleteTasks) {
+  const id = pendingDelete;
+  pendingDelete = null;
+  $('delete-confirm').close();
+  if (!id) return;
+  deleteProject(id, { deleteTasks });
+  if ($('projects').open) renderManageProjects();
+  if ($('project').open) $('project').close();
 }
 
 /* ---------------------------------------------------------- link arming */
@@ -652,11 +1248,16 @@ function setLinkArmed(armed, kind) {
 
 async function setBoardFromFiles(files, message) {
   resetBoard(files);
+  const clashes = duplicateProjectIds(files);
   ui.projectId = defaultProjectId();
   ui.people.clear();
   ui.selectedId = null;
   await persist();
-  status(message ?? '');
+  status(
+    clashes.length
+      ? `${message ?? ''} Two folders claim ${clashes.join(', ')} — using the first of each.`.trim()
+      : (message ?? '')
+  );
   render();
 }
 
@@ -875,7 +1476,14 @@ function acceptSuggestion(index) {
 
 /* ---------------------------------------------------------- trash dialog */
 
-const TRASH_LABEL = { task: 'task', edge: 'link' };
+const TRASH_LABEL = { task: 'task', edge: 'link', project: 'project' };
+
+/** What a trash row says it holds — a project entry carries its tasks with it. */
+function trashDetail(record) {
+  const count = record.kind === 'project' ? (record.data.tasks?.length ?? 0) : 0;
+  if (!count) return TRASH_LABEL[record.kind] ?? record.kind;
+  return `project · with ${count} task${count === 1 ? '' : 's'}`;
+}
 
 function renderTrash() {
   const list = $('trash-list');
@@ -902,7 +1510,7 @@ function renderTrash() {
     label.textContent = record.label || '(untitled)';
     const meta = document.createElement('span');
     meta.className = 'why';
-    meta.textContent = `${TRASH_LABEL[record.kind] ?? record.kind} · ${record.at.slice(0, 10)}`;
+    meta.textContent = `${trashDetail(record)} · ${record.at.slice(0, 10)}`;
     body.append(label, meta);
 
     const restore = document.createElement('button');
@@ -1028,7 +1636,12 @@ function writeProjectField(key, value) {
     return;
   }
   const project = currentProject();
-  if (project) updateProject(project.id, { [key]: value });
+  // Committing a value the project already holds would spend an undo step on nothing, which
+  // is exactly what a debounced keystroke and the blur that follows it would otherwise do.
+  const unchanged = Array.isArray(value)
+    ? JSON.stringify(project?.[key] ?? []) === JSON.stringify(value)
+    : (project?.[key] ?? '') === value;
+  if (project && !unchanged) updateProject(project.id, { [key]: value });
   renderProjectDialog();
 }
 
@@ -1068,9 +1681,22 @@ function refreshStorageState() {
         : supportsFolder
           ? 'Saving to this browser only.'
           : 'Saving to this browser only — this browser cannot open folders.';
-  $('storage-state').textContent = text;
+  const foldered = board().projects.filter((p) => p.folder).length;
+  const layout =
+    mode === 'folder' && board().projects.length
+      ? foldered === board().projects.length
+        ? ' Every project has its own subfolder.'
+        : ` ${foldered} of ${board().projects.length} projects have their own subfolder.`
+      : '';
+  $('storage-state').textContent = text + layout;
   $('connect-folder').disabled = !supportsFolder;
   $('disconnect-folder').disabled = mode !== 'folder';
+
+  const moves = pendingMoves(board(), organisedBoard());
+  $('organise-folders').disabled = !moves;
+  $('organise-state').textContent = moves
+    ? `Would move ${moves} file${moves === 1 ? '' : 's'} into project folders. Nothing is deleted.`
+    : 'Nothing to move.';
 }
 
 async function loadModels() {
@@ -1152,11 +1778,28 @@ async function copyBrief() {
 function wireEvents() {
   $('project-picker').addEventListener('change', (event) => {
     ui.projectId = event.target.value;
+    peopleMenu?.close();
     ui.people.clear();
     ui.selectedId = null;
     status('');
     render();
+    // Land looking at the project you picked, rather than at wherever the last one was.
+    graph.fit();
   });
+
+  peopleMenu = createMenu($('people-menu'), $('people-options'));
+  contextMenu = createContextMenu($('context-menu'));
+
+  const setPeopleFilter = (names) => {
+    ui.people.clear();
+    for (const name of names) ui.people.add(name);
+    status('');
+    render();
+  };
+  $('people-all').addEventListener('click', () =>
+    setPeopleFilter(projectPeople(currentProject(), board().tasks).map((p) => p.name))
+  );
+  $('people-none').addEventListener('click', () => setPeopleFilter([]));
 
   $('hide-done').addEventListener('change', (event) => {
     ui.hideDone = event.target.checked;
@@ -1174,6 +1817,9 @@ function wireEvents() {
   const stepRows = (delta) => {
     const applied = graph.setLevelSeparation(readRowHeight() + delta);
     localStorage.setItem(ROWS_KEY, String(applied));
+    // vis re-spaces the rows itself while it owns the layout; off auto-layout the y of
+    // every card is ours to restate, which a render does from the board's own data.
+    if (!ui.autoLayout) render();
     status(`Row height ${applied}px.`);
   };
   $('rows-tighter').addEventListener('click', () => stepRows(-16));
@@ -1207,6 +1853,25 @@ function wireEvents() {
     else setLinkArmed(true);
   });
 
+  wirePanelResize();
+  $('projects-open').addEventListener('click', () => {
+    renderManageProjects();
+    if (!$('projects').open) $('projects').showModal();
+  });
+  $('show-archived').addEventListener('change', (event) => {
+    ui.showArchived = event.target.checked;
+    localStorage.setItem(ARCHIVED_KEY, String(ui.showArchived));
+    render();
+  });
+  $('pd-keep').addEventListener('click', () => finishDeleteProject(false));
+  $('pd-delete').addEventListener('click', () => finishDeleteProject(true));
+  $('pd-cancel').addEventListener('click', () => {
+    pendingDelete = null;
+    $('delete-confirm').close();
+  });
+
+  $('organise-folders').addEventListener('click', organiseIntoFolders);
+  $('auto-layout').addEventListener('click', () => setAutoLayout(!ui.autoLayout));
   $('fit').addEventListener('click', () => graph.fit());
   $('assist').addEventListener('click', () => {
     openSuggestions('Assistant');
@@ -1263,16 +1928,35 @@ function wireEvents() {
   $('project-open').addEventListener('click', () =>
     openProject(currentProject() ? 'edit' : 'create')
   );
+  $('project-new').addEventListener('click', () => openProject('create'));
 
-  const projectField = (elementId, key, transform = (v) => v.trim()) =>
-    $(elementId).addEventListener('change', (event) =>
-      writeProjectField(key, transform(event.target.value))
-    );
+  /**
+   * Project fields, committed as you type rather than only when you leave them.
+   *
+   * The dialog is a sheet with the board still visible around it, so typing an end goal and
+   * watching no card appear reads as the goal being ignored — which is exactly how this was
+   * reported. Waiting for a blur is too late when the result is on screen behind you.
+   *
+   * Debounced, so a typed sentence costs an undo step or two rather than one per keystroke,
+   * and only for the text fields: a colour picker fires `input` continuously while dragging,
+   * and a date is committed by the picker itself.
+   */
+  const projectField = (elementId, key, transform = (v) => v.trim(), live = true) => {
+    const element = $(elementId);
+    const write = () => writeProjectField(key, transform(element.value));
+    element.addEventListener('change', write);
+    if (!live) return;
+    let pending = null;
+    element.addEventListener('input', () => {
+      clearTimeout(pending);
+      pending = setTimeout(write, 400);
+    });
+  };
   projectField('p-title', 'title');
   projectField('p-goal', 'goal');
-  projectField('p-start', 'start');
-  projectField('p-end', 'end');
-  projectField('p-color', 'color');
+  projectField('p-start', 'start', (v) => v.trim(), false);
+  projectField('p-end', 'end', (v) => v.trim(), false);
+  projectField('p-color', 'color', (v) => v.trim(), false);
   projectField('p-context', 'context', (v) => v.replace(/\s+$/, ''));
 
   $('p-people-form').addEventListener('submit', (event) => {
@@ -1293,9 +1977,8 @@ function wireEvents() {
   $('project-delete').addEventListener('click', () => {
     const project = currentProject();
     if (!project) return;
-    deleteProject(project.id);
-    if (currentProject()) renderProjectDialog();
-    else $('project').close();
+    // Only asks; `finishDeleteProject` closes this dialog if the answer is yes.
+    askDeleteProject(project.id);
   });
 
   $('export-zip').addEventListener('click', exportZip);
@@ -1353,6 +2036,9 @@ function wireEvents() {
       ui.selectedId = task.id;
       render();
       panel.focusTitle();
+    } else if (event.key === 'w' || event.key === 'W') {
+      if (ui.selectedId) setWorking(ui.selectedId);
+      else status('Select a task first, then W to mark it the one you are on.');
     } else if (event.key === 'e' || event.key === 'E') {
       setLinkArmed(!ui.linkArmed);
     } else if (event.key === 'f' || event.key === 'F') {
@@ -1364,6 +2050,9 @@ function wireEvents() {
 }
 
 async function boot() {
+  ui.autoLayout = readAutoLayout();
+  ui.showArchived = readShowArchived();
+  setPanelWidth(readPanelWidth(), { persist: false });
   graph = createGraph(
     $('canvas'),
     {
@@ -1380,19 +2069,36 @@ async function boot() {
       render();
     },
     onLink: link,
-    onReschedule: (taskId, level) => {
+    // The row the gutter would label, so the preview and the gutter never disagree.
+    dropLabel: labelForLevel,
+    onContext: openContextMenu,
+    onReschedule: (taskId, level, x) => {
       const view = buildView();
       const task = board().tasks.find((t) => t.id === taskId);
-      const due = task ? dueForLevel(view, level) : '';
       // Anything that does not move the task still needs a redraw, or it stays floating
       // wherever it was dropped.
-      if (!task || task.goal || due === task.due) {
+      if (!task || task.goal) {
         render();
         if (task?.goal) status('The goal node sits at the project deadline.');
         return;
       }
-      updateTask(taskId, { due });
-      status(due ? `“${task.title}” moved to ${due}.` : `“${task.title}” is now unscheduled.`);
+      // Rows, not dates: a row stands for a whole period, and `dueForLevel` names its
+      // first day. Comparing the dates would read "due 07 Aug, row starts 01 Aug" as a
+      // move and quietly re-date a task that never left its row.
+      const fromRow = view.levels.get(taskId);
+      const toRow = Math.max(0, Math.round(level));
+      const rescheduled = fromRow != null && toRow !== fromRow;
+      const moved = x != null && x !== task.x;
+      if (!rescheduled && !moved) {
+        render();
+        return;
+      }
+
+      const due = rescheduled ? dueForLevel(view, toRow) : task.due;
+      // Off auto-layout a drop says both when the task is due and where its card lives.
+      updateTask(taskId, { ...(rescheduled ? { due } : {}), ...(moved ? { x } : {}) });
+      if (!rescheduled) status(`“${task.title}” moved.`);
+      else status(due ? `“${task.title}” moved to ${due}.` : `“${task.title}” is now unscheduled.`);
     },
     onMerge: (sourceId, targetId) => {
       const result = mergeTaskInto(board().tasks, sourceId, targetId);
@@ -1408,14 +2114,10 @@ async function boot() {
         `“${result.merged.title}” is now a subtask of “${target.title}”. Ctrl+Z to undo.`
       );
     },
-      onBlankDoubleClick: () => {
-        const task = addTask();
-        ui.selectedId = task.id;
-        render();
-        panel.focusTitle();
-      },
+      // Double-click and right-click both create a task on the row you aimed at.
+      onBlankDoubleClick: addTaskAt,
     },
-    { levelSeparation: readRowHeight() }
+    { levelSeparation: readRowHeight(), autoLayout: ui.autoLayout }
   );
 
   panel = createPanel({
@@ -1427,6 +2129,9 @@ async function boot() {
     },
     onPromote: promoteSubtask,
     onSuggest: runAssist,
+    onAddPerson: addPersonToTask,
+    onWorking: setWorking,
+    onMessage: (message) => status(message, true),
   });
 
   wireEvents();

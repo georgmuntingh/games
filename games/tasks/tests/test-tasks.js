@@ -17,6 +17,10 @@ import {
   projectToMarkdown,
   buildBoard,
   boardToFiles,
+  duplicateProjectIds,
+  sortProjects,
+  visibleProjects,
+  deleteProjectPlan,
   chooseBucket,
   getBucket,
   projectWindow,
@@ -32,6 +36,9 @@ import {
   goalTaskId,
   goalLinks,
   mergeTaskInto,
+  cyclicRefs,
+  initialsOf,
+  markWorking,
   trashFromMarkdown,
   trashToMarkdown,
   pushTrash,
@@ -431,6 +438,419 @@ test('the demo project has no scheduling conflicts', () => {
   assertEqual(buildEdges(tasks, levels).filter((e) => e.conflict), []);
 });
 
+/* ----------------------------------------------------------- relations */
+
+describe('relations');
+
+/** a <- b <- c: c waits on b, which waits on a. */
+const chain = () => [
+  { id: 'a', blockedBy: [], partOf: [] },
+  { id: 'b', blockedBy: ['a'], partOf: [] },
+  { id: 'c', blockedBy: ['b'], partOf: [] },
+  { id: 'loner', blockedBy: [], partOf: [] },
+];
+
+test('a task can never wait on itself', () => {
+  assert(cyclicRefs(chain(), 'a', 'blockedBy').has('a'), 'a is forbidden to itself');
+});
+
+test('anything downstream would close a loop', () => {
+  const forbidden = cyclicRefs(chain(), 'a', 'blockedBy');
+  // b waits on a, and c waits on b, so neither can be something a waits on.
+  assert(forbidden.has('b'), 'direct dependent');
+  assert(forbidden.has('c'), 'dependent two steps out');
+});
+
+test('an unrelated task is always available', () => {
+  assert(!cyclicRefs(chain(), 'a', 'blockedBy').has('loner'), 'loner is fine');
+  assert(!cyclicRefs(chain(), 'c', 'blockedBy').has('a'), 'c already waits on a upstream');
+});
+
+test('upstream tasks stay available, so the chain can be tightened', () => {
+  // c waits on b which waits on a: adding a to c's blockers is redundant, not a loop.
+  assert(!cyclicRefs(chain(), 'c', 'blockedBy').has('b'), 'b is already a blocker of c');
+});
+
+test('part-of loops are refused the same way', () => {
+  const tasks = [
+    { id: 'parent', blockedBy: [], partOf: [] },
+    { id: 'child', blockedBy: [], partOf: ['parent'] },
+    { id: 'grandchild', blockedBy: [], partOf: ['child'] },
+  ];
+  const forbidden = cyclicRefs(tasks, 'parent', 'partOf');
+  assertEqual([...forbidden].sort(), ['child', 'grandchild', 'parent']);
+});
+
+test('the two relations are judged independently', () => {
+  const tasks = [
+    { id: 'a', blockedBy: [], partOf: [] },
+    { id: 'b', blockedBy: ['a'], partOf: [] },
+  ];
+  // b waits on a, but nothing is part of anything, so part-of is still wide open.
+  assert(!cyclicRefs(tasks, 'a', 'partOf').has('b'), 'blocking does not constrain part-of');
+});
+
+test('a missing reference cannot make a loop', () => {
+  const tasks = [{ id: 'a', blockedBy: ['ghost'], partOf: [] }];
+  assertEqual([...cyclicRefs(tasks, 'a', 'blockedBy')], ['a']);
+});
+
+test('the demo board has no task that could be added to its own blockers', () => {
+  for (const task of board.tasks) {
+    assert(cyclicRefs(board.tasks, task.id, 'blockedBy').has(task.id), `${task.id} excludes itself`);
+  }
+});
+
+/* ------------------------------------------------------ managing projects */
+
+describe('star and archive');
+
+const projectMd = (id, extra = '') => `---\nid: ${id}\ntitle: ${id}\n${extra}---\n`;
+
+test('starred and archived round trip, and are written only when set', () => {
+  const project = projectFromMarkdown(
+    '_project-kitchen.md',
+    projectMd('kitchen', 'starred: true\narchived: true\n')
+  );
+  assertEqual(project.starred, true);
+  assertEqual(project.archived, true);
+
+  const written = projectToMarkdown(project);
+  assert(/^starred: true$/m.test(written), 'starred is written when set');
+  assert(/^archived: true$/m.test(written), 'archived is written when set');
+
+  const plain = projectToMarkdown({ ...project, starred: false, archived: false });
+  assert(!/starred/.test(plain) && !/archived/.test(plain), 'neither is written when unset');
+});
+
+test('a project file with neither flag reads as neither', () => {
+  const project = projectFromMarkdown('_project-kitchen.md', projectMd('kitchen'));
+  assertEqual(project.starred, false);
+  assertEqual(project.archived, false);
+});
+
+test('starred projects sort first, the rest keep their order', () => {
+  const sorted = sortProjects([
+    { id: 'b' },
+    { id: 'a' },
+    { id: 'z', starred: true },
+    { id: 'c' },
+  ]);
+  assertEqual(sorted.map((p) => p.id), ['z', 'a', 'b', 'c']);
+});
+
+test('archived projects are hidden unless asked for', () => {
+  const projects = [{ id: 'a' }, { id: 'b', archived: true }];
+  assertEqual(visibleProjects(projects).map((p) => p.id), ['a']);
+  assertEqual(visibleProjects(projects, true).map((p) => p.id), ['a', 'b']);
+});
+
+/* ------------------------------------------------------- deleting a project */
+
+describe('deleting a project');
+
+const deletable = () => ({
+  projects: [
+    { id: 'kitchen', title: 'Kitchen', folder: 'kitchen' },
+    { id: 'website', title: 'Website', folder: 'website' },
+  ],
+  tasks: [
+    { id: 'worktop', title: 'Worktop', project: ['kitchen'] },
+    { id: 'shared', title: 'Shared', project: ['kitchen', 'website'] },
+    { id: 'kitchen-goal', title: 'A finished kitchen', project: ['kitchen'], goal: true },
+    { id: 'other', title: 'Other', project: ['website'] },
+  ],
+  trash: [],
+});
+
+test('keeping the tasks only strips the tag', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: false });
+  assertEqual(plan.removed, []);
+  assertEqual(plan.projects.map((p) => p.id), ['website']);
+  assertEqual(plan.tasks.find((t) => t.id === 'worktop').project, []);
+});
+
+test('deleting the tasks takes only the ones this project alone holds', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  assertEqual(plan.removed.map((t) => t.id), ['worktop']);
+  assert(!plan.tasks.some((t) => t.id === 'worktop'), 'the task this project alone held is gone');
+});
+
+test('a task belonging elsewhere survives, and moves to that project', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  const shared = plan.tasks.find((t) => t.id === 'shared');
+  assertEqual(shared.project, ['website']);
+  // The point of keeping it: first-tag-wins now files it under the project it still has.
+  const files = Object.keys(boardToFiles({ ...deletable(), ...plan, tasks: plan.tasks }));
+  assert(files.includes('website/shared.md'), `shared.md moved to website/ (${files.join(', ')})`);
+});
+
+test('the goal node goes quietly either way, never into the trash', () => {
+  for (const deleteTasks of [false, true]) {
+    const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks });
+    assert(!plan.tasks.some((t) => t.id === 'kitchen-goal'), 'the goal node is gone');
+    assert(!plan.removed.some((t) => t.goal), 'and is not in the trash record');
+  }
+});
+
+test('tasks that merely lose the tag are remembered, so a restore can undo that', () => {
+  const keep = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: false });
+  // Both real tasks survive untagged, so both need putting back if the project returns.
+  assertEqual(keep.untagged.sort(), ['shared', 'worktop']);
+  // Deleted ones are in `removed` instead; they are not untagged, they are gone.
+  const binned = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  assertEqual(binned.untagged, ['shared']);
+  assertEqual(binned.removed.map((t) => t.id), ['worktop']);
+});
+
+test('deleting a project that does not exist plans nothing', () => {
+  assertEqual(deleteProjectPlan(deletable(), 'nope', { deleteTasks: true }), null);
+});
+
+test('tasks in other projects are left completely alone', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  assertEqual(plan.tasks.find((t) => t.id === 'other').project, ['website']);
+});
+
+/* ------------------------------------------------------- project folders */
+
+describe('project folders');
+
+const NESTED = {
+  // The folder is named nothing like the project: the id inside the file identifies it, so
+  // this is the case that proves a folder name is only a container.
+  'relaunch-2026/_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+  'relaunch-2026/wireframes.md': '---\nid: wireframes\ntitle: Wireframes\nproject: website\n---\n',
+  'kitchen/_project-kitchen.md': '---\nid: kitchen\ntitle: Kitchen\n---\n',
+  'kitchen/worktop.md': '---\nid: worktop\ntitle: Worktop\nproject: kitchen\n---\n',
+  'odd-job.md': '---\nid: odd-job\ntitle: Odd job\n---\n',
+};
+
+const pathOf = (files, id) =>
+  Object.keys(files).find((path) => path === `${id}.md` || path.endsWith(`/${id}.md`));
+
+test('a project remembers the folder it was found in', () => {
+  const { projects } = buildBoard(NESTED);
+  assertEqual(projects.find((p) => p.id === 'website').folder, 'relaunch-2026');
+  assertEqual(projects.find((p) => p.id === 'kitchen').folder, 'kitchen');
+});
+
+test('a task follows its project, not a folder named after it', () => {
+  const files = boardToFiles(buildBoard(NESTED));
+  assertEqual(pathOf(files, 'wireframes'), 'relaunch-2026/wireframes.md');
+  assertEqual(pathOf(files, 'worktop'), 'kitchen/worktop.md');
+});
+
+test('a project file lives in its own folder', () => {
+  assert(
+    'relaunch-2026/_project-website.md' in boardToFiles(buildBoard(NESTED)),
+    'the project file stays beside its tasks'
+  );
+});
+
+test('an untagged task sits at the parent root', () => {
+  assertEqual(pathOf(boardToFiles(buildBoard(NESTED)), 'odd-job'), 'odd-job.md');
+});
+
+test('the first tag decides where a task lives', () => {
+  const board = buildBoard({
+    ...NESTED,
+    'both.md': '---\nid: both\ntitle: Both\nproject: [kitchen, website]\n---\n',
+  });
+  assertEqual(pathOf(boardToFiles(board), 'both'), 'kitchen/both.md');
+  // Placement does not change what a task belongs to: the other tag is untouched.
+  assertEqual(board.tasks.find((t) => t.id === 'both').project, ['kitchen', 'website']);
+});
+
+test('a tag naming no project we have lands at the root', () => {
+  const board = buildBoard({
+    ...NESTED,
+    'stray.md': '---\nid: stray\ntitle: Stray\nproject: gardening\n---\n',
+  });
+  assertEqual(pathOf(boardToFiles(board), 'stray'), 'stray.md');
+});
+
+test('the trash belongs to the parent, not to any one project', () => {
+  const board = { ...buildBoard(NESTED), trash: [{ kind: 'task', data: { id: 'gone' } }] };
+  assert('_trash.md' in boardToFiles(board), 'the trash is at the root');
+});
+
+test('a nested board round trips to a fixed point', () => {
+  const once = boardToFiles(buildBoard(NESTED));
+  assertEqual(boardToFiles(buildBoard(once)), once);
+});
+
+const FLAT = {
+  '_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+  'wireframes.md': '---\nid: wireframes\ntitle: Wireframes\nproject: website\n---\n',
+};
+
+test('a flat board stays flat', () => {
+  assertEqual(Object.keys(boardToFiles(buildBoard(FLAT))).sort(), [
+    '_project-website.md',
+    'wireframes.md',
+  ]);
+});
+
+test('giving a flat project a folder moves its files into it', () => {
+  const flat = buildBoard(FLAT);
+  const organised = { ...flat, projects: flat.projects.map((p) => ({ ...p, folder: p.id })) };
+  assertEqual(Object.keys(boardToFiles(organised)).sort(), [
+    'website/_project-website.md',
+    'website/wireframes.md',
+  ]);
+});
+
+test('two folders claiming one id: the first is used', () => {
+  const { projects } = buildBoard({
+    'a/_project-website.md': '---\nid: website\ntitle: First\n---\n',
+    'b/_project-website.md': '---\nid: website\ntitle: Second\n---\n',
+  });
+  assertEqual(projects.length, 1);
+  assertEqual(projects[0].folder, 'a');
+});
+
+test('a clash is reported so the app can say so', () => {
+  assertEqual(
+    duplicateProjectIds({
+      'a/_project-website.md': '',
+      'b/_project-website.md': '',
+      'kitchen/_project-kitchen.md': '',
+    }),
+    ['website']
+  );
+  assertEqual(duplicateProjectIds(NESTED), []);
+});
+
+/* ------------------------------------------------------------- initials */
+
+describe('initials');
+
+test('one word gives one letter, two give two', () => {
+  assertEqual(initialsOf('Georg'), 'G');
+  assertEqual(initialsOf('Georg Muntingh'), 'GM');
+});
+
+test('only the first two words count', () => {
+  assertEqual(initialsOf('Ada Byron King Lovelace'), 'AB');
+});
+
+test('separators other than spaces still split', () => {
+  assertEqual(initialsOf('ada-lovelace'), 'AL');
+  assertEqual(initialsOf('ada.lovelace'), 'AL');
+  assertEqual(initialsOf('ada_lovelace'), 'AL');
+});
+
+test('punctuation and stray whitespace are ignored', () => {
+  assertEqual(initialsOf('  georg   '), 'G');
+  assertEqual(initialsOf("O'Brien"), 'O');
+});
+
+test('a name with no letters still yields something drawable', () => {
+  assertEqual(initialsOf(''), '?');
+  assertEqual(initialsOf('   '), '?');
+  assertEqual(initialsOf(null), '?');
+});
+
+test('initials come back upper case whatever the name looks like', () => {
+  assertEqual(initialsOf('georg muntingh'), 'GM');
+});
+
+/* ------------------------------------------------------- the task in hand */
+
+describe('working');
+
+const three = () => [
+  { id: 'a', working: false },
+  { id: 'b', working: true },
+  { id: 'c', working: false },
+];
+
+const workingIds = (tasks) => tasks.filter((t) => t.working).map((t) => t.id);
+
+test('setting one releases whatever held it', () => {
+  assertEqual(workingIds(markWorking(three(), 'c')), ['c']);
+});
+
+test('null releases without setting another', () => {
+  assertEqual(workingIds(markWorking(three(), null)), []);
+});
+
+test('an id that is not on the board leaves nothing marked', () => {
+  assertEqual(workingIds(markWorking(three(), 'ghost')), []);
+});
+
+test('there is never more than one, whatever the input claimed', () => {
+  const confused = [
+    { id: 'a', working: true },
+    { id: 'b', working: true },
+  ];
+  assertEqual(workingIds(markWorking(confused, 'b')), ['b']);
+});
+
+test('tasks that do not change are returned by identity', () => {
+  const tasks = three();
+  const next = markWorking(tasks, 'b');
+  assert(next[0] === tasks[0], 'untouched task is the same object');
+  assert(next[1] === tasks[1], 'the one already set is untouched too');
+});
+
+test('nothing else about a task is disturbed', () => {
+  const tasks = [{ id: 'a', title: 'Wireframes', people: ['Georg'], working: false }];
+  assertEqual(markWorking(tasks, 'a'), [
+    { id: 'a', title: 'Wireframes', people: ['Georg'], working: true },
+  ]);
+});
+
+/* ------------------------------------------------- layout and flags on disk */
+
+describe('placement and flags');
+
+test('a stored x comes back as a number, not the string yaml gives', () => {
+  const task = taskFromMarkdown('w.md', ['---', 'id: w', 'title: W', 'x: 412', '---', ''].join('\n'));
+  assertEqual(task.x, 412);
+  assert(typeof task.x === 'number', 'x is a number');
+});
+
+test('an unparseable or missing x is null rather than NaN', () => {
+  const bad = taskFromMarkdown('w.md', ['---', 'id: w', 'x: over there', '---', ''].join('\n'));
+  assertEqual(bad.x, null);
+  assertEqual(taskFromMarkdown('w.md', ['---', 'id: w', '---', ''].join('\n')).x, null);
+});
+
+test('x survives a round trip, including x: 0', () => {
+  const task = taskFromMarkdown('w.md', ['---', 'id: w', 'title: W', 'x: 0', '---', ''].join('\n'));
+  assertEqual(task.x, 0);
+  assert(/^x: 0$/m.test(taskToMarkdown(task)), 'x: 0 is written, not dropped as empty');
+});
+
+test('no x means no x line', () => {
+  const written = taskToMarkdown(taskFromMarkdown('w.md', ['---', 'id: w', '---', ''].join('\n')));
+  assert(!/^x:/m.test(written), 'nothing to say about placement, so nothing written');
+});
+
+test('working is written only when it is set', () => {
+  const on = taskFromMarkdown('w.md', ['---', 'id: w', 'working: true', '---', ''].join('\n'));
+  assertEqual(on.working, true);
+  assert(/^working: true$/m.test(taskToMarkdown(on)), 'set, so written');
+  assert(!/working/.test(taskToMarkdown({ ...on, working: false })), 'released, so absent');
+});
+
+test('the two new keys round trip to a fixed point', () => {
+  const text = taskToMarkdown(
+    taskFromMarkdown(
+      'w.md',
+      ['---', 'id: w', 'title: W', 'due: 2026-08-15', 'working: true', 'x: 412', '---', '', 'Body', ''].join('\n')
+    )
+  );
+  assertEqual(taskToMarkdown(taskFromMarkdown('w.md', text)), text);
+});
+
+test('placement and flags do not leak into extra', () => {
+  const task = taskFromMarkdown('w.md', ['---', 'id: w', 'x: 5', 'working: true', '---', ''].join('\n'));
+  assertEqual(task.extra, {});
+});
+
 /* --------------------------------------------------------------- brief */
 
 describe('LLM brief');
@@ -512,6 +932,20 @@ test('clearing the goal hands its node back for deletion', () => {
   const { tasks, removed } = syncGoalTasks({ tasks: first, projects: [projectWithGoal({ goal: '' })] });
   assertEqual(tasks.length, 0);
   assertEqual(removed.map((t) => t.id), [goalTaskId('w')]);
+});
+
+test('deleting a project hands its goal node back too', () => {
+  // What `deleteProject` relies on: with the project gone from the board, its goal node is
+  // no longer wanted and comes back for binning rather than lingering as an orphan card.
+  const before = syncGoalTasks({
+    tasks: [],
+    projects: [{ id: 'website', title: 'Website', goal: 'Ship it', end: '2026-09-01' }],
+  });
+  assertEqual(before.tasks.map((t) => t.id), ['website-goal']);
+
+  const after = syncGoalTasks({ tasks: before.tasks, projects: [] });
+  assertEqual(after.tasks, []);
+  assertEqual(after.removed.map((t) => t.id), ['website-goal']);
 });
 
 test('a goal node survives a round-trip through markdown', () => {
