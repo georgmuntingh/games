@@ -18,6 +18,9 @@ import {
   buildBoard,
   boardToFiles,
   duplicateProjectIds,
+  sortProjects,
+  visibleProjects,
+  deleteProjectPlan,
   chooseBucket,
   getBucket,
   projectWindow,
@@ -496,6 +499,117 @@ test('the demo board has no task that could be added to its own blockers', () =>
   for (const task of board.tasks) {
     assert(cyclicRefs(board.tasks, task.id, 'blockedBy').has(task.id), `${task.id} excludes itself`);
   }
+});
+
+/* ------------------------------------------------------ managing projects */
+
+describe('star and archive');
+
+const projectMd = (id, extra = '') => `---\nid: ${id}\ntitle: ${id}\n${extra}---\n`;
+
+test('starred and archived round trip, and are written only when set', () => {
+  const project = projectFromMarkdown(
+    '_project-kitchen.md',
+    projectMd('kitchen', 'starred: true\narchived: true\n')
+  );
+  assertEqual(project.starred, true);
+  assertEqual(project.archived, true);
+
+  const written = projectToMarkdown(project);
+  assert(/^starred: true$/m.test(written), 'starred is written when set');
+  assert(/^archived: true$/m.test(written), 'archived is written when set');
+
+  const plain = projectToMarkdown({ ...project, starred: false, archived: false });
+  assert(!/starred/.test(plain) && !/archived/.test(plain), 'neither is written when unset');
+});
+
+test('a project file with neither flag reads as neither', () => {
+  const project = projectFromMarkdown('_project-kitchen.md', projectMd('kitchen'));
+  assertEqual(project.starred, false);
+  assertEqual(project.archived, false);
+});
+
+test('starred projects sort first, the rest keep their order', () => {
+  const sorted = sortProjects([
+    { id: 'b' },
+    { id: 'a' },
+    { id: 'z', starred: true },
+    { id: 'c' },
+  ]);
+  assertEqual(sorted.map((p) => p.id), ['z', 'a', 'b', 'c']);
+});
+
+test('archived projects are hidden unless asked for', () => {
+  const projects = [{ id: 'a' }, { id: 'b', archived: true }];
+  assertEqual(visibleProjects(projects).map((p) => p.id), ['a']);
+  assertEqual(visibleProjects(projects, true).map((p) => p.id), ['a', 'b']);
+});
+
+/* ------------------------------------------------------- deleting a project */
+
+describe('deleting a project');
+
+const deletable = () => ({
+  projects: [
+    { id: 'kitchen', title: 'Kitchen', folder: 'kitchen' },
+    { id: 'website', title: 'Website', folder: 'website' },
+  ],
+  tasks: [
+    { id: 'worktop', title: 'Worktop', project: ['kitchen'] },
+    { id: 'shared', title: 'Shared', project: ['kitchen', 'website'] },
+    { id: 'kitchen-goal', title: 'A finished kitchen', project: ['kitchen'], goal: true },
+    { id: 'other', title: 'Other', project: ['website'] },
+  ],
+  trash: [],
+});
+
+test('keeping the tasks only strips the tag', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: false });
+  assertEqual(plan.removed, []);
+  assertEqual(plan.projects.map((p) => p.id), ['website']);
+  assertEqual(plan.tasks.find((t) => t.id === 'worktop').project, []);
+});
+
+test('deleting the tasks takes only the ones this project alone holds', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  assertEqual(plan.removed.map((t) => t.id), ['worktop']);
+  assert(!plan.tasks.some((t) => t.id === 'worktop'), 'the task this project alone held is gone');
+});
+
+test('a task belonging elsewhere survives, and moves to that project', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  const shared = plan.tasks.find((t) => t.id === 'shared');
+  assertEqual(shared.project, ['website']);
+  // The point of keeping it: first-tag-wins now files it under the project it still has.
+  const files = Object.keys(boardToFiles({ ...deletable(), ...plan, tasks: plan.tasks }));
+  assert(files.includes('website/shared.md'), `shared.md moved to website/ (${files.join(', ')})`);
+});
+
+test('the goal node goes quietly either way, never into the trash', () => {
+  for (const deleteTasks of [false, true]) {
+    const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks });
+    assert(!plan.tasks.some((t) => t.id === 'kitchen-goal'), 'the goal node is gone');
+    assert(!plan.removed.some((t) => t.goal), 'and is not in the trash record');
+  }
+});
+
+test('tasks that merely lose the tag are remembered, so a restore can undo that', () => {
+  const keep = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: false });
+  // Both real tasks survive untagged, so both need putting back if the project returns.
+  assertEqual(keep.untagged.sort(), ['shared', 'worktop']);
+  // Deleted ones are in `removed` instead; they are not untagged, they are gone.
+  const binned = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  assertEqual(binned.untagged, ['shared']);
+  assertEqual(binned.removed.map((t) => t.id), ['worktop']);
+});
+
+test('deleting a project that does not exist plans nothing', () => {
+  assertEqual(deleteProjectPlan(deletable(), 'nope', { deleteTasks: true }), null);
+});
+
+test('tasks in other projects are left completely alone', () => {
+  const plan = deleteProjectPlan(deletable(), 'kitchen', { deleteTasks: true });
+  assertEqual(plan.tasks.find((t) => t.id === 'other').project, ['website']);
 });
 
 /* ------------------------------------------------------- project folders */

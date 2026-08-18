@@ -24,6 +24,9 @@
           ✎
         </button>
         <button type="button" id="project-new" class="icon-btn" title="New project">+</button>
+        <button type="button" id="projects-open" class="icon-btn" title="Manage projects">
+          ☰
+        </button>
         <button type="button" id="trash-open" class="icon-btn" title="Trash">🗑</button>
 
         <button
@@ -221,6 +224,36 @@
     <!-- `manual`, not `auto`: a right-click opens the menu between pointerdown and
          pointerup, and an auto popover treats that pointerup as a dismissal. menu.js
          wires the outside-click and Escape itself. -->
+    <dialog id="projects" class="sheet">
+      <form method="dialog" class="sheet-head">
+        <h2>Manage projects</h2>
+        <button class="icon" title="Close">✕</button>
+      </form>
+
+      <label class="check">
+        <input type="checkbox" id="show-archived" />
+        <span>Show archived projects in the picker</span>
+      </label>
+
+      <ul id="manage-list" class="manage-list"></ul>
+      <p class="muted small">
+        Archiving only hides a project: every file stays exactly where it is, and its work
+        stops being offered elsewhere until you bring it back.
+      </p>
+    </dialog>
+
+    <!-- Deleting can take a dozen tasks with it, so this one asks. Everything else in this
+         app just happens and offers Ctrl+Z. -->
+    <dialog id="delete-confirm" class="sheet narrow">
+      <h2 id="pd-heading">Delete project?</h2>
+      <p id="pd-detail" class="muted"></p>
+      <div class="row pd-actions">
+        <button type="button" id="pd-keep">Keep the tasks</button>
+        <button type="button" id="pd-delete" class="danger">Delete them too</button>
+        <button type="button" id="pd-cancel">Cancel</button>
+      </div>
+    </dialog>
+
     <div id="context-menu" class="menu-panel menu-items" popover="manual"></div>
 
     <datalist id="people-list"></datalist>

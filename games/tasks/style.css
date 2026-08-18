@@ -158,6 +158,78 @@ body {
   background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
 }
 
+/* ------------------------------------------------------ managing projects */
+
+.manage-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.manage-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.2rem;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.manage-list li:last-child {
+  border-bottom: none;
+}
+
+/* Shelved projects stay legible but recede, so the live ones read first. */
+.manage-list li.archived .name {
+  color: var(--ui-muted);
+}
+
+.manage-list .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-list .why {
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.manage-list .star {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem 0.2rem;
+  color: var(--ui-muted);
+}
+
+.manage-list .star[aria-pressed='true'] {
+  color: #f59e0b;
+}
+
+.manage-list button:not(.star) {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.45rem;
+}
+
+/* The three-way delete question, which is the only place this app asks before acting. */
+.sheet.narrow {
+  max-width: 26rem;
+}
+
+.pd-actions {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
 .menu-items {
   padding: 0.25rem;
   min-width: 11rem;

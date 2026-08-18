@@ -211,6 +211,10 @@ export function projectFromMarkdown(filename, text) {
     people: asList(data.people),
     start: data.start ? String(data.start) : '',
     end: data.end ? String(data.end) : '',
+    /** Pinned to the top of the picker, and preferred when the board opens. */
+    starred: data.starred === true,
+    /** Shelved: out of the picker and the suggestion lists, but untouched on disk. */
+    archived: data.archived === true,
     color: data.color ? String(data.color) : '',
     /**
      * The folder this project's files live in; empty means the parent folder itself. Read
@@ -229,6 +233,9 @@ export function projectToMarkdown(project) {
         id: project.id,
         title: project.title,
         goal: project.goal ?? '',
+        // Written only when set, like `goal` on a task: no file gains a `starred: false`.
+        ...(project.starred ? { starred: true } : {}),
+        ...(project.archived ? { archived: true } : {}),
         people: project.people ?? [],
         start: project.start ?? '',
         end: project.end ?? '',
@@ -266,6 +273,59 @@ export function trashFromMarkdown(text) {
 export function trashToMarkdown(trash) {
   const body = ['```json', JSON.stringify(trash ?? [], null, 2), '```'].join('\n');
   return serialiseFrontmatter({ id: '_trash' }, body);
+}
+
+/** Starred first, and otherwise the order they already had. */
+export function sortProjects(projects) {
+  return [...(projects ?? [])].sort(
+    (a, b) => Number(Boolean(b.starred)) - Number(Boolean(a.starred)) || a.id.localeCompare(b.id)
+  );
+}
+
+/** The projects worth showing in the picker: everything, or everything unshelved. */
+export function visibleProjects(projects, showArchived = false) {
+  return showArchived ? [...(projects ?? [])] : (projects ?? []).filter((p) => !p.archived);
+}
+
+/**
+ * What deleting a project does to the board, and what of it is worth keeping in the trash.
+ *
+ * `deleteTasks` decides the tasks' fate, with one rule that cannot be guessed: a task that
+ * belongs to another project as well is not this project's to delete. It loses only this
+ * tag, which under the first-tag-wins placement rule files it in that other project instead.
+ *
+ * The project's goal node is derived from the project rather than written by anyone, so it
+ * goes quietly in both cases and `syncGoalTasks` mints it again if the project comes back.
+ */
+export function deleteProjectPlan(board, id, { deleteTasks = false } = {}) {
+  const project = (board.projects ?? []).find((p) => p.id === id);
+  if (!project) return null;
+
+  const tags = (task) => task.project ?? [];
+  const without = (task) => tags(task).filter((tag) => tag !== id);
+  const mine = (task) => tags(task).includes(id);
+  const onlyMine = (task) => mine(task) && without(task).length === 0;
+
+  const removed = deleteTasks ? board.tasks.filter((t) => !t.goal && onlyMine(t)) : [];
+  const dropped = new Set([
+    ...removed.map((t) => t.id),
+    ...board.tasks.filter((t) => t.goal && mine(t)).map((t) => t.id),
+  ]);
+
+  return {
+    project,
+    removed,
+    /**
+     * Tasks that survive but lose the tag. Remembered so that restoring the project puts
+     * them back in it — without this, restoring after "keep the tasks" hands back an empty
+     * project, which looks like the restore failed.
+     */
+    untagged: board.tasks.filter((t) => !t.goal && mine(t) && !dropped.has(t.id)).map((t) => t.id),
+    projects: (board.projects ?? []).filter((p) => p.id !== id),
+    tasks: board.tasks
+      .filter((t) => !dropped.has(t.id))
+      .map((t) => (mine(t) ? { ...t, project: without(t) } : t)),
+  };
 }
 
 /** Newest first, oldest dropped past the cap. */

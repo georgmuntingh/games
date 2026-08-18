@@ -14,6 +14,8 @@ const KEY_ORDER = [
   'id',
   'title',
   'goal',
+  'starred',
+  'archived',
   'project',
   'people',
   'due',

@@ -12,6 +12,9 @@ import {
   buildBoard,
   boardToFiles,
   duplicateProjectIds,
+  sortProjects,
+  visibleProjects,
+  deleteProjectPlan,
   buildEdges,
   assignLevels,
   chooseBucket,
@@ -71,6 +74,7 @@ const ui = {
   linkArmed: false,
   linkKind: 'blocks',
   autoLayout: true,
+  showArchived: false,
 };
 
 const ROWS_KEY = 'tasks.rowHeight';
@@ -80,6 +84,10 @@ const readRowHeight = () => Number(localStorage.getItem(ROWS_KEY)) || LEVEL_SEPA
 // each card sits is not: that belongs to the tasks themselves.
 const LAYOUT_KEY = 'tasks.autoLayout';
 const readAutoLayout = () => localStorage.getItem(LAYOUT_KEY) !== 'false';
+
+// What is shelved lives in the vault; whether you are currently looking at it does not.
+const ARCHIVED_KEY = 'tasks.showArchived';
+const readShowArchived = () => localStorage.getItem(ARCHIVED_KEY) === 'true';
 
 const PANEL_KEY = 'tasks.panelWidth';
 /** Matches the CSS fallback in `.panel`: the width the sidebar had before it could move. */
@@ -319,6 +327,52 @@ function restoreTrash(index) {
     return;
   }
 
+  if (record.kind === 'project') {
+    const original = record.data.project;
+    const takenProjects = new Set(board().projects.map((p) => p.id));
+    const project = takenProjects.has(original.id)
+      ? { ...original, id: uniqueSlug(original.title, takenProjects) }
+      : original;
+
+    const taken = new Set(board().tasks.map((t) => t.id));
+    const tasks = (record.data.tasks ?? []).map((task) => {
+      const id = taken.has(task.id) ? uniqueSlug(task.title, taken) : task.id;
+      taken.add(id);
+      return {
+        ...task,
+        id,
+        // If the project had to come back under a new id, its tasks must point at that one
+        // or they would file themselves under a project nothing owns.
+        project: (task.project ?? []).map((tag) => (tag === original.id ? project.id : tag)),
+      };
+    });
+
+    // Tasks that merely lost the tag get it back, appended: a task that has since been
+    // filed under another project stays where it is now rather than jumping folders.
+    const regained = new Set(record.data.untagged ?? []);
+    const rejoined = board().tasks.map((task) =>
+      regained.has(task.id) && !(task.project ?? []).includes(project.id)
+        ? { ...task, project: [...(task.project ?? []), project.id] }
+        : task
+    );
+
+    commit(
+      {
+        ...board(),
+        projects: [...board().projects, project],
+        tasks: [...rejoined, ...tasks],
+        trash: rest,
+      },
+      tasks.length
+        ? `Restored “${project.title}” and ${tasks.length} task${tasks.length === 1 ? '' : 's'}.`
+        : `Restored “${project.title}”.`
+    );
+    ui.projectId = project.id;
+    render();
+    graph.fit();
+    return;
+  }
+
   const edge = parseEdgeId(`${record.data.kind}:${record.data.from}->${record.data.to}`);
   const byId = byIdAll();
   if (!edge || !byId.has(edge.from) || !byId.has(edge.to)) {
@@ -458,31 +512,53 @@ function addProject(fields = {}) {
   return project;
 }
 
-/** Remove a project. Its tasks keep existing; they just lose the tag. */
-function deleteProject(id) {
-  const project = board().projects.find((p) => p.id === id);
-  if (!project) return;
+/**
+ * Remove a project, keeping or binning its tasks. Whichever way, the whole thing is one
+ * trash entry, so it comes back as it went: the project and the tasks that went with it.
+ */
+function deleteProject(id, { deleteTasks = false } = {}) {
+  const plan = deleteProjectPlan(board(), id, { deleteTasks });
+  if (!plan) return;
+
   ui.projectId = null;
   ui.people.clear();
   ui.selectedId = null;
+  const record = {
+    kind: 'project',
+    at: now(),
+    label: plan.project.title,
+    data: { project: plan.project, tasks: plan.removed, untagged: plan.untagged },
+  };
   // Through `commit` like every other mutation, rather than pushing history directly: that
   // bypassed the goal sync, so a deleted project's goal card stayed on the board with
   // nothing behind it, and it dropped the trash off the board state entirely.
   commit(
     {
       ...board(),
-      projects: board().projects.filter((p) => p.id !== id),
-      tasks: board().tasks.map((t) => ({
-        ...t,
-        project: (t.project ?? []).filter((tag) => tag !== id),
-      })),
+      projects: plan.projects,
+      tasks: plan.tasks,
+      trash: pushTrash(board().trash, record),
     },
-    `Deleted “${project.title}”. Its tasks kept, untagged. Ctrl+Z to undo.`
+    plan.removed.length
+      ? `Deleted “${plan.project.title}” and ${plan.removed.length} task${plan.removed.length === 1 ? '' : 's'}. Ctrl+Z, or restore it from the trash.`
+      : `Deleted “${plan.project.title}”. Its tasks kept, untagged. Ctrl+Z, or restore it from the trash.`
   );
   // Chosen from the board as it is now, with this project gone.
   ui.projectId = defaultProjectId();
   render();
   graph.fit();
+}
+
+/**
+ * Tasks worth suggesting elsewhere: a task whose every project is shelved is shelved too.
+ * An untagged task belongs to nothing and so is always in play.
+ */
+function unshelvedTasks() {
+  const shelved = new Set(board().projects.filter((p) => p.archived).map((p) => p.id));
+  if (!shelved.size) return board().tasks;
+  return board().tasks.filter(
+    (task) => !task.project?.length || task.project.some((tag) => !shelved.has(tag))
+  );
 }
 
 /* ------------------------------------------------------------- view model */
@@ -498,10 +574,14 @@ function defaultProjectId() {
       if (counts.has(id)) counts.set(id, counts.get(id) + 1);
     }
   }
+  // A starred project is the one you said you work in; the busiest is only a guess. Shelved
+  // projects are skipped entirely unless there is nothing else left to open.
+  const live = board().projects.filter((p) => !p.archived);
   return (
-    [...board().projects]
+    [...(live.length ? live : board().projects)]
       .sort(
         (a, b) =>
+          Number(Boolean(b.starred)) - Number(Boolean(a.starred)) ||
           counts.get(b.id) - counts.get(a.id) ||
           (parseDate(a.start) ?? Infinity) - (parseDate(b.start) ?? Infinity)
       )
@@ -722,8 +802,13 @@ function render() {
     tasks: projectTasks,
     allTasks: board().tasks,
     roster: projectPeople(view.project, board().tasks),
-    people: allPeople(board().tasks),
-    projects: [...new Set([...board().projects.map((p) => p.id), ...allProjectTags(board().tasks)])],
+    people: allPeople(unshelvedTasks()),
+    projects: [
+      ...new Set([
+        ...board().projects.filter((p) => !p.archived).map((p) => p.id),
+        ...allProjectTags(unshelvedTasks()),
+      ]),
+    ],
     eligible: selected
       ? {
           blockedBy: eligibleRefs(selected, 'blockedBy', projectTasks),
@@ -733,6 +818,7 @@ function render() {
     assistantReady: Boolean(llm.getKey()),
   });
   if ($('project').open) renderProjectDialog();
+  if ($('projects').open) renderManageProjects();
   if ($('trash').open) renderTrash();
   if (!$('status-bar').textContent) renderSummary(view);
 }
@@ -754,12 +840,17 @@ function renderSummary(view) {
 
 function renderToolbar(view) {
   const picker = $('project-picker');
-  const projects = board().projects;
+  // Starred to the top, shelved out of sight — but never hide the one being looked at.
+  const projects = sortProjects(
+    visibleProjects(board().projects, ui.showArchived).concat(
+      view.project && view.project.archived && !ui.showArchived ? [view.project] : []
+    )
+  );
   picker.textContent = '';
   for (const project of projects) {
     const option = document.createElement('option');
     option.value = project.id;
-    option.textContent = project.title;
+    option.textContent = project.starred ? `★ ${project.title}` : project.title;
     option.selected = project.id === view.project?.id;
     picker.append(option);
   }
@@ -1022,6 +1113,122 @@ function wirePanelResize() {
   handle.addEventListener('dblclick', () => report(setPanelWidth(PANEL_WIDTH_DEFAULT)));
 }
 
+/* ------------------------------------------------------- managing projects */
+
+/** Tasks a project actually holds, goal nodes aside — they are the project's own doing. */
+const projectTaskCount = (id) =>
+  board().tasks.filter((t) => !t.goal && (t.project ?? []).includes(id)).length;
+
+function renderManageProjects() {
+  const list = $('manage-list');
+  list.textContent = '';
+  $('show-archived').checked = ui.showArchived;
+
+  const projects = sortProjects(board().projects);
+  if (!projects.length) {
+    const empty = document.createElement('li');
+    empty.className = 'muted';
+    empty.textContent = 'No projects yet.';
+    list.append(empty);
+    return;
+  }
+
+  for (const project of projects) {
+    const li = document.createElement('li');
+    if (project.archived) li.className = 'archived';
+
+    const star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'star';
+    star.textContent = project.starred ? '★' : '☆';
+    star.title = project.starred ? 'Starred — shown first' : 'Star to keep it at the top';
+    star.setAttribute('aria-pressed', String(Boolean(project.starred)));
+    star.addEventListener('click', () => {
+      updateProject(project.id, { starred: !project.starred });
+      renderManageProjects();
+    });
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = project.title;
+
+    const count = document.createElement('span');
+    count.className = 'why';
+    const tasks = projectTaskCount(project.id);
+    count.textContent = `${tasks} task${tasks === 1 ? '' : 's'}${project.archived ? ' · archived' : ''}`;
+
+    const archive = document.createElement('button');
+    archive.type = 'button';
+    archive.textContent = project.archived ? 'Unarchive' : 'Archive';
+    archive.addEventListener('click', () => {
+      updateProject(project.id, { archived: !project.archived });
+      // Never leave the board on a project that was just put away.
+      if (!project.archived && ui.projectId === project.id) {
+        ui.projectId = defaultProjectId();
+        render();
+        graph.fit();
+      }
+      renderManageProjects();
+      status(project.archived ? `“${project.title}” is back.` : `Archived “${project.title}”.`);
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'danger';
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', () => askDeleteProject(project.id));
+
+    li.append(star, name, count, archive, remove);
+    list.append(li);
+  }
+}
+
+/** Which projects would keep a task alive if this one were deleted, and how many. */
+function rescuedByOthers(id) {
+  const rescued = board().tasks.filter(
+    (t) => !t.goal && (t.project ?? []).includes(id) && (t.project ?? []).some((tag) => tag !== id)
+  );
+  const others = new Set(rescued.flatMap((t) => (t.project ?? []).filter((tag) => tag !== id)));
+  const titles = [...others]
+    .map((tag) => board().projects.find((p) => p.id === tag)?.title ?? tag)
+    .sort((a, b) => a.localeCompare(b));
+  return { count: rescued.length, titles };
+}
+
+/** The project awaiting an answer in the delete dialog. */
+let pendingDelete = null;
+
+function askDeleteProject(id) {
+  const project = board().projects.find((p) => p.id === id);
+  if (!project) return;
+  pendingDelete = id;
+
+  const tasks = projectTaskCount(id);
+  const { count, titles } = rescuedByOthers(id);
+  $('pd-heading').textContent = `Delete “${project.title}”?`;
+  $('pd-detail').textContent = !tasks
+    ? 'It holds no tasks.'
+    : count
+      ? // The part of the rule nobody could guess: shared tasks are not this project's to bin.
+        `${tasks} task${tasks === 1 ? '' : 's'} here, ${count} of them also in ${titles.join(', ')} — those stay, and move there.`
+      : `${tasks} task${tasks === 1 ? '' : 's'} here, in this project only.`;
+  // With no tasks, or none this project alone holds, there is no choice left to offer.
+  const nothingToBin = tasks === count;
+  $('pd-delete').hidden = nothingToBin;
+  $('pd-keep').textContent = nothingToBin ? 'Delete project' : 'Keep the tasks';
+  if (!$('delete-confirm').open) $('delete-confirm').showModal();
+}
+
+function finishDeleteProject(deleteTasks) {
+  const id = pendingDelete;
+  pendingDelete = null;
+  $('delete-confirm').close();
+  if (!id) return;
+  deleteProject(id, { deleteTasks });
+  if ($('projects').open) renderManageProjects();
+  if ($('project').open) $('project').close();
+}
+
 /* ---------------------------------------------------------- link arming */
 
 function setLinkArmed(armed, kind) {
@@ -1269,7 +1476,14 @@ function acceptSuggestion(index) {
 
 /* ---------------------------------------------------------- trash dialog */
 
-const TRASH_LABEL = { task: 'task', edge: 'link' };
+const TRASH_LABEL = { task: 'task', edge: 'link', project: 'project' };
+
+/** What a trash row says it holds — a project entry carries its tasks with it. */
+function trashDetail(record) {
+  const count = record.kind === 'project' ? (record.data.tasks?.length ?? 0) : 0;
+  if (!count) return TRASH_LABEL[record.kind] ?? record.kind;
+  return `project · with ${count} task${count === 1 ? '' : 's'}`;
+}
 
 function renderTrash() {
   const list = $('trash-list');
@@ -1296,7 +1510,7 @@ function renderTrash() {
     label.textContent = record.label || '(untitled)';
     const meta = document.createElement('span');
     meta.className = 'why';
-    meta.textContent = `${TRASH_LABEL[record.kind] ?? record.kind} · ${record.at.slice(0, 10)}`;
+    meta.textContent = `${trashDetail(record)} · ${record.at.slice(0, 10)}`;
     body.append(label, meta);
 
     const restore = document.createElement('button');
@@ -1640,6 +1854,22 @@ function wireEvents() {
   });
 
   wirePanelResize();
+  $('projects-open').addEventListener('click', () => {
+    renderManageProjects();
+    if (!$('projects').open) $('projects').showModal();
+  });
+  $('show-archived').addEventListener('change', (event) => {
+    ui.showArchived = event.target.checked;
+    localStorage.setItem(ARCHIVED_KEY, String(ui.showArchived));
+    render();
+  });
+  $('pd-keep').addEventListener('click', () => finishDeleteProject(false));
+  $('pd-delete').addEventListener('click', () => finishDeleteProject(true));
+  $('pd-cancel').addEventListener('click', () => {
+    pendingDelete = null;
+    $('delete-confirm').close();
+  });
+
   $('organise-folders').addEventListener('click', organiseIntoFolders);
   $('auto-layout').addEventListener('click', () => setAutoLayout(!ui.autoLayout));
   $('fit').addEventListener('click', () => graph.fit());
@@ -1747,9 +1977,8 @@ function wireEvents() {
   $('project-delete').addEventListener('click', () => {
     const project = currentProject();
     if (!project) return;
-    deleteProject(project.id);
-    if (currentProject()) renderProjectDialog();
-    else $('project').close();
+    // Only asks; `finishDeleteProject` closes this dialog if the answer is yes.
+    askDeleteProject(project.id);
   });
 
   $('export-zip').addEventListener('click', exportZip);
@@ -1822,6 +2051,7 @@ function wireEvents() {
 
 async function boot() {
   ui.autoLayout = readAutoLayout();
+  ui.showArchived = readShowArchived();
   setPanelWidth(readPanelWidth(), { persist: false });
   graph = createGraph(
     $('canvas'),
