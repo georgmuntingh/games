@@ -820,6 +820,20 @@ test('clearing the goal hands its node back for deletion', () => {
   assertEqual(removed.map((t) => t.id), [goalTaskId('w')]);
 });
 
+test('deleting a project hands its goal node back too', () => {
+  // What `deleteProject` relies on: with the project gone from the board, its goal node is
+  // no longer wanted and comes back for binning rather than lingering as an orphan card.
+  const before = syncGoalTasks({
+    tasks: [],
+    projects: [{ id: 'website', title: 'Website', goal: 'Ship it', end: '2026-09-01' }],
+  });
+  assertEqual(before.tasks.map((t) => t.id), ['website-goal']);
+
+  const after = syncGoalTasks({ tasks: before.tasks, projects: [] });
+  assertEqual(after.tasks, []);
+  assertEqual(after.removed.map((t) => t.id), ['website-goal']);
+});
+
 test('a goal node survives a round-trip through markdown', () => {
   const { tasks } = syncGoalTasks({ tasks: [], projects: [projectWithGoal()] });
   const markdown = taskToMarkdown(tasks[0]);

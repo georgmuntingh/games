@@ -452,6 +452,9 @@ function addProject(fields = {}) {
   ui.people.clear();
   ui.selectedId = null;
   commit({ ...board(), projects: [...board().projects, project] }, `Created “${title}”.`);
+  // A new project holds one card at most, which is precisely when a stale viewport looks
+  // like nothing was created.
+  graph.fit();
   return project;
 }
 
@@ -459,21 +462,27 @@ function addProject(fields = {}) {
 function deleteProject(id) {
   const project = board().projects.find((p) => p.id === id);
   if (!project) return;
-  const next = {
-    projects: board().projects.filter((p) => p.id !== id),
-    tasks: board().tasks.map((t) => ({
-      ...t,
-      project: (t.project ?? []).filter((tag) => tag !== id),
-    })),
-  };
-  history.push(next);
   ui.projectId = null;
-  ui.projectId = defaultProjectId();
   ui.people.clear();
   ui.selectedId = null;
-  persist();
+  // Through `commit` like every other mutation, rather than pushing history directly: that
+  // bypassed the goal sync, so a deleted project's goal card stayed on the board with
+  // nothing behind it, and it dropped the trash off the board state entirely.
+  commit(
+    {
+      ...board(),
+      projects: board().projects.filter((p) => p.id !== id),
+      tasks: board().tasks.map((t) => ({
+        ...t,
+        project: (t.project ?? []).filter((tag) => tag !== id),
+      })),
+    },
+    `Deleted “${project.title}”. Its tasks kept, untagged. Ctrl+Z to undo.`
+  );
+  // Chosen from the board as it is now, with this project gone.
+  ui.projectId = defaultProjectId();
   render();
-  status(`Deleted “${project.title}”. Its tasks kept, untagged. Ctrl+Z to undo.`);
+  graph.fit();
 }
 
 /* ------------------------------------------------------------- view model */
@@ -1413,7 +1422,12 @@ function writeProjectField(key, value) {
     return;
   }
   const project = currentProject();
-  if (project) updateProject(project.id, { [key]: value });
+  // Committing a value the project already holds would spend an undo step on nothing, which
+  // is exactly what a debounced keystroke and the blur that follows it would otherwise do.
+  const unchanged = Array.isArray(value)
+    ? JSON.stringify(project?.[key] ?? []) === JSON.stringify(value)
+    : (project?.[key] ?? '') === value;
+  if (project && !unchanged) updateProject(project.id, { [key]: value });
   renderProjectDialog();
 }
 
@@ -1555,6 +1569,8 @@ function wireEvents() {
     ui.selectedId = null;
     status('');
     render();
+    // Land looking at the project you picked, rather than at wherever the last one was.
+    graph.fit();
   });
 
   peopleMenu = createMenu($('people-menu'), $('people-options'));
@@ -1684,15 +1700,33 @@ function wireEvents() {
   );
   $('project-new').addEventListener('click', () => openProject('create'));
 
-  const projectField = (elementId, key, transform = (v) => v.trim()) =>
-    $(elementId).addEventListener('change', (event) =>
-      writeProjectField(key, transform(event.target.value))
-    );
+  /**
+   * Project fields, committed as you type rather than only when you leave them.
+   *
+   * The dialog is a sheet with the board still visible around it, so typing an end goal and
+   * watching no card appear reads as the goal being ignored — which is exactly how this was
+   * reported. Waiting for a blur is too late when the result is on screen behind you.
+   *
+   * Debounced, so a typed sentence costs an undo step or two rather than one per keystroke,
+   * and only for the text fields: a colour picker fires `input` continuously while dragging,
+   * and a date is committed by the picker itself.
+   */
+  const projectField = (elementId, key, transform = (v) => v.trim(), live = true) => {
+    const element = $(elementId);
+    const write = () => writeProjectField(key, transform(element.value));
+    element.addEventListener('change', write);
+    if (!live) return;
+    let pending = null;
+    element.addEventListener('input', () => {
+      clearTimeout(pending);
+      pending = setTimeout(write, 400);
+    });
+  };
   projectField('p-title', 'title');
   projectField('p-goal', 'goal');
-  projectField('p-start', 'start');
-  projectField('p-end', 'end');
-  projectField('p-color', 'color');
+  projectField('p-start', 'start', (v) => v.trim(), false);
+  projectField('p-end', 'end', (v) => v.trim(), false);
+  projectField('p-color', 'color', (v) => v.trim(), false);
   projectField('p-context', 'context', (v) => v.replace(/\s+$/, ''));
 
   $('p-people-form').addEventListener('submit', (event) => {
