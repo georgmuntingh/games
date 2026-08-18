@@ -14,6 +14,12 @@
  * folder — when a folder is connected the folder is the single source of truth. This
  * is the only module that knows where bytes live: an Obsidian plugin reimplements just
  * this file against the vault API.
+ *
+ * A connected folder opens *read-only*. The folder may be inside a vault that syncs, and
+ * nothing here can tell a folder that has finished syncing from one that is mid-pull — so
+ * the answer comes from the person who can tell, and `unlock` re-reads before believing
+ * them. Until then `save` touches nothing, which is what makes a tab left open for a week
+ * harmless rather than a way to overwrite a week of edits made elsewhere.
  */
 
 // The one thing this layer needs from the domain: which subfolders are projects, and so
@@ -124,8 +130,10 @@ async function readDirectory(handle) {
   return files;
 }
 
-export function createStorage() {
+export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
   let directory = null;
+  /** Whether writes to the connected folder have been authorised. See `unlock`. */
+  let unlocked = false;
 
   /**
    * The directory a path lives in. Creating on the way down is for writing only, so a stale
@@ -142,7 +150,7 @@ export function createStorage() {
   const basename = (path) => path.slice(path.lastIndexOf('/') + 1);
   /** Files we have read or written in the connected folder — the only ones we may delete. */
   let owned = new Set();
-  /** Last content written per file, so unchanged files are not rewritten. */
+  /** What each file said on disk when we last read or wrote it. */
   let written = new Map();
 
   const state = {
@@ -155,6 +163,10 @@ export function createStorage() {
     supportsFolder,
     /** True when a folder was connected previously but needs a click to re-authorise. */
     reconnectable: false,
+    /** False while a connected folder is still read-only. Browser-only storage is always writable. */
+    get writable() {
+      return !directory || unlocked;
+    },
   };
 
   /** Reattach a previously chosen folder, but only if permission is still granted. */
@@ -192,12 +204,19 @@ export function createStorage() {
   }
 
   async function save(files) {
+    // Before the mirror, not after: a board that was never allowed onto disk must not be
+    // left behind in localStorage either, where a later session could write it back out.
+    if (directory && !unlocked) return { skipped: 'read-only' };
     writeMirror(files);
-    if (!directory) return;
+    if (!directory) return {};
     for (const [name, text] of Object.entries(files)) {
-      // Only touch files that actually changed. Rewriting all of them on every edit
-      // would churn mtimes and wake Obsidian's file watcher for notes nothing altered.
-      if (written.get(name) === text) continue;
+      // Only touch files that actually changed, and judge that by what the file *says*
+      // rather than by its bytes. A note hand-written in a vault rarely matches this app's
+      // spacing and key order, and rewriting all of those on the first edit of a session
+      // would churn mtimes, wake Obsidian's watcher for notes nothing altered, and hand
+      // every one of them to the next sync as a change to reconcile.
+      const previous = written.get(name);
+      if (previous !== undefined && sameFile(name, previous, text)) continue;
       const dir = await directoryFor(name, true);
       const fileHandle = await dir.getFileHandle(basename(name), { create: true });
       const writable = await fileHandle.createWritable();
@@ -221,6 +240,26 @@ export function createStorage() {
       written.delete(name);
     }
     owned = new Set(Object.keys(files));
+    return {};
+  }
+
+  /**
+   * Authorise writes to the connected folder, re-reading it first.
+   *
+   * The re-read is the point: it is what makes "yes, this has finished syncing" true of the
+   * folder as it is now rather than as it was at boot. Nothing has been written while
+   * locked, so there is nothing to merge and the fresh contents simply replace the board.
+   */
+  async function unlock() {
+    if (!directory) return null;
+    const files = await load();
+    unlocked = true;
+    return files;
+  }
+
+  /** Withdraw that authorisation — the tab has been away long enough to have gone stale. */
+  function lock() {
+    unlocked = false;
   }
 
   /** Prompt for a directory. Returns its contents, which replace whatever was loaded. */
@@ -232,17 +271,21 @@ export function createStorage() {
       throw new Error('Permission to use that folder was declined.');
     }
     directory = handle;
+    unlocked = false;
     state.reconnectable = false;
-    await idbSet(handle);
+    // Failing to *remember* the folder is no reason to refuse to use it: private windows and
+    // blocked storage both land here, and the folder itself works fine for this session.
+    await idbSet(handle).catch(() => {});
     return load();
   }
 
   function disconnectFolder() {
     directory = null;
+    unlocked = false;
     written = new Map();
     state.reconnectable = false;
     idbSet(null).catch(() => {});
   }
 
-  return { state, load, save, connectFolder, disconnectFolder, tryRestoreFolder };
+  return { state, load, save, unlock, lock, connectFolder, disconnectFolder, tryRestoreFolder };
 }

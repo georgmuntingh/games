@@ -43,7 +43,10 @@ import {
   trashToMarkdown,
   pushTrash,
   TRASH_LIMIT,
+  canonicalise,
+  sameFile,
 } from '../model.js';
+import { createStorage } from '../storage.js';
 import { buildBrief, buildTaskBrief } from '../exporter.js';
 import { parseJsonResponse, ACTIONS } from '../prompts.js';
 import { crc32, createZip } from '../zip.js';
@@ -1246,32 +1249,363 @@ test('an empty archive is still well formed', () => {
   assertEqual(zip.length, 22);
 });
 
+/* --------------------------------------------------------- same file */
+
+describe('same file');
+
+const TASK_MD = `---
+id: wireframes
+title: Wireframes
+project: [website]
+done: false
+---
+Some notes.
+
+- [ ] first
+- [x] second
+`;
+
+test('a file is the same as itself', () => {
+  assert(sameFile('wireframes.md', TASK_MD, TASK_MD));
+});
+
+test('key order, quoting, CRLF and checklist position do not change meaning', () => {
+  const rearranged =
+    '---\r\n' +
+    'title: "Wireframes"\r\n' +
+    'project:\r\n  - website\r\n' +
+    'id: wireframes\r\n' +
+    'done: false\r\n' +
+    '---\r\n' +
+    '- [ ] first\r\n' +
+    'Some notes.\r\n' +
+    '- [x] second\r\n';
+  assert(rearranged !== TASK_MD, 'the two should differ as bytes');
+  assert(sameFile('wireframes.md', TASK_MD, rearranged));
+});
+
+test('a real change is still a change', () => {
+  assert(!sameFile('wireframes.md', TASK_MD, TASK_MD.replace('done: false', 'done: true')));
+  assert(!sameFile('wireframes.md', TASK_MD, TASK_MD.replace('Some notes.', 'Other notes.')));
+  assert(!sameFile('wireframes.md', TASK_MD, TASK_MD.replace('- [ ] first', '- [x] first')));
+});
+
+test('projects and the trash canonicalise too', () => {
+  const a = '---\nid: website\ntitle: Website\nstarred: true\n---\nContext.\n';
+  const b = '---\ntitle: Website\nstarred: true\nid: website\n---\n\nContext.\n\n';
+  assert(sameFile('website/_project-website.md', a, b));
+  assert(!sameFile('website/_project-website.md', a, a.replace('Context.', 'Different.')));
+  const trash = trashToMarkdown([{ kind: 'task', at: 'now', label: 'x', data: {} }]);
+  assert(sameFile('_trash.md', trash, trash));
+});
+
+test('a note with no frontmatter is compared by what it says', () => {
+  assert(sameFile('stray.md', 'Just prose.\n', 'Just prose.'));
+  assert(!sameFile('stray.md', 'Just prose.', 'Other prose.'));
+});
+
+test('canonicalising the demo corpus is a fixed point', () => {
+  for (const [name, text] of Object.entries(DEMO)) {
+    const once = canonicalise(name, text);
+    assertEqual(canonicalise(name, once), once, name);
+  }
+});
+
+/* ------------------------------------------------------ storage gate */
+
+/**
+ * Enough of `FileSystemDirectoryHandle` for storage.js: nested directories, writable
+ * files, and a log of every write and removal — so a test can assert that a read-only
+ * board touched nothing at all, which is the whole point of the gate.
+ */
+function fakeDirectory(name, seed = {}, log = [], prefix = '') {
+  const files = new Map();
+  const dirs = new Map();
+
+  const handle = {
+    name,
+    kind: 'directory',
+    log,
+    async queryPermission() {
+      return 'granted';
+    },
+    async requestPermission() {
+      return 'granted';
+    },
+    async *entries() {
+      for (const [key, text] of [...files]) {
+        yield [
+          key,
+          {
+            kind: 'file',
+            name: key,
+            async getFile() {
+              return {
+                async text() {
+                  return text;
+                },
+              };
+            },
+          },
+        ];
+      }
+      for (const [key, dir] of [...dirs]) yield [key, dir];
+    },
+    async getDirectoryHandle(key, { create } = {}) {
+      if (!dirs.has(key)) {
+        if (!create) throw new Error(`no such directory: ${key}`);
+        dirs.set(key, fakeDirectory(key, {}, log, `${prefix}${key}/`));
+      }
+      return dirs.get(key);
+    },
+    async getFileHandle(key, { create } = {}) {
+      if (!files.has(key) && !create) throw new Error(`no such file: ${key}`);
+      return {
+        kind: 'file',
+        name: key,
+        async getFile() {
+          return {
+            async text() {
+              return files.get(key) ?? '';
+            },
+          };
+        },
+        async createWritable() {
+          let buffer = '';
+          return {
+            async write(text) {
+              buffer += text;
+            },
+            async close() {
+              files.set(key, buffer);
+              log.push(`write ${prefix}${key}`);
+            },
+          };
+        },
+      };
+    },
+    async removeEntry(key) {
+      if (!files.delete(key)) throw new Error(`no such file: ${key}`);
+      log.push(`remove ${prefix}${key}`);
+    },
+    /** Write straight to the fake disk, as another device or Obsidian would. */
+    put(path, text) {
+      const cut = path.indexOf('/');
+      if (cut === -1) {
+        files.set(path, text);
+        return;
+      }
+      const folder = path.slice(0, cut);
+      if (!dirs.has(folder)) dirs.set(folder, fakeDirectory(folder, {}, log, `${prefix}${folder}/`));
+      dirs.get(folder).put(path.slice(cut + 1), text);
+    },
+    /** Current contents as a `path -> text` map, for assertions. */
+    dump() {
+      const out = {};
+      for (const [key, text] of files) out[`${prefix}${key}`] = text;
+      for (const dir of dirs.values()) Object.assign(out, dir.dump());
+      return out;
+    },
+  };
+
+  for (const [path, text] of Object.entries(seed)) handle.put(path, text);
+  return handle;
+}
+
+/** A storage connected to a fake folder, still locked, with its write log cleared. */
+async function connectedTo(seed) {
+  const directory = fakeDirectory('vault', seed);
+  const previous = globalThis.showDirectoryPicker;
+  globalThis.showDirectoryPicker = async () => directory;
+  try {
+    const storage = createStorage({ sameFile });
+    const files = await storage.connectFolder();
+    directory.log.length = 0;
+    return { storage, directory, files };
+  } finally {
+    globalThis.showDirectoryPicker = previous;
+  }
+}
+
+const DOOMED_MD = '---\nid: doomed\ntitle: Doomed\ndone: false\n---\n';
+
+/**
+ * Like `test`, but puts this browser's own board back afterwards.
+ *
+ * `save` mirrors every write into localStorage under the same key the app itself uses, so
+ * without this, running the tests would quietly replace the board of anyone using the
+ * browser-only backend.
+ */
+function storageTest(name, fn) {
+  test(name, async () => {
+    const mirror = localStorage.getItem('tasks.files');
+    try {
+      await fn();
+    } finally {
+      if (mirror === null) localStorage.removeItem('tasks.files');
+      else localStorage.setItem('tasks.files', mirror);
+    }
+  });
+}
+
+describe('storage gate');
+
+storageTest('browser-only storage is always writable', () => {
+  assert(createStorage({ sameFile }).state.writable);
+});
+
+storageTest('a connected folder opens read-only', async () => {
+  const { storage } = await connectedTo({ 'wireframes.md': TASK_MD });
+  assertEqual(storage.state.mode, 'folder');
+  assert(!storage.state.writable, 'a fresh folder must not be writable');
+});
+
+storageTest('a read-only folder is not written to, and nothing is deleted', async () => {
+  const { storage, directory } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  const before = directory.dump();
+  const mirror = localStorage.getItem('tasks.files');
+
+  // An edit to one file and the disappearance of another: both must be refused.
+  const result = await storage.save({ 'wireframes.md': TASK_MD.replace('Wireframes', 'Changed') });
+
+  assertEqual(result, { skipped: 'read-only' });
+  assertEqual(directory.log, [], 'a locked folder must see no writes and no removals');
+  assertEqual(directory.dump(), before);
+  assertEqual(localStorage.getItem('tasks.files'), mirror, 'the mirror must not move either');
+});
+
+storageTest('unlocking re-reads the folder', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  // Another device gets there first, after this tab has already read the folder.
+  directory.put('wireframes.md', TASK_MD.replace('Some notes.', 'Notes from my phone.'));
+  directory.put('later.md', '---\nid: later\ntitle: Later\ndone: false\n---\n');
+
+  const files = await storage.unlock();
+
+  assert(storage.state.writable, 'unlock must open the gate');
+  assert(files['wireframes.md'].includes('Notes from my phone.'), 'the external edit must be seen');
+  assert('later.md' in files, 'the external addition must be seen');
+  assertEqual(directory.log, [], 'unlocking must not write anything');
+});
+
+storageTest('writes resume once unlocked', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  await storage.unlock();
+  const changed = TASK_MD.replace('Some notes.', 'Edited here.');
+
+  await storage.save({ 'wireframes.md': changed });
+
+  assertEqual(directory.log, ['write wireframes.md']);
+  assertEqual(directory.dump()['wireframes.md'], changed);
+});
+
+storageTest('a file that differs only in formatting is left alone', async () => {
+  // As a hand-written vault note would be: same meaning, different shape.
+  const handWritten =
+    '---\ntitle: Wireframes\nid: wireframes\nproject: [website]\ndone: false\n---\n' +
+    'Some notes.\n\n- [ ] first\n- [x] second\n';
+  const { storage, directory } = await connectedTo({ 'wireframes.md': handWritten });
+  await storage.unlock();
+
+  await storage.save({ 'wireframes.md': canonicalise('wireframes.md', handWritten) });
+
+  assertEqual(directory.log, [], 'reformatting alone is not a change worth writing');
+  assertEqual(directory.dump()['wireframes.md'], handWritten, 'the file keeps its own shape');
+});
+
+storageTest('a genuinely new file is still created', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  await storage.unlock();
+  const added = '---\nid: new-task\ntitle: New task\ndone: false\n---\n';
+
+  await storage.save({ 'wireframes.md': TASK_MD, 'new-task.md': added });
+
+  assertEqual(directory.log, ['write new-task.md']);
+  assertEqual(directory.dump()['new-task.md'], added);
+});
+
+storageTest('deletions happen once unlocked, and not before', async () => {
+  const { storage, directory } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+
+  await storage.save({ 'wireframes.md': TASK_MD });
+  assert('doomed.md' in directory.dump(), 'a locked folder keeps its files');
+
+  await storage.unlock();
+  await storage.save({ 'wireframes.md': TASK_MD });
+
+  assertEqual(directory.log, ['remove doomed.md']);
+  assert(!('doomed.md' in directory.dump()));
+});
+
+storageTest('locking again withdraws the right to write', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  await storage.unlock();
+  storage.lock();
+
+  assert(!storage.state.writable);
+  await storage.save({ 'wireframes.md': TASK_MD.replace('Wireframes', 'Changed') });
+  assertEqual(directory.log, []);
+});
+
+storageTest('project subfolders round-trip through the gate', async () => {
+  const { storage, directory } = await connectedTo({
+    'website/_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+    'website/wireframes.md': TASK_MD,
+  });
+  assert(!storage.state.writable);
+
+  const files = await storage.unlock();
+  assert('website/_project-website.md' in files);
+  assert('website/wireframes.md' in files);
+
+  await storage.save({
+    ...files,
+    'website/wireframes.md': TASK_MD.replace('Some notes.', 'Edited.'),
+  });
+  assertEqual(directory.log, ['write website/wireframes.md']);
+});
+
 /* ---------------------------------------------------------------- run */
 
 const out = document.getElementById('out');
 let passed = 0;
 let failed = 0;
 
-for (const { name, tests } of groups) {
-  const heading = document.createElement('h2');
-  heading.textContent = name;
-  out.append(heading);
-  for (const { name: testName, fn } of tests) {
-    const row = document.createElement('div');
-    try {
-      fn();
-      row.className = 'pass';
-      row.textContent = `✓ ${testName}`;
-      passed += 1;
-    } catch (error) {
-      row.className = 'fail';
-      row.textContent = `✗ ${testName} — ${error.message}`;
-      failed += 1;
+/**
+ * Tests may be async — the storage ones drive a fake filesystem — so each is awaited in
+ * turn. Wrapped in a function rather than run at the top level: top-level await is beyond
+ * the browsers this project builds for.
+ */
+async function run() {
+  for (const { name, tests } of groups) {
+    const heading = document.createElement('h2');
+    heading.textContent = name;
+    out.append(heading);
+    for (const { name: testName, fn } of tests) {
+      const row = document.createElement('div');
+      try {
+        await fn();
+        row.className = 'pass';
+        row.textContent = `✓ ${testName}`;
+        passed += 1;
+      } catch (error) {
+        row.className = 'fail';
+        row.textContent = `✗ ${testName} — ${error.message}`;
+        failed += 1;
+      }
+      out.append(row);
     }
-    out.append(row);
   }
+
+  const summary = document.getElementById('summary');
+  summary.textContent = `${passed} passed, ${failed} failed`;
+  summary.className = failed ? 'fail' : 'pass';
 }
 
-const summary = document.getElementById('summary');
-summary.textContent = `${passed} passed, ${failed} failed`;
-summary.className = failed ? 'fail' : 'pass';
+run();

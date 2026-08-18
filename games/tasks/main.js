@@ -36,6 +36,7 @@ import {
   formatDate,
   parseDate,
   totalEstimateHours,
+  sameFile,
 } from './model.js';
 import { createGraph, LEVEL_SEPARATION_DEFAULT } from './graph.js';
 import { createPanel } from './panel.js';
@@ -59,8 +60,18 @@ const DEMO_FILES = Object.fromEntries(
 
 /* ---------------------------------------------------------------- state */
 
-const storage = createStorage();
+// `sameFile` is the domain's opinion on when two files say the same thing; storage.js
+// stays free of any notion of what a task is.
+const storage = createStorage({ sameFile });
 const history = createHistory({ tasks: [], projects: [], trash: [] });
+
+/**
+ * How long a tab may sit in the background before its picture of the folder is treated as
+ * out of date and editing is withdrawn again.
+ */
+const STALE_AFTER_MS = 15 * 60 * 1000;
+/** When this tab was last hidden, so returning to it can tell a blink from a night away. */
+let hiddenAt = 0;
 
 /** UI state, deliberately outside the undo history. */
 const ui = {
@@ -132,6 +143,19 @@ function resetBoard(files) {
 const taskRecord = (task) => ({ kind: 'task', at: now(), label: task.title, data: task });
 
 /**
+ * Whether the board may be changed at all.
+ *
+ * A connected folder starts read-only, so refuse the edit outright rather than letting the
+ * board drift away from the files: an edit that cannot reach the disk is an edit waiting to
+ * be lost, and one the user believes they have made.
+ */
+function requireWritable() {
+  if (storage.state.writable) return true;
+  status('Editing is off while this folder is read-only — use “Enable editing” above.', true);
+  return false;
+}
+
+/**
  * Commit a new board: reconcile the goal nodes, record undo, persist, redraw.
  *
  * The goal sync lives here rather than at each call site so no mutation can leave a
@@ -139,6 +163,7 @@ const taskRecord = (task) => ({ kind: 'task', at: now(), label: task.title, data
  * is binned like any other deletion.
  */
 function commit(next, message) {
+  if (!requireWritable()) return;
   const { tasks, removed } = syncGoalTasks(next);
   const trash = removed.reduce((acc, task) => pushTrash(acc, taskRecord(task)), next.trash ?? []);
   history.push({ ...next, tasks, trash });
@@ -148,6 +173,10 @@ function commit(next, message) {
 }
 
 async function persist() {
+  // Boot reconciles goal nodes and may adopt the demo board, both of which want saving —
+  // but not into a folder nobody has vouched for yet. Enabling editing re-reads and
+  // re-persists, so nothing owed is forgotten.
+  if (!storage.state.writable) return;
   try {
     await storage.save(boardToFiles(board()));
   } catch (error) {
@@ -1671,11 +1700,24 @@ function openSettings() {
   if (!$('model-picker').options.length) loadModels();
 }
 
+/** Show or hide the read-only strip above the board. */
+function refreshReadOnly() {
+  const { writable, folderName } = storage.state;
+  $('readonly-bar').hidden = writable;
+  if (writable) return;
+  $('readonly-text').textContent =
+    `Reading “${folderName}” — editing is off. Make sure Obsidian has finished syncing ` +
+    'this vault, then enable editing.';
+}
+
 function refreshStorageState() {
-  const { mode, folderName, supportsFolder, reconnectable } = storage.state;
+  const { mode, folderName, supportsFolder, reconnectable, writable } = storage.state;
+  refreshReadOnly();
   const text =
     mode === 'folder'
-      ? `Reading and writing .md files in “${folderName}”.`
+      ? writable
+        ? `Reading and writing .md files in “${folderName}”.`
+        : `Reading .md files in “${folderName}”. Editing is off until you enable it.`
       : reconnectable
         ? 'A folder was connected before. Click “Open folder…” to reconnect it.'
         : supportsFolder
@@ -1693,7 +1735,7 @@ function refreshStorageState() {
   $('disconnect-folder').disabled = mode !== 'folder';
 
   const moves = pendingMoves(board(), organisedBoard());
-  $('organise-folders').disabled = !moves;
+  $('organise-folders').disabled = !moves || !writable;
   $('organise-state').textContent = moves
     ? `Would move ${moves} file${moves === 1 ? '' : 's'} into project folders. Nothing is deleted.`
     : 'Nothing to move.';
@@ -1754,6 +1796,7 @@ function exportZip() {
 }
 
 async function importFiles(fileList) {
+  if (!requireWritable()) return;
   const files = { ...boardToFiles(board()) };
   for (const file of fileList) {
     if (!/\.md$/i.test(file.name)) continue;
@@ -1910,15 +1953,47 @@ function wireEvents() {
       const files = await storage.connectFolder();
       refreshStorageState();
       if (Object.keys(files).length) {
-        await setBoardFromFiles(files, `Opened “${storage.state.folderName}”.`);
+        await setBoardFromFiles(files, `Opened “${storage.state.folderName}” read-only.`);
       } else {
-        await persist();
-        status(`Opened empty folder “${storage.state.folderName}” — wrote the current board into it.`);
+        // Nothing is written here. A folder can read as empty precisely because sync has
+        // not caught up yet, and writing the current board into it is how a vault gets
+        // replaced by a demo board.
+        status(
+          `Opened “${storage.state.folderName}”, which has no .md files in it. ` +
+            'If that looks wrong, let Obsidian finish syncing before enabling editing.'
+        );
       }
     } catch (error) {
       if (error.name !== 'AbortError') status(error.message, true);
     }
   });
+  $('enable-editing').addEventListener('click', async () => {
+    try {
+      // The re-read happens inside `unlock`, so what gets enabled is editing of the folder
+      // as it stands now — not as it stood when this tab opened.
+      const files = await storage.unlock();
+      if (!files) return;
+      await setBoardFromFiles(files, `Editing “${storage.state.folderName}”.`);
+      refreshStorageState();
+    } catch (error) {
+      status(`Could not re-read the folder: ${error.message}`, true);
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      hiddenAt = Date.now();
+      return;
+    }
+    const away = hiddenAt && Date.now() - hiddenAt;
+    hiddenAt = 0;
+    if (!away || away < STALE_AFTER_MS) return;
+    if (storage.state.mode !== 'folder' || !storage.state.writable) return;
+    storage.lock();
+    refreshStorageState();
+    status('This tab has been away a while — editing is off until you confirm the folder is up to date.');
+  });
+
   $('disconnect-folder').addEventListener('click', () => {
     storage.disconnectFolder();
     refreshStorageState();
@@ -1989,10 +2064,12 @@ function wireEvents() {
   });
   $('copy-brief').addEventListener('click', copyBrief);
 
-  $('load-demo').addEventListener('click', () =>
-    setBoardFromFiles({ ...DEMO_FILES }, 'Demo project reloaded.')
-  );
+  $('load-demo').addEventListener('click', () => {
+    if (!requireWritable()) return;
+    setBoardFromFiles({ ...DEMO_FILES }, 'Demo project reloaded.');
+  });
   $('clear-board').addEventListener('click', async () => {
+    if (!requireWritable()) return;
     await setBoardFromFiles({}, 'Board cleared. Name a project to begin.');
     $('settings').close();
     openProject('create');
@@ -2005,6 +2082,7 @@ function wireEvents() {
       document.querySelector('dialog[open]') !== null;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
       event.preventDefault();
+      if (!requireWritable()) return;
       const next = event.shiftKey ? history.redo() : history.undo();
       if (!next.tasks.some((t) => t.id === ui.selectedId)) ui.selectedId = null;
       ui.selectedEdgeId = null;
@@ -2152,6 +2230,7 @@ async function boot() {
     await persist();
   }
 
+  refreshStorageState();
   render();
   graph.fit();
   if (isEmpty) status('Demo project loaded. Settings ⚙ to clear it and start empty.');
