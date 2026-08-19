@@ -350,20 +350,39 @@ function homeFolder(task, folderOf) {
 }
 
 /**
- * Project ids claimed by more than one folder. The first read wins; this is what lets the
- * app say so rather than quietly dropping the others.
+ * Ids claimed by more than one file, and which files `buildBoard` will therefore drop.
+ *
+ * The first read wins, so the rest have nowhere to go: their id already belongs to another
+ * file, and everything written from the board is written to a path derived from the id. That
+ * makes `paths` the more useful half — those files must be left alone rather than deleted as
+ * files this app owns but no longer has a board entry for. `ids` is what lets the app say so.
+ *
+ * Both kinds are looked up the way the board looks them up, inside the file: a project's id
+ * comes from its frontmatter, not its folder, and so does a task's. Two copies of one note
+ * under different names clash on the id even though nothing about their names says so, which
+ * is exactly the case that used to end with one of them deleted.
  */
-export function duplicateProjectIds(files) {
+export function duplicateIds(files) {
   const seen = new Set();
-  const clashes = new Set();
-  for (const filename of Object.keys(files)) {
+  const ids = new Set();
+  const paths = [];
+  for (const [filename, text] of Object.entries(files)) {
     const base = filename.slice(filename.lastIndexOf('/') + 1);
-    if (!/\.md$/i.test(base) || !base.startsWith(PROJECT_PREFIX)) continue;
-    const id = base.replace(/\.md$/i, '').replace(new RegExp(`^${PROJECT_PREFIX}`), '');
-    if (seen.has(id)) clashes.add(id);
-    seen.add(id);
+    if (!/\.md$/i.test(base) || base === TRASH_FILENAME) continue;
+    const project = base.startsWith(PROJECT_PREFIX);
+    const id = project
+      ? projectFromMarkdown(filename, text).id
+      : taskFromMarkdown(base, text).id;
+    // Namespaced: a project and a task may share an id without either being a duplicate.
+    const key = `${project ? 'project' : 'task'}:${id}`;
+    if (seen.has(key)) {
+      ids.add(id);
+      paths.push(filename);
+      continue;
+    }
+    seen.add(key);
   }
-  return [...clashes];
+  return { ids: [...ids], paths };
 }
 
 /**
@@ -375,6 +394,7 @@ export function buildBoard(files) {
   const projects = [];
   let trash = [];
   const claimed = new Set();
+  const taken = new Set();
   for (const [filename, text] of Object.entries(files)) {
     if (!/\.md$/i.test(filename)) continue;
     const base = filename.slice(filename.lastIndexOf('/') + 1);
@@ -387,7 +407,14 @@ export function buildBoard(files) {
       if (claimed.has(project.id)) continue;
       claimed.add(project.id);
       projects.push(project);
-    } else tasks.push(taskFromMarkdown(base, text));
+    } else {
+      const task = taskFromMarkdown(base, text);
+      // And two files claiming one task id would collapse onto one path on the next save,
+      // taking whichever of them lost with it. First wins, as with projects.
+      if (taken.has(task.id)) continue;
+      taken.add(task.id);
+      tasks.push(task);
+    }
   }
   tasks.sort((a, b) => a.id.localeCompare(b.id));
   projects.sort((a, b) => a.id.localeCompare(b.id));

@@ -17,7 +17,7 @@ import {
   projectToMarkdown,
   buildBoard,
   boardToFiles,
-  duplicateProjectIds,
+  duplicateIds,
   sortProjects,
   visibleProjects,
   deleteProjectPlan,
@@ -723,14 +723,37 @@ test('two folders claiming one id: the first is used', () => {
 
 test('a clash is reported so the app can say so', () => {
   assertEqual(
-    duplicateProjectIds({
+    duplicateIds({
       'a/_project-website.md': '',
       'b/_project-website.md': '',
       'kitchen/_project-kitchen.md': '',
     }),
-    ['website']
+    { ids: ['website'], paths: ['b/_project-website.md'] }
   );
-  assertEqual(duplicateProjectIds(NESTED), []);
+  assertEqual(duplicateIds(NESTED), { ids: [], paths: [] });
+});
+
+test('two files claiming one task id clash on what is inside them', () => {
+  const files = {
+    'wireframes.md': TASK_MD,
+    'wireframes 1.md': TASK_MD,
+  };
+  assertEqual(duplicateIds(files), { ids: ['wireframes'], paths: ['wireframes 1.md'] });
+  // The board keeps the first and drops the second rather than holding two of one id.
+  assertEqual(
+    buildBoard(files).tasks.map((task) => task.id),
+    ['wireframes']
+  );
+});
+
+test('a project and a task may share an id', () => {
+  assertEqual(
+    duplicateIds({
+      '_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+      'website.md': '---\nid: website\ntitle: Website launch\n---\n',
+    }),
+    { ids: [], paths: [] }
+  );
 });
 
 /* ------------------------------------------------------------- initials */
@@ -1484,9 +1507,25 @@ test('canonicalising the demo corpus is a fixed point', () => {
  * files, and a log of every write and removal — so a test can assert that a read-only
  * board touched nothing at all, which is the whole point of the gate.
  */
+/**
+ * A clock for the fake filesystem, so every write lands at a later `lastModified` than the
+ * read before it — which is the whole of what `save` now checks before touching anything.
+ */
+let fakeClock = Date.UTC(2026, 0, 1);
+
 function fakeDirectory(name, seed = {}, log = [], prefix = '') {
+  /** `name -> { text, mtime, size }`, the shape `save` now checks a file against. */
   const files = new Map();
   const dirs = new Map();
+
+  const record = (text) => ({ text, mtime: (fakeClock += 1000), size: text.length });
+  const asFile = (rec) => ({
+    lastModified: rec.mtime,
+    size: rec.size,
+    async text() {
+      return rec.text;
+    },
+  });
 
   const handle = {
     name,
@@ -1499,18 +1538,14 @@ function fakeDirectory(name, seed = {}, log = [], prefix = '') {
       return 'granted';
     },
     async *entries() {
-      for (const [key, text] of [...files]) {
+      for (const [key, rec] of [...files]) {
         yield [
           key,
           {
             kind: 'file',
             name: key,
             async getFile() {
-              return {
-                async text() {
-                  return text;
-                },
-              };
+              return asFile(rec);
             },
           },
         ];
@@ -1530,11 +1565,7 @@ function fakeDirectory(name, seed = {}, log = [], prefix = '') {
         kind: 'file',
         name: key,
         async getFile() {
-          return {
-            async text() {
-              return files.get(key) ?? '';
-            },
-          };
+          return asFile(files.get(key) ?? { text: '', mtime: 0, size: 0 });
         },
         async createWritable() {
           let buffer = '';
@@ -1543,7 +1574,8 @@ function fakeDirectory(name, seed = {}, log = [], prefix = '') {
               buffer += text;
             },
             async close() {
-              files.set(key, buffer);
+              // A write moves the clock on, as a real one moves the mtime.
+              files.set(key, record(buffer));
               log.push(`write ${prefix}${key}`);
             },
           };
@@ -1558,7 +1590,7 @@ function fakeDirectory(name, seed = {}, log = [], prefix = '') {
     put(path, text) {
       const cut = path.indexOf('/');
       if (cut === -1) {
-        files.set(path, text);
+        files.set(path, record(text));
         return;
       }
       const folder = path.slice(0, cut);
@@ -1568,7 +1600,7 @@ function fakeDirectory(name, seed = {}, log = [], prefix = '') {
     /** Current contents as a `path -> text` map, for assertions. */
     dump() {
       const out = {};
-      for (const [key, text] of files) out[`${prefix}${key}`] = text;
+      for (const [key, rec] of files) out[`${prefix}${key}`] = rec.text;
       for (const dir of dirs.values()) Object.assign(out, dir.dump());
       return out;
     },
@@ -1735,6 +1767,168 @@ storageTest('project subfolders round-trip through the gate', async () => {
     'website/wireframes.md': TASK_MD.replace('Some notes.', 'Edited.'),
   });
   assertEqual(directory.log, ['write website/wireframes.md']);
+});
+
+/* --------------------------------------------- a folder that keeps moving */
+
+describe('a folder that keeps moving');
+
+const CONFLICT_NAME = "wireframes (Georg's conflicted copy 2026-08-19).md";
+
+storageTest('a conflict copy is never read, written or deleted', async () => {
+  const { storage, directory, files } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    [CONFLICT_NAME]: TASK_MD.replace('Some notes.', 'The other machine’s notes.'),
+  });
+  assert(!(CONFLICT_NAME in files), 'a conflict copy must not reach the board');
+  assertEqual(storage.state.conflictFiles, [CONFLICT_NAME]);
+
+  const board = await storage.unlock();
+  // Twice: the delete loop is what used to take it, and it runs on every save.
+  await storage.save(board);
+  await storage.save({ ...board, 'wireframes.md': TASK_MD.replace('Some notes.', 'Edited.') });
+
+  assert(!directory.log.some((line) => line.includes('conflicted copy')), directory.log.join());
+  assertEqual(directory.dump()[CONFLICT_NAME], TASK_MD.replace('Some notes.', 'The other machine’s notes.'));
+});
+
+storageTest('a conflict copy of a project file does not make a folder a project', async () => {
+  const { files } = await connectedTo({
+    "notes/_project-website (Georg's conflicted copy 2026-08-19).md":
+      '---\nid: website\ntitle: Website\n---\n',
+    'notes/reading.md': TASK_MD,
+  });
+  // Nothing in that folder is a project file, so the folder is none of this app's business.
+  assertEqual(Object.keys(files), []);
+});
+
+storageTest('a file that changed since we read it is not written over', async () => {
+  const { storage, directory } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  const board = await storage.unlock();
+  directory.put('wireframes.md', TASK_MD.replace('Some notes.', 'Written on the other machine.'));
+
+  const result = await storage.save({
+    ...board,
+    'wireframes.md': TASK_MD.replace('Some notes.', 'Written here.'),
+    'doomed.md': DOOMED_MD.replace('Doomed', 'Spared'),
+  });
+
+  assertEqual(result, { blocked: ['wireframes.md'] });
+  // The untouched sibling in the same save still goes through: this refuses a file, not a save.
+  assertEqual(directory.log, ['write doomed.md']);
+  assert(
+    directory.dump()['wireframes.md'].includes('Written on the other machine.'),
+    'the folder’s version must survive'
+  );
+});
+
+storageTest('a file that changed since we read it is not deleted', async () => {
+  const { storage, directory } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  const board = await storage.unlock();
+  directory.put('doomed.md', DOOMED_MD.replace('Doomed', 'Not any more'));
+
+  const { 'doomed.md': _gone, ...without } = board;
+  const result = await storage.save(without);
+
+  assertEqual(result, { blocked: ['doomed.md'] });
+  assertEqual(directory.log, []);
+  assert('doomed.md' in directory.dump(), 'the file must still be there');
+});
+
+storageTest('a file that vanished elsewhere is written back, not blocked', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  const board = await storage.unlock();
+  await directory.removeEntry('wireframes.md');
+  directory.log.length = 0;
+
+  const result = await storage.save({
+    'wireframes.md': TASK_MD.replace('Some notes.', 'Edited.'),
+  });
+  assertEqual(result, {});
+  assertEqual(directory.log, ['write wireframes.md']);
+});
+
+storageTest('a path we have never read is not created over something', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  const board = await storage.unlock();
+  // Another machine got to this task first, between our read and our write.
+  directory.put('worktop.md', '---\nid: worktop\ntitle: Worktop\n---\nTheirs.\n');
+
+  const result = await storage.save({
+    ...board,
+    'worktop.md': '---\nid: worktop\ntitle: Worktop\n---\nOurs.\n',
+  });
+  assertEqual(result, { blocked: ['worktop.md'] });
+  assertEqual(directory.log, []);
+  assert(directory.dump()['worktop.md'].includes('Theirs.'));
+});
+
+storageTest('two saves at once do not interleave', async () => {
+  const { storage, directory } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  await storage.unlock();
+
+  // Exactly how `commit` calls it: started, not awaited.
+  const first = storage.save({
+    'wireframes.md': TASK_MD.replace('Some notes.', 'First.'),
+    'doomed.md': DOOMED_MD.replace('Doomed', 'First'),
+  });
+  const second = storage.save({
+    'wireframes.md': TASK_MD.replace('Some notes.', 'Second.'),
+    'doomed.md': DOOMED_MD.replace('Doomed', 'Second'),
+  });
+  await Promise.all([first, second]);
+
+  // Interleaved, the second save would read the first's file mid-write and refuse it.
+  assertEqual(directory.log, [
+    'write wireframes.md',
+    'write doomed.md',
+    'write wireframes.md',
+    'write doomed.md',
+  ]);
+  assert(directory.dump()['wireframes.md'].includes('Second.'));
+});
+
+storageTest('a re-read notices the folder moving, and settles it', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  await storage.unlock();
+
+  assertEqual((await storage.revalidate()).changed, false);
+
+  directory.put('wireframes.md', TASK_MD.replace('Some notes.', 'Theirs.'));
+  const { files, changed } = await storage.revalidate();
+  assert(changed, 'an edit elsewhere is a change');
+  assert(files['wireframes.md'].includes('Theirs.'));
+
+  // Having taken the folder's version, saving it back writes nothing at all.
+  await storage.save(files);
+  assertEqual(directory.log, []);
+});
+
+storageTest('a file whose id another file claimed is left where it is', async () => {
+  const { storage, directory, files } = await connectedTo({
+    'wireframes.md': TASK_MD,
+    'wireframes 1.md': TASK_MD.replace('Some notes.', 'A copy.'),
+  });
+  const board = await storage.unlock();
+  storage.disown(duplicateIds(board).paths);
+
+  // The board holds one task, so `boardToFiles` names one path — the copy is simply missing
+  // from the save, which is exactly what the delete loop used to act on.
+  await storage.save(boardToFiles(buildBoard(board)));
+
+  assertEqual(directory.log, []);
+  assert('wireframes 1.md' in directory.dump(), 'the copy must survive');
+  assert(directory.dump()['wireframes 1.md'].includes('A copy.'));
+  assert('wireframes.md' in files);
 });
 
 /* ---------------------------------------------------------------- run */
