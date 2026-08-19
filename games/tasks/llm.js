@@ -56,43 +56,163 @@ export async function fetchModels() {
 
 /* ------------------------------------------------------------ completion */
 
-/** Send a chat completion and return the assistant's message text. */
-export async function complete(messages, { key, model, signal } = {}) {
+/** Headers every call shares. The referer and title are what OpenRouter shows in its logs. */
+const headersFor = (key) => ({
+  Authorization: `Bearer ${key}`,
+  'Content-Type': 'application/json',
+  'HTTP-Referer': location.origin,
+  'X-Title': 'Tasks',
+});
+
+/** Pull the useful part out of a failed response, falling back to the status code. */
+async function failureDetail(response) {
+  try {
+    const body = await response.json();
+    return body?.error?.message || `HTTP ${response.status}`;
+  } catch {
+    return `HTTP ${response.status}`;
+  }
+}
+
+/**
+ * Send a chat completion and return the assistant's message text.
+ *
+ * The defaults are the structured actions' settings: short, low-temperature answers that
+ * have to parse as JSON. Freeform asks pass their own, since prose needs the room.
+ */
+export async function complete(messages, { key, model, signal, maxTokens = 900, temperature = 0.4 } = {}) {
   if (!key) throw new Error('No OpenRouter API key set. Add one under Settings.');
 
   const response = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
     signal,
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': location.origin,
-      'X-Title': 'Tasks',
-    },
+    headers: headersFor(key),
     body: JSON.stringify({
       model: model || DEFAULT_MODEL,
       messages,
-      temperature: 0.4,
-      max_tokens: 900,
+      temperature,
+      max_tokens: maxTokens,
     }),
   });
 
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      detail = body?.error?.message || detail;
-    } catch {
-      /* keep the status-code message */
-    }
-    throw new Error(`OpenRouter: ${detail}`);
-  }
+  if (!response.ok) throw new Error(`OpenRouter: ${await failureDetail(response)}`);
 
   const payload = await response.json();
   if (payload?.error) throw new Error(`OpenRouter: ${payload.error.message ?? 'unknown error'}`);
   const content = payload?.choices?.[0]?.message?.content;
   if (!content) throw new Error('OpenRouter returned an empty response.');
   return content;
+}
+
+/* ---------------------------------------------------------- streaming */
+
+/**
+ * Decodes an SSE body into content fragments.
+ *
+ * Split out from the network so it can be tested directly: chunks arrive at whatever
+ * boundaries the socket chose, so a JSON payload is routinely cut in half and has to be
+ * held until the rest of its line turns up.
+ */
+export function createSseReader(onDelta) {
+  let buffer = '';
+  let done = false;
+
+  const handleLine = (line) => {
+    const trimmed = line.trim();
+    // Comments keep the connection warm — OpenRouter sends ": OPENROUTER PROCESSING".
+    if (!trimmed || trimmed.startsWith(':')) return;
+    if (!trimmed.startsWith('data:')) return;
+    const payload = trimmed.slice(5).trim();
+    if (payload === '[DONE]') {
+      done = true;
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      // A frame we cannot read is not worth failing the whole answer over.
+      return;
+    }
+    // An error can arrive mid-stream, after the response headers said 200.
+    if (parsed?.error) throw new Error(`OpenRouter: ${parsed.error.message ?? 'unknown error'}`);
+    const delta = parsed?.choices?.[0]?.delta?.content;
+    if (delta) onDelta?.(delta);
+  };
+
+  return {
+    /** Feed one decoded chunk; complete lines are dispatched, the remainder is kept. */
+    push(text) {
+      buffer += text;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) handleLine(line);
+    },
+    /** Flush whatever the last chunk left behind. */
+    end() {
+      if (buffer) {
+        handleLine(buffer);
+        buffer = '';
+      }
+    },
+    get finished() {
+      return done;
+    },
+  };
+}
+
+/**
+ * Stream a chat completion, reporting each fragment as it lands and resolving to the whole
+ * answer. Aborting via `signal` is not an error here: the caller keeps what arrived.
+ */
+export async function stream(
+  messages,
+  { key, model, signal, maxTokens = 2000, temperature = 0.7, onDelta } = {}
+) {
+  if (!key) throw new Error('No OpenRouter API key set. Add one under Settings.');
+
+  const response = await fetch(`${BASE}/chat/completions`, {
+    method: 'POST',
+    signal,
+    headers: headersFor(key),
+    body: JSON.stringify({
+      model: model || DEFAULT_MODEL,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok) throw new Error(`OpenRouter: ${await failureDetail(response)}`);
+  if (!response.body) throw new Error('OpenRouter returned no response body.');
+
+  let text = '';
+  const reader = createSseReader((delta) => {
+    text += delta;
+    onDelta?.(delta, text);
+  });
+
+  const body = response.body.getReader();
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { value, done } = await body.read();
+      if (done) break;
+      reader.push(decoder.decode(value, { stream: true }));
+      if (reader.finished) break;
+    }
+    reader.end();
+  } catch (error) {
+    // A deliberate Stop leaves the caller holding a partial answer, which is the point.
+    if (error?.name === 'AbortError') return text;
+    throw error;
+  } finally {
+    body.cancel().catch(() => {});
+  }
+
+  if (!text) throw new Error('OpenRouter returned an empty response.');
+  return text;
 }
 
 /**

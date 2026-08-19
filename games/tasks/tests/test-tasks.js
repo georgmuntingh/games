@@ -47,8 +47,16 @@ import {
   sameFile,
 } from '../model.js';
 import { createStorage } from '../storage.js';
-import { buildBrief, buildTaskBrief } from '../exporter.js';
-import { parseJsonResponse, ACTIONS } from '../prompts.js';
+import {
+  buildBrief,
+  buildTaskBrief,
+  buildContext,
+  contextSections,
+  countWords,
+  CONTEXT_BLOCKS,
+} from '../exporter.js';
+import { parseJsonResponse, ACTIONS, askMessages, ASK_SYSTEM } from '../prompts.js';
+import { createSseReader } from '../llm.js';
 import { crc32, createZip } from '../zip.js';
 
 /* ------------------------------------------------------------- harness */
@@ -1142,6 +1150,164 @@ test('the task brief lists existing subtasks', () => {
   const brief = buildTaskBrief(task);
   assert(brief.includes('id: wireframes'));
   assert(brief.includes('- [x] Landing page'));
+});
+
+/* ------------------------------------------------------- ask context */
+
+describe('ask context');
+
+const askProject = { id: 'website', title: 'Website relaunch', goal: 'Ship it', context: 'Stripe is set up.' };
+const askTasks = () => filterTasks(board.tasks, { projectId: 'website' });
+
+test('nothing ticked sends nothing at all', () => {
+  assertEqual(buildContext([], { project: askProject, tasks: askTasks() }), '');
+});
+
+test('a block only brings its own section', () => {
+  const goalOnly = buildContext(['goal'], { project: askProject, tasks: askTasks() });
+  assert(goalOnly.includes('## Goal'), 'the goal is there');
+  assert(!goalOnly.includes('## Tasks'), 'the table is not');
+  const tasksOnly = buildContext(['tasks'], { project: askProject, tasks: askTasks() });
+  assert(tasksOnly.includes('## Tasks'), 'the table is there');
+  assert(!tasksOnly.includes('## Goal'), 'the goal is not');
+});
+
+test('sections are assembled in catalogue order, whatever order they are asked for', () => {
+  const brief = buildContext(['people', 'tasks', 'goal'], { project: askProject, tasks: askTasks() });
+  assert(brief.indexOf('## Goal') < brief.indexOf('## Tasks'), 'goal before tasks');
+  assert(brief.indexOf('## Tasks') < brief.indexOf('## People'), 'tasks before people');
+});
+
+test('the task table carries completed work too, since the model is judging the whole plan', () => {
+  const tasks = [
+    { id: 'a', title: 'Done thing', done: true, project: ['website'], people: [], subtasks: [], blockedBy: [], partOf: [] },
+    { id: 'b', title: 'Open thing', project: ['website'], people: [], subtasks: [], blockedBy: [], partOf: [] },
+  ];
+  const brief = buildContext(['tasks'], { project: askProject, tasks });
+  assert(brief.includes('| a | Done thing |'), 'the finished task is still listed');
+  assert(brief.includes('| b | Open thing |'), 'and so is the open one');
+});
+
+test('detail carries the notes and subtask text the table only counts', () => {
+  const tasks = [
+    { id: 'a', title: 'Wireframes', notes: 'Figma file is shared.', project: ['website'], people: [],
+      subtasks: [{ done: true, text: 'Landing page' }, { done: false, text: 'Pricing page' }], blockedBy: [], partOf: [] },
+  ];
+  const detail = buildContext(['detail'], { project: askProject, tasks });
+  assert(detail.includes('Figma file is shared.'), 'notes survive');
+  assert(detail.includes('- [x] Landing page'), 'ticked subtask survives');
+  assert(detail.includes('- [ ] Pricing page'), 'unticked subtask survives');
+  assert(!buildContext(['tasks'], { project: askProject, tasks }).includes('Figma file is shared.'),
+    'and the table alone never carried it');
+});
+
+test('the selected-task block is absent when nothing is selected', () => {
+  const tasks = askTasks();
+  assertEqual(buildContext(['task'], { project: askProject, tasks, task: null }), '');
+  const chosen = tasks.find((t) => t.id === 'wireframes');
+  assert(buildContext(['task'], { project: askProject, tasks, task: chosen }).includes('id: wireframes'));
+});
+
+test('other projects are summarised, and the current one is not repeated', () => {
+  const projects = [
+    { id: 'website', title: 'Website relaunch' },
+    { id: 'app', title: 'Mobile app', goal: 'Ship v1' },
+    { id: 'old', title: 'Archived thing', archived: true },
+  ];
+  const brief = buildContext(['projects'], { project: askProject, projects, allTasks: board.tasks });
+  assert(brief.includes('Mobile app'), 'the other project is listed');
+  assert(brief.includes('Ship v1'), 'with its goal');
+  assert(!brief.includes('Website relaunch'), 'the current project is not repeated');
+  assert(!brief.includes('Archived thing'), 'archived projects stay out');
+});
+
+test('a block with nothing to say costs no words and no heading', () => {
+  const sections = contextSections({ project: askProject, tasks: [], projects: [], allTasks: [] });
+  assertEqual(sections.detail, '', 'no notes anywhere means no detail section');
+  assertEqual(sections.projects, '', 'no other projects means no heading');
+  assertEqual(sections.task, '', 'no selection means no task section');
+});
+
+test('every catalogued block is one the assembler can actually build', () => {
+  const sections = contextSections({ project: askProject, tasks: askTasks(), projects: board.projects, allTasks: board.tasks });
+  for (const block of CONTEXT_BLOCKS) {
+    assert(typeof sections[block.id] === 'string', `${block.id} has a section`);
+  }
+});
+
+test('word counting matches what the dialog promises', () => {
+  assertEqual(countWords(''), 0);
+  assertEqual(countWords('   \n  '), 0);
+  assertEqual(countWords('one two  three\nfour'), 4);
+});
+
+/* ----------------------------------------------------------- ask prompt */
+
+describe('ask prompt');
+
+test('the brief rides on the first question and is not repeated', () => {
+  const messages = askMessages('BRIEF', [
+    { role: 'user', content: 'Q1' },
+    { role: 'assistant', content: 'A1' },
+    { role: 'user', content: 'Q2' },
+  ]);
+  assertEqual(messages[0], { role: 'system', content: ASK_SYSTEM });
+  assert(messages[1].content.includes('BRIEF'), 'the brief travels with the first turn');
+  assert(messages[1].content.includes('Q1'), 'and so does the question');
+  assertEqual(messages[3].content, 'Q2', 'the follow-up is the question alone');
+  assertEqual(messages.length, 4);
+});
+
+test('the freeform prompt never asks for JSON', () => {
+  assert(!/json/i.test(ASK_SYSTEM), 'this path wants prose, not a fenced block');
+});
+
+/* -------------------------------------------------------------- streaming */
+
+describe('response streaming');
+
+const collect = (chunks) => {
+  let text = '';
+  const reader = createSseReader((delta) => {
+    text += delta;
+  });
+  for (const chunk of chunks) reader.push(chunk);
+  reader.end();
+  return { text, finished: reader.finished };
+};
+
+const frame = (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n`;
+
+test('fragments are concatenated in order', () => {
+  assertEqual(collect([frame('Hello'), frame(' world')]).text, 'Hello world');
+});
+
+test('a frame split across chunks is held until the rest arrives', () => {
+  const whole = frame('Hello world');
+  const cut = Math.floor(whole.length / 2);
+  assertEqual(collect([whole.slice(0, cut), whole.slice(cut)]).text, 'Hello world');
+});
+
+test('keep-alive comments and blank lines are ignored', () => {
+  assertEqual(collect([': OPENROUTER PROCESSING\n', '\n', frame('hi')]).text, 'hi');
+});
+
+test('[DONE] ends the stream', () => {
+  const { text, finished } = collect([frame('hi'), 'data: [DONE]\n']);
+  assertEqual(text, 'hi');
+  assert(finished, 'the reader knows it is over');
+});
+
+test('a frame the last chunk left unterminated is still read', () => {
+  assertEqual(collect([frame('hi').trimEnd()]).text, 'hi');
+});
+
+test('an error arriving mid-stream is raised, not swallowed', () => {
+  assertThrows(() => collect(['data: {"error":{"message":"rate limited"}}\n']));
+});
+
+test('an unreadable frame does not sink the answer', () => {
+  assertEqual(collect([frame('a'), 'data: {not json\n', frame('b')]).text, 'ab');
 });
 
 /* ------------------------------------------------------- LLM responses */

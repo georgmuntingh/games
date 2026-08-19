@@ -46,6 +46,7 @@ import { createHistory } from './undo.js';
 import { createZip } from './zip.js';
 import { buildBrief } from './exporter.js';
 import { ACTIONS } from './prompts.js';
+import { createAsk } from './ask.js';
 import * as llm from './llm.js';
 
 const $ = (id) => document.getElementById(id);
@@ -117,6 +118,7 @@ let contextMenu;
 /** The view behind what is currently on the canvas, read by the drop preview. */
 let currentView = null;
 let pending = null; // the suggestion batch currently under review
+let ask = null; // the freeform question dialog
 
 const board = () => history.current;
 
@@ -1921,6 +1923,12 @@ function wireEvents() {
     $('suggest-status').textContent = 'Pick an action. Nothing changes until you accept.';
   });
   $('settings-open').addEventListener('click', openSettings);
+  $('ask-open').addEventListener('click', () => ask.open());
+  $('assist-ask').addEventListener('click', () => {
+    // Two stacked modals read badly, so the Assist sheet steps aside.
+    $('suggestions').close();
+    ask.open();
+  });
 
   document.querySelectorAll('#assist-actions button').forEach((button) => {
     button.addEventListener('click', () => runAssist(button.dataset.action));
@@ -2121,6 +2129,9 @@ function wireEvents() {
       setLinkArmed(!ui.linkArmed);
     } else if (event.key === 'f' || event.key === 'F') {
       graph.fit();
+    } else if (event.key === '?') {
+      event.preventDefault();
+      ask.open();
     }
   });
 
@@ -2210,6 +2221,19 @@ async function boot() {
     onAddPerson: addPersonToTask,
     onWorking: setWorking,
     onMessage: (message) => status(message, true),
+  });
+
+  ask = createAsk({
+    // Read at ask time rather than captured: the board moves while the dialog is open.
+    getState: () => ({
+      project: currentProject(),
+      tasks: filterTasks(board().tasks, { projectId: ui.projectId }),
+      task: board().tasks.find((t) => t.id === ui.selectedId) ?? null,
+      projects: board().projects,
+      allTasks: board().tasks,
+    }),
+    onStatus: status,
+    openSettings,
   });
 
   wireEvents();
