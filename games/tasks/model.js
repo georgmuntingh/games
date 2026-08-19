@@ -409,6 +409,36 @@ export function boardToFiles({ tasks, projects, trash }) {
   return files;
 }
 
+/**
+ * A file's text reduced to the form this app would write for it.
+ *
+ * Parse and re-serialise is a fixed point, so two files that mean the same thing reduce to
+ * the same string however they were ordered, quoted or spaced. That is what lets `save`
+ * leave a hand-written note alone instead of rewriting a whole vault into house style the
+ * first time anything at all is edited.
+ */
+export function canonicalise(path, text) {
+  const base = String(path).slice(String(path).lastIndexOf('/') + 1);
+  if (base === TRASH_FILENAME) return trashToMarkdown(trashFromMarkdown(text));
+  if (base.startsWith(PROJECT_PREFIX)) return projectToMarkdown(projectFromMarkdown(path, text));
+  return taskToMarkdown(taskFromMarkdown(base, text));
+}
+
+/**
+ * True when two texts for the same path say the same thing.
+ *
+ * A file this app cannot parse is compared by bytes alone: a redundant write is a far
+ * smaller problem than treating someone else's note as equal to ours and skipping it.
+ */
+export function sameFile(path, a, b) {
+  if (a === b) return true;
+  try {
+    return canonicalise(path, a) === canonicalise(path, b);
+  } catch {
+    return false;
+  }
+}
+
 /* ----------------------------------------------------------- goal tasks */
 
 /** The auto-managed node carrying a project's end goal. */

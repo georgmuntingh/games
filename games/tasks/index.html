@@ -88,6 +88,11 @@
         <button type="button" id="settings-open" title="Settings">⚙</button>
       </header>
 
+      <div id="readonly-bar" class="readonly-bar" hidden>
+        <p id="readonly-text"></p>
+        <button type="button" id="enable-editing">Enable editing</button>
+      </div>
+
       <main class="workspace">
         <div id="canvas" class="canvas"></div>
 
@@ -287,6 +292,11 @@
           inside an Obsidian vault and the notes are yours. Each subfolder holding a
           <code>_project-…</code> file is a project; every other folder is left alone, and
           only files this app created are ever removed.
+        </p>
+        <p class="muted small">
+          A folder always opens read-only. If the vault syncs between devices, this tab cannot
+          tell a folder that has finished syncing from one that is still catching up — so it
+          writes nothing until you say so, and re-reads the folder when you do.
         </p>
         <div class="row">
           <button type="button" id="organise-folders">Organise into project folders</button>
