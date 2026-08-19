@@ -16,6 +16,33 @@ Reference existing tasks only by the exact id given in the brief.
 Prefer few, high-value suggestions over exhaustive lists.`;
 
 /**
+ * The freeform ask is prose, not JSON, so it gets its own framing — reusing SYSTEM would
+ * order the model to answer a plain question in a fenced code block.
+ */
+export const ASK_SYSTEM = `You are a project planning advisor helping someone think about their own project.
+Answer in concise markdown prose. Lead with the answer, then the reasoning.
+Ground every claim in the brief you were given, and refer to tasks by their exact id in backticks.
+If the brief does not contain what you would need, say so plainly instead of inventing it.
+You are being asked to think, not to fill in a form: no preamble, no restating the question.`;
+
+/**
+ * Messages for a freeform conversation. The brief rides on the first user turn and is not
+ * repeated: the model keeps it in the conversation, and re-sending it every turn would put
+ * two near-identical briefs in front of it.
+ */
+export function askMessages(brief, turns) {
+  const messages = [{ role: 'system', content: ASK_SYSTEM }];
+  turns.forEach((turn, index) => {
+    const first = index === 0 && turn.role === 'user' && brief;
+    messages.push({
+      role: turn.role,
+      content: first ? `${brief}\n---\n${turn.content}` : turn.content,
+    });
+  });
+  return messages;
+}
+
+/**
  * Pull a JSON value out of a model response: fenced block first, then the first
  * balanced-looking object or array. Throws with the raw text attached on failure.
  */
