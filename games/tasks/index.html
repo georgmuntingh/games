@@ -8,10 +8,10 @@
       name="description"
       content="Decompose a project into tasks on a timeline graph, and ask a language model what you have missed."
     />
-    <script type="module" crossorigin src="/games/assets/games/tasks-DPIWsiw8.js"></script>
+    <script type="module" crossorigin src="/games/assets/games/tasks-BVgqUI8i.js"></script>
     <link rel="modulepreload" crossorigin href="/games/assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="/games/assets/prompts-DYpDnIig.js">
-    <link rel="stylesheet" crossorigin href="/games/assets/tasks-a7gKFKFh.css">
+    <link rel="modulepreload" crossorigin href="/games/assets/prompts-D5jtSQLS.js">
+    <link rel="stylesheet" crossorigin href="/games/assets/tasks-C7ksX35g.css">
     <link rel="stylesheet" crossorigin href="/games/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -90,6 +90,11 @@
         <button type="button" id="fit" title="Fit to view (F)">Fit</button>
         <button type="button" id="settings-open" title="Settings">⚙</button>
       </header>
+
+      <div id="readonly-bar" class="readonly-bar" hidden>
+        <p id="readonly-text"></p>
+        <button type="button" id="enable-editing">Enable editing</button>
+      </div>
 
       <main class="workspace">
         <div id="canvas" class="canvas"></div>
@@ -290,6 +295,11 @@
           inside an Obsidian vault and the notes are yours. Each subfolder holding a
           <code>_project-…</code> file is a project; every other folder is left alone, and
           only files this app created are ever removed.
+        </p>
+        <p class="muted small">
+          A folder always opens read-only. If the vault syncs between devices, this tab cannot
+          tell a folder that has finished syncing from one that is still catching up — so it
+          writes nothing until you say so, and re-reads the folder when you do.
         </p>
         <div class="row">
           <button type="button" id="organise-folders">Organise into project folders</button>
