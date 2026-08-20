@@ -292,6 +292,7 @@
         <p id="storage-state" class="muted"></p>
         <div class="row">
           <button type="button" id="connect-folder">Open folder…</button>
+          <button type="button" id="connect-dropbox">Connect Dropbox…</button>
           <button type="button" id="disconnect-folder">Use this browser only</button>
         </div>
         <p class="muted small">
@@ -304,6 +305,21 @@
           A folder always opens read-only. If the vault syncs between devices, this tab cannot
           tell a folder that has finished syncing from one that is still catching up — so it
           writes nothing until you say so, and re-reads the folder when you do.
+        </p>
+        <label class="field">
+          <span>Dropbox app key</span>
+          <input id="dropbox-key" type="text" placeholder="abcd1234efgh567" autocomplete="off" />
+        </label>
+        <p class="muted small">
+          No phone browser can open a folder, so on a phone the way to the same
+          <code>.md</code> files is Dropbox itself. Create an app at
+          <a href="https://www.dropbox.com/developers/apps" target="_blank" rel="noreferrer"
+            >dropbox.com/developers/apps</a
+          >
+          with <strong>App folder</strong> access and the
+          <code>files.metadata.read</code>, <code>files.content.read</code> and
+          <code>files.content.write</code> permissions, add this page's address to its redirect
+          URIs, then paste the app key here. The app folder is the only thing it can ever see.
         </p>
         <div class="row">
           <button type="button" id="organise-folders">Organise into project folders</button>

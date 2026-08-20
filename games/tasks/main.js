@@ -48,6 +48,7 @@ import { buildBrief } from './exporter.js';
 import { ACTIONS } from './prompts.js';
 import { createAsk } from './ask.js';
 import * as llm from './llm.js';
+import * as dropbox from './dropbox.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1357,7 +1358,7 @@ async function setBoardFromFiles(files, message) {
  * does not, and taking the folder's version would throw it away, so it waits to be asked.
  */
 async function revalidate() {
-  if (storage.state.mode !== 'folder' || !storage.state.writable || revalidating) return;
+  if (storage.state.mode === 'local' || !storage.state.writable || revalidating) return;
   revalidating = true;
   try {
     const { files, changed } = await storage.revalidate();
@@ -1395,6 +1396,68 @@ async function reloadFromFolder() {
   } catch (error) {
     status(`Could not re-read the folder: ${error.message}`, true);
   }
+}
+
+/* --------------------------------------------------------------- dropbox */
+
+/**
+ * Where Dropbox sends the browser back to. Must match a redirect URI on the app exactly, so
+ * it is this page and nothing else — no query, no hash.
+ */
+const redirectUri = () => `${location.origin}${location.pathname}`;
+
+/**
+ * Finish a sign-in we are returning from, if that is what this load is.
+ *
+ * Returns true when a grant was just obtained, so boot can open Dropbox rather than whatever
+ * this browser was using before.
+ */
+async function finishDropboxSignIn() {
+  // Read the answer off the address bar before wiping it, not after.
+  const search = location.search;
+  const params = new URLSearchParams(search);
+  if (!params.has('code') && !params.has('error')) return false;
+  // Out of the address bar however it went: the code is single-use, but it is still a
+  // credential, and a reload carrying a spent one would only fail. `globalThis` because
+  // `history` in this module is the undo stack.
+  globalThis.history.replaceState(null, '', redirectUri());
+
+  const refused = dropbox.authError(search);
+  if (refused) {
+    status(`Dropbox sign-in was refused: ${refused}`, true);
+    return false;
+  }
+  const code = dropbox.pendingCode(search);
+  if (!code) {
+    // A code whose `state` is not the one this tab planted: another tab's sign-in, or a link
+    // someone else made. Either way it is not ours to spend.
+    status('That Dropbox sign-in did not start in this tab — try connecting again.', true);
+    return false;
+  }
+  try {
+    await dropbox.exchangeCode(code, redirectUri());
+    await dropbox.fetchAccountName();
+    return true;
+  } catch (error) {
+    status(`Could not finish signing in to Dropbox: ${error.message}`, true);
+    return false;
+  }
+}
+
+/** Switch this browser over to the Dropbox app folder and show what is in it. */
+async function useDropbox(message) {
+  const files = await storage.connectDropbox();
+  blockedPaths.clear();
+  if (Object.keys(files).length) {
+    await setBoardFromFiles(files, message ?? `Reading Dropbox as ${storage.state.folderName}.`);
+  } else {
+    // Deliberately not replacing the board with nothing: a first connection is usually made
+    // from a device that already has the board, and the app folder fills up on the next edit.
+    status(
+      'The Dropbox app folder is empty — this board will be saved into it on the next change.'
+    );
+  }
+  refreshStorageState();
 }
 
 /* ------------------------------------------------------------ assistant */
@@ -1803,6 +1866,7 @@ function openProject(mode = 'edit') {
 function openSettings() {
   refreshStorageState();
   $('api-key').value = llm.getKey();
+  $('dropbox-key').value = dropbox.getAppKey();
   if (!$('settings').open) $('settings').showModal();
   if (!$('model-picker').options.length) loadModels();
 }
@@ -1836,14 +1900,17 @@ function refreshStorageState() {
       ? writable
         ? `Reading and writing .md files in “${folderName}”.`
         : `Reading .md files in “${folderName}”. Editing is off until you enable it.`
-      : reconnectable
-        ? 'A folder was connected before. Click “Open folder…” to reconnect it.'
-        : supportsFolder
-          ? 'Saving to this browser only.'
-          : 'Saving to this browser only — this browser cannot open folders.';
+      : mode === 'dropbox'
+        ? `Reading and writing .md files in the Dropbox app folder of ${folderName}.`
+        : reconnectable
+          ? 'A folder was connected before. Click “Open folder…” to reconnect it.'
+          : supportsFolder
+            ? 'Saving to this browser only.'
+            : 'Saving to this browser only — this browser cannot open folders, so Dropbox is ' +
+              'the way to your .md files here.';
   const foldered = board().projects.filter((p) => p.folder).length;
   const layout =
-    mode === 'folder' && board().projects.length
+    mode !== 'local' && board().projects.length
       ? foldered === board().projects.length
         ? ' Every project has its own subfolder.'
         : ` ${foldered} of ${board().projects.length} projects have their own subfolder.`
@@ -1851,7 +1918,13 @@ function refreshStorageState() {
   const conflicts = conflictNote();
   $('storage-state').textContent = [text + layout, conflicts].filter(Boolean).join(' ');
   $('connect-folder').disabled = !supportsFolder;
-  $('disconnect-folder').disabled = mode !== 'folder';
+  $('connect-dropbox').textContent =
+    mode === 'dropbox'
+      ? 'Reconnect Dropbox…'
+      : dropbox.isConnected()
+        ? 'Use Dropbox'
+        : 'Connect Dropbox…';
+  $('disconnect-folder').disabled = mode === 'local';
 
   const moves = pendingMoves(board(), organisedBoard());
   $('organise-folders').disabled = !moves || !writable;
@@ -2092,6 +2165,30 @@ function wireEvents() {
       if (error.name !== 'AbortError') status(error.message, true);
     }
   });
+  $('dropbox-key').addEventListener('change', (event) => {
+    dropbox.setAppKey(event.target.value.trim());
+    refreshStorageState();
+    status(event.target.value.trim() ? 'Dropbox app key saved in this browser.' : 'Dropbox app key cleared.');
+  });
+
+  $('connect-dropbox').addEventListener('click', async () => {
+    try {
+      if (!dropbox.getAppKey()) {
+        status('Add your Dropbox app key first.', true);
+        $('dropbox-key').focus();
+        return;
+      }
+      // Already authorised and merely not in use: no need to send anyone to Dropbox again.
+      if (dropbox.isConnected() && storage.state.mode !== 'dropbox') {
+        await useDropbox();
+        return;
+      }
+      location.href = await dropbox.authoriseUrl(redirectUri());
+    } catch (error) {
+      status(error.message, true);
+    }
+  });
+
   $('enable-editing').addEventListener('click', async () => {
     // The same button, because it is the same answer to the same question: take the folder.
     if (storage.state.writable) {
@@ -2134,9 +2231,18 @@ function wireEvents() {
   window.addEventListener('focus', scheduleRevalidate);
 
   $('disconnect-folder').addEventListener('click', () => {
+    // "This browser only" means it: the Dropbox grant goes too, rather than sitting in
+    // localStorage against a folder nothing is reading.
+    const wasRemote = storage.state.mode === 'dropbox';
     storage.disconnectFolder();
+    if (wasRemote) dropbox.signOut();
+    blockedPaths.clear();
     refreshStorageState();
-    status('Disconnected. Saving to this browser only.');
+    status(
+      wasRemote
+        ? 'Disconnected from Dropbox. Saving to this browser only.'
+        : 'Disconnected. Saving to this browser only.'
+    );
   });
 
   $('project-open').addEventListener('click', () =>
@@ -2369,26 +2475,34 @@ async function boot() {
 
   wireEvents();
 
+  // Before anything is read: this load may be the second half of a sign-in, and it decides
+  // which backend there is to read from.
+  const signedIn = await finishDropboxSignIn();
+
   let files;
   try {
-    files = await storage.load();
+    files = signedIn ? await storage.connectDropbox() : await storage.load();
   } catch (error) {
     files = {};
     status(`Could not read saved data: ${error.message}`, true);
   }
   const isEmpty = Object.keys(files).length === 0;
+  // The demo is for a browser with nothing in it, not for a connected folder that happens to
+  // be empty — writing a demo board into somebody's Dropbox is not a good first impression.
+  const demo = isEmpty && storage.state.mode === 'local';
   const before = JSON.stringify(Object.keys(files).sort());
-  adoptFiles(isEmpty ? DEMO_FILES : files);
+  adoptFiles(demo ? DEMO_FILES : files);
   ui.projectId = defaultProjectId();
   // Writes the demo out, and any goal node the sync had to create for an existing vault.
-  if (isEmpty || JSON.stringify(Object.keys(boardToFiles(board())).sort()) !== before) {
+  if (demo || JSON.stringify(Object.keys(boardToFiles(board())).sort()) !== before) {
     await persist();
   }
 
   refreshStorageState();
   render();
   graph.fit();
-  if (isEmpty) status('Demo project loaded. Settings ⚙ to clear it and start empty.');
+  if (demo) status('Demo project loaded. Settings ⚙ to clear it and start empty.');
+  else if (signedIn) status(`Reading Dropbox as ${storage.state.folderName}. ${conflictNote()}`.trim());
   else if (conflictNote()) status(conflictNote());
 }
 
