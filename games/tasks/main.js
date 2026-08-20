@@ -11,7 +11,7 @@ import { marked } from 'marked';
 import {
   buildBoard,
   boardToFiles,
-  duplicateProjectIds,
+  duplicateIds,
   sortProjects,
   visibleProjects,
   deleteProjectPlan,
@@ -73,6 +73,27 @@ const history = createHistory({ tasks: [], projects: [], trash: [] });
 const STALE_AFTER_MS = 15 * 60 * 1000;
 /** When this tab was last hidden, so returning to it can tell a blink from a night away. */
 let hiddenAt = 0;
+
+/**
+ * Files storage refused to write or delete because the folder had moved on under us.
+ *
+ * While this has anything in it the board and the folder genuinely disagree — the edit is
+ * here and not there — so a re-read must not quietly replace the board, and the strip above
+ * it says so until someone reloads.
+ */
+let blockedPaths = new Set();
+
+/** A re-read already under way, and the one waiting out the tab settling down. */
+let revalidating = false;
+let revalidateTimer = null;
+/**
+ * Focus and visibility both fire on the way back to a tab, and switching windows fires focus
+ * on its own. Once is enough, and a moment later is soon enough.
+ */
+function scheduleRevalidate() {
+  clearTimeout(revalidateTimer);
+  revalidateTimer = setTimeout(revalidate, 500);
+}
 
 /** UI state, deliberately outside the undo history. */
 const ui = {
@@ -180,7 +201,14 @@ async function persist() {
   // re-persists, so nothing owed is forgotten.
   if (!storage.state.writable) return;
   try {
-    await storage.save(boardToFiles(board()));
+    const { blocked } = await storage.save(boardToFiles(board()));
+    if (!blocked?.length) return;
+    // Nothing was lost on disk, but this edit is now only in the tab, which is worth more
+    // than a line in the status bar: `commit` writes its own message straight after this,
+    // and `render` refills an empty bar with the project summary.
+    for (const path of blocked) blockedPaths.add(path);
+    status('This task changed elsewhere — reload to take the folder’s version.', true);
+    refreshReadOnly();
   } catch (error) {
     status(`Could not save: ${error.message}`, true);
   }
@@ -1277,19 +1305,96 @@ function setLinkArmed(armed, kind) {
 
 /* --------------------------------------------------------------- boards */
 
-async function setBoardFromFiles(files, message) {
+/**
+ * Take a board from a set of files, leaving behind what it cannot hold.
+ *
+ * Files whose id another file already claimed have no place in the board and no path of
+ * their own to be written back to, so storage is told to stop counting them as ours —
+ * otherwise the next save would delete them for having gone missing from the board. They
+ * stay on disk, which is the whole point: one of them is somebody's only copy.
+ */
+function adoptFiles(files) {
+  const { ids, paths } = duplicateIds(files);
+  storage.disown(paths);
   resetBoard(files);
-  const clashes = duplicateProjectIds(files);
+  return ids;
+}
+
+/** What is in the folder that this app is deliberately keeping its hands off. */
+function conflictNote() {
+  const count = storage.state.conflictFiles.length;
+  if (!count) return '';
+  return `${count} conflict ${count === 1 ? 'file' : 'files'} in this folder — resolve ${
+    count === 1 ? 'it' : 'them'
+  } in Dropbox.`;
+}
+
+async function setBoardFromFiles(files, message) {
+  const clashes = adoptFiles(files);
   ui.projectId = defaultProjectId();
   ui.people.clear();
   ui.selectedId = null;
   await persist();
   status(
-    clashes.length
-      ? `${message ?? ''} Two folders claim ${clashes.join(', ')} — using the first of each.`.trim()
-      : (message ?? '')
+    [
+      message ?? '',
+      clashes.length ? `Two files claim ${clashes.join(', ')} — using the first of each.` : '',
+      conflictNote(),
+    ]
+      .filter(Boolean)
+      .join(' ')
   );
   render();
+}
+
+/**
+ * Re-read the folder and take what it says.
+ *
+ * A folder in Dropbox changes under an open tab as a matter of course, and this tab reads it
+ * once. Replacing the board with what is on disk is lossless for the same reason unlocking is:
+ * the app persists on every commit, so the board in memory is what it last wrote. The one
+ * exception is a write that was refused — then the board really does hold something the folder
+ * does not, and taking the folder's version would throw it away, so it waits to be asked.
+ */
+async function revalidate() {
+  if (storage.state.mode !== 'folder' || !storage.state.writable || revalidating) return;
+  revalidating = true;
+  try {
+    const { files, changed } = await storage.revalidate();
+    if (!changed) return;
+    // A refused write that now says the same thing as the folder was never a disagreement —
+    // a sync client touching a file it did not really change looks exactly like this.
+    if (blockedPaths.size && !blocksResolved(files)) {
+      refreshReadOnly();
+      return;
+    }
+    blockedPaths.clear();
+    await setBoardFromFiles(files, 'The folder changed elsewhere — reloaded from disk.');
+    refreshReadOnly();
+  } catch (error) {
+    status(`Could not re-read the folder: ${error.message}`, true);
+  } finally {
+    revalidating = false;
+  }
+}
+
+/** True when every refused write has become a non-difference against the folder. */
+function blocksResolved(files) {
+  const ours = boardToFiles(board());
+  return [...blockedPaths].every((path) => sameFile(path, files[path] ?? '', ours[path] ?? ''));
+}
+
+/** Take the folder's version, at the user's asking rather than on a hunch. */
+async function reloadFromFolder() {
+  try {
+    const { files } = await storage.revalidate();
+    if (!files) return;
+    blockedPaths.clear();
+    await setBoardFromFiles(files, `Reloaded “${storage.state.folderName}” from the folder.`);
+    refreshReadOnly();
+  } catch (error) {
+    status(`Could not re-read the folder: ${error.message}`, true);
+  }
 }
 
 /* ------------------------------------------------------------ assistant */
@@ -1702,14 +1807,25 @@ function openSettings() {
   if (!$('model-picker').options.length) loadModels();
 }
 
-/** Show or hide the read-only strip above the board. */
+/**
+ * Show or hide the strip above the board.
+ *
+ * Two states share it, because they are the same sentence at different times: the folder and
+ * this tab do not agree, and the folder is the one that is right. Before unlocking that means
+ * everything; after a refused write it means the handful of files named in `blockedPaths`.
+ */
 function refreshReadOnly() {
   const { writable, folderName } = storage.state;
-  $('readonly-bar').hidden = writable;
-  if (writable) return;
-  $('readonly-text').textContent =
-    `Reading “${folderName}” — editing is off. Make sure Obsidian has finished syncing ` +
-    'this vault, then enable editing.';
+  const stale = writable && blockedPaths.size > 0;
+  $('readonly-bar').hidden = writable && !stale;
+  $('enable-editing').textContent = stale ? 'Reload from folder' : 'Enable editing';
+  if (writable && !stale) return;
+  const count = blockedPaths.size;
+  $('readonly-text').textContent = stale
+    ? `${count} file${count === 1 ? '' : 's'} in “${folderName}” changed elsewhere after this ` +
+      'tab read them, so those edits were not saved. Reload to take the folder’s version.'
+    : `Reading “${folderName}” — editing is off. Make sure Dropbox or Obsidian has finished ` +
+      'syncing this folder, then enable editing.';
 }
 
 function refreshStorageState() {
@@ -1732,7 +1848,8 @@ function refreshStorageState() {
         ? ' Every project has its own subfolder.'
         : ` ${foldered} of ${board().projects.length} projects have their own subfolder.`
       : '';
-  $('storage-state').textContent = text + layout;
+  const conflicts = conflictNote();
+  $('storage-state').textContent = [text + layout, conflicts].filter(Boolean).join(' ');
   $('connect-folder').disabled = !supportsFolder;
   $('disconnect-folder').disabled = mode !== 'folder';
 
@@ -1976,6 +2093,11 @@ function wireEvents() {
     }
   });
   $('enable-editing').addEventListener('click', async () => {
+    // The same button, because it is the same answer to the same question: take the folder.
+    if (storage.state.writable) {
+      await reloadFromFolder();
+      return;
+    }
     try {
       // The re-read happens inside `unlock`, so what gets enabled is editing of the folder
       // as it stands now — not as it stood when this tab opened.
@@ -1995,12 +2117,21 @@ function wireEvents() {
     }
     const away = hiddenAt && Date.now() - hiddenAt;
     hiddenAt = 0;
-    if (!away || away < STALE_AFTER_MS) return;
-    if (storage.state.mode !== 'folder' || !storage.state.writable) return;
+    const stale =
+      away >= STALE_AFTER_MS && storage.state.mode === 'folder' && storage.state.writable;
+    if (!stale) {
+      // A blink rather than a night away: the folder may still have moved on, so read it
+      // again — that is what makes a tab left open beside a syncing folder trustworthy.
+      scheduleRevalidate();
+      return;
+    }
     storage.lock();
     refreshStorageState();
     status('This tab has been away a while — editing is off until you confirm the folder is up to date.');
   });
+
+  // Switching windows never hides the tab, so this is the common case, not the rare one.
+  window.addEventListener('focus', scheduleRevalidate);
 
   $('disconnect-folder').addEventListener('click', () => {
     storage.disconnectFolder();
@@ -2247,7 +2378,7 @@ async function boot() {
   }
   const isEmpty = Object.keys(files).length === 0;
   const before = JSON.stringify(Object.keys(files).sort());
-  resetBoard(isEmpty ? DEMO_FILES : files);
+  adoptFiles(isEmpty ? DEMO_FILES : files);
   ui.projectId = defaultProjectId();
   // Writes the demo out, and any goal node the sync had to create for an existing vault.
   if (isEmpty || JSON.stringify(Object.keys(boardToFiles(board())).sort()) !== before) {
@@ -2258,6 +2389,7 @@ async function boot() {
   render();
   graph.fit();
   if (isEmpty) status('Demo project loaded. Settings ⚙ to clear it and start empty.');
+  else if (conflictNote()) status(conflictNote());
 }
 
 // Project goals are wrapped prose, so single newlines must reflow rather than break.

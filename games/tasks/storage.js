@@ -20,6 +20,13 @@
  * the answer comes from the person who can tell, and `unlock` re-reads before believing
  * them. Until then `save` touches nothing, which is what makes a tab left open for a week
  * harmless rather than a way to overwrite a week of edits made elsewhere.
+ *
+ * Unlocking is only the start of the session, though, and a folder in Dropbox keeps moving
+ * underneath one. So every write and every delete is checked against the file as it is on
+ * disk *now*, not as it was when the folder was read: anything that has moved since is
+ * refused and reported rather than overwritten. And the files a sync client writes to keep
+ * a version it could not merge are skipped entirely — they are the only copy of somebody's
+ * work, and this app parsing them as tasks is how they would get deleted.
  */
 
 // The one thing this layer needs from the domain: which subfolders are projects, and so
@@ -91,13 +98,36 @@ function writeMirror(files) {
 
 const isMarkdown = (name) => name.toLowerCase().endsWith('.md');
 
-/** Every `.md` entry in one directory, as `[name, handle]`, without reading any contents. */
+/**
+ * What a sync client names the version it could not merge — Dropbox and Obsidian Sync write
+ * `note (Georg's conflicted copy 2026-08-19).md`, Syncthing `note.sync-conflict-….md`.
+ *
+ * These carry the same frontmatter `id:` as the file they were copied from, so reading them
+ * would give the board two tasks with one id, one path to write both to, and a delete of
+ * whichever lost — destroying the recovery file the moment it appears. They are left
+ * unread, unwritten and undeleted instead. A false positive costs nothing: some note in the
+ * vault is simply none of this app's business, which is the normal state of most of them.
+ */
+const CONFLICT_PATTERNS = [
+  /\([^)]*conflicted copy[^)]*\)\.md$/i, // Dropbox, Obsidian Sync
+  /\.sync-conflict-[^/]*\.md$/i, // Syncthing
+];
+const isConflictCopy = (name) => CONFLICT_PATTERNS.some((pattern) => pattern.test(name));
+
+/**
+ * Every `.md` entry in one directory, as `[name, handle]`, without reading any contents.
+ * Conflict copies are separated out here rather than filtered later, so nothing downstream —
+ * including the test for whether this folder is a project at all — can see them.
+ */
 async function markdownEntries(handle) {
   const found = [];
+  const conflicts = [];
   for await (const [name, entry] of handle.entries()) {
-    if (entry.kind === 'file' && isMarkdown(name)) found.push([name, entry]);
+    if (entry.kind !== 'file' || !isMarkdown(name)) continue;
+    if (isConflictCopy(name)) conflicts.push(name);
+    else found.push([name, entry]);
   }
-  return found;
+  return { found, conflicts };
 }
 
 /**
@@ -110,24 +140,37 @@ async function markdownEntries(handle) {
  */
 async function readDirectory(handle) {
   const files = {};
+  /** What each file said it was when we read it, for `save` to check against later. */
+  const stats = new Map();
+  const conflicts = [];
   const subdirectories = [];
+
+  // `lastModified` and `size` come with the `File` we are reading anyway, so the record of
+  // what was on disk at this moment costs nothing beyond keeping it.
+  const take = async (path, entry) => {
+    const file = await entry.getFile();
+    files[path] = await file.text();
+    stats.set(path, { mtime: file.lastModified, size: file.size });
+  };
 
   for await (const [name, entry] of handle.entries()) {
     if (entry.kind === 'directory') subdirectories.push([name, entry]);
     else if (entry.kind === 'file' && isMarkdown(name)) {
-      files[name] = await (await entry.getFile()).text();
+      if (isConflictCopy(name)) conflicts.push(name);
+      else await take(name, entry);
     }
   }
 
   for (const [folder, directoryHandle] of subdirectories) {
-    const entries = await markdownEntries(directoryHandle);
-    if (!entries.some(([name]) => name.startsWith(PROJECT_PREFIX))) continue;
-    for (const [name, entry] of entries) {
-      files[`${folder}/${name}`] = await (await entry.getFile()).text();
-    }
+    const { found, conflicts: theirs } = await markdownEntries(directoryHandle);
+    if (!found.some(([name]) => name.startsWith(PROJECT_PREFIX))) continue;
+    // Only now that this folder is known to be a project's: a conflict copy in a folder we
+    // have no business in is not this app's to count either.
+    for (const name of theirs) conflicts.push(`${folder}/${name}`);
+    for (const [name, entry] of found) await take(`${folder}/${name}`, entry);
   }
 
-  return files;
+  return { files, stats, conflicts };
 }
 
 export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
@@ -148,10 +191,36 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
   }
 
   const basename = (path) => path.slice(path.lastIndexOf('/') + 1);
-  /** Files we have read or written in the connected folder — the only ones we may delete. */
-  let owned = new Set();
-  /** What each file said on disk when we last read or wrote it. */
-  let written = new Map();
+
+  /**
+   * Every file we have read or written in the connected folder: what it said, and what the
+   * filesystem said about it, when we last touched it.
+   *
+   * These are the only files we may write to or delete — and its keys are that claim of
+   * ownership, so a file dropped from here is a file left alone from then on. The `mtime`
+   * and `size` are what make "unchanged since we read it" a question about the disk rather
+   * than about our own memory of it.
+   */
+  let snapshot = new Map();
+
+  /**
+   * One save at a time.
+   *
+   * `persist` is called without being awaited, so two quick edits start two saves — and each
+   * save now checks a file and then writes it, which is only safe if nothing else is doing
+   * the same in between. Re-reads queue here too, so a folder cannot be re-read halfway
+   * through being written.
+   */
+  let queue = Promise.resolve();
+  function serialise(job) {
+    // Both arms: a job that threw must still let the next one run.
+    const run = queue.then(job, job);
+    queue = run.then(
+      () => {},
+      () => {}
+    );
+    return run;
+  }
 
   const state = {
     get mode() {
@@ -163,6 +232,8 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
     supportsFolder,
     /** True when a folder was connected previously but needs a click to re-authorise. */
     reconnectable: false,
+    /** Sync conflict copies seen in the folder, left untouched. Named so the app can say so. */
+    conflictFiles: [],
     /** False while a connected folder is still read-only. Browser-only storage is always writable. */
     get writable() {
       return !directory || unlocked;
@@ -191,56 +262,149 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
     return false;
   }
 
-  async function load() {
+  async function loadNow() {
     if (!directory) await tryRestoreFolder();
     if (directory) {
-      const files = await readDirectory(directory);
-      owned = new Set(Object.keys(files));
-      written = new Map(Object.entries(files));
+      const { files, stats, conflicts } = await readDirectory(directory);
+      snapshot = new Map(
+        Object.entries(files).map(([path, text]) => [path, { text, ...stats.get(path) }])
+      );
+      state.conflictFiles = conflicts;
       writeMirror(files);
       return files;
     }
     return readMirror() ?? {};
   }
 
-  async function save(files) {
+  const load = () => serialise(loadNow);
+
+  /**
+   * What the filesystem says about a path right now, or null if there is nothing there.
+   * Never creates: a stat is a question, and asking it must not answer itself.
+   */
+  async function statOnDisk(path) {
+    try {
+      const dir = await directoryFor(path, false);
+      const handle = await dir.getFileHandle(basename(path), { create: false });
+      const file = await handle.getFile();
+      return { mtime: file.lastModified, size: file.size };
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when the file on disk is not the one we last read or wrote. */
+  const moved = (recorded, current) =>
+    current.mtime !== recorded.mtime || current.size !== recorded.size;
+
+  async function saveNow(files) {
     // Before the mirror, not after: a board that was never allowed onto disk must not be
     // left behind in localStorage either, where a later session could write it back out.
     if (directory && !unlocked) return { skipped: 'read-only' };
     writeMirror(files);
     if (!directory) return {};
+    /** Paths where the folder had moved on, so we left it alone. The caller has to say so. */
+    const blocked = [];
+
     for (const [name, text] of Object.entries(files)) {
       // Only touch files that actually changed, and judge that by what the file *says*
       // rather than by its bytes. A note hand-written in a vault rarely matches this app's
       // spacing and key order, and rewriting all of those on the first edit of a session
       // would churn mtimes, wake Obsidian's watcher for notes nothing altered, and hand
       // every one of them to the next sync as a change to reconcile.
-      const previous = written.get(name);
-      if (previous !== undefined && sameFile(name, previous, text)) continue;
+      const previous = snapshot.get(name);
+      if (previous && sameFile(name, previous.text, text)) continue;
+
+      // The check the whole file exists for: is this still the file we read? A folder in
+      // Dropbox is written to by other machines while this tab sits open, and the edit in
+      // hand was made against what we read, so overwriting a newer file loses whatever it
+      // said. A file that has since vanished is not a conflict — it is simply gone, and
+      // writing it back is what a save is for.
+      const current = await statOnDisk(name);
+      if (previous ? current && moved(previous, current) : Boolean(current)) {
+        // The second case is a path we have never read with something already at it: another
+        // machine got to this task first, or the vault has a note of its own by that name.
+        // Either way these are bytes nobody here has seen, which is reason enough.
+        blocked.push(name);
+        continue;
+      }
+
       const dir = await directoryFor(name, true);
       const fileHandle = await dir.getFileHandle(basename(name), { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(text);
       await writable.close();
-      written.set(name, text);
+      // Re-stat rather than guess: what we recorded has to be what the *filesystem* now
+      // says, or the next save would read its own write as somebody else's change.
+      const after = await fileHandle.getFile();
+      snapshot.set(name, { text, mtime: after.lastModified, size: after.size });
     }
+
     // Remove only files we ourselves put there, so unrelated notes in a vault survive. A
     // task retagged into another project shows up here as a delete of its old path, the new
     // one having just been written above — which is the whole of moving a file between
     // project folders. Emptied directories are left alone: a project folder always keeps its
     // project file, and removing a directory in someone's vault is not this app's business.
-    for (const name of owned) {
+    for (const [name, previous] of [...snapshot]) {
       if (name in files) continue;
-      try {
-        const dir = await directoryFor(name, false);
-        await dir.removeEntry(basename(name));
-      } catch {
-        /* already gone, or its folder is */
+      const current = await statOnDisk(name);
+      if (current && moved(previous, current)) {
+        // Deleting is the one thing there is no recovering from, so a file that has changed
+        // since we read it stays, and stays ours: the next re-read decides what it is now.
+        blocked.push(name);
+        continue;
       }
-      written.delete(name);
+      if (current) {
+        try {
+          const dir = await directoryFor(name, false);
+          await dir.removeEntry(basename(name));
+        } catch {
+          /* already gone, or its folder is */
+        }
+      }
+      snapshot.delete(name);
     }
-    owned = new Set(Object.keys(files));
-    return {};
+
+    return blocked.length ? { blocked } : {};
+  }
+
+  const save = (files) => serialise(() => saveNow(files));
+
+  /**
+   * Re-read the folder and say whether it now differs from what we last saw.
+   *
+   * This is what makes an open tab notice a folder that moved under it. The comparison is by
+   * meaning, not bytes, so a sync client rewriting a file it did not really change does not
+   * count as the folder having changed.
+   */
+  async function revalidateNow() {
+    if (!directory || !unlocked) return { files: null, changed: false };
+    const previous = snapshot;
+    const files = await loadNow();
+    const paths = new Set([...previous.keys(), ...Object.keys(files)]);
+    let changed = false;
+    for (const path of paths) {
+      const before = previous.get(path);
+      const after = files[path];
+      if (before === undefined || after === undefined || !sameFile(path, before.text, after)) {
+        changed = true;
+        break;
+      }
+    }
+    return { files, changed };
+  }
+
+  const revalidate = () => serialise(revalidateNow);
+
+  /**
+   * Stop claiming these files: leave them on disk, unwritten and undeleted.
+   *
+   * For files the board could not take in — two of them claiming one id, say. They were read,
+   * so without this they count as ours, and the next save would delete the one that lost for
+   * having no place in the board.
+   */
+  function disown(paths) {
+    for (const path of paths) snapshot.delete(path);
   }
 
   /**
@@ -250,11 +414,13 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
    * folder as it is now rather than as it was at boot. Nothing has been written while
    * locked, so there is nothing to merge and the fresh contents simply replace the board.
    */
-  async function unlock() {
-    if (!directory) return null;
-    const files = await load();
-    unlocked = true;
-    return files;
+  function unlock() {
+    return serialise(async () => {
+      if (!directory) return null;
+      const files = await loadNow();
+      unlocked = true;
+      return files;
+    });
   }
 
   /** Withdraw that authorisation — the tab has been away long enough to have gone stale. */
@@ -282,10 +448,22 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
   function disconnectFolder() {
     directory = null;
     unlocked = false;
-    written = new Map();
+    snapshot = new Map();
+    state.conflictFiles = [];
     state.reconnectable = false;
     idbSet(null).catch(() => {});
   }
 
-  return { state, load, save, unlock, lock, connectFolder, disconnectFolder, tryRestoreFolder };
+  return {
+    state,
+    load,
+    save,
+    revalidate,
+    disown,
+    unlock,
+    lock,
+    connectFolder,
+    disconnectFolder,
+    tryRestoreFolder,
+  };
 }
