@@ -21,9 +21,10 @@
       <h1>Tasks tests</h1>
       <p class="muted">
         Markdown round-tripping, ids, dates, timeline buckets, derived status, filters, the
-        LLM response parsers and the zip writer — plus the storage layer's read-only gate,
-        driven against a fake directory handle. Rendering and network calls are not covered
-        here.
+        LLM response parsers and the zip writer — plus the storage layer, driven against a
+        fake directory handle and a fake Dropbox: the read-only gate, the refusal to overwrite
+        a file that moved elsewhere, and the conflict copies it leaves alone. Rendering is not
+        covered here.
       </p>
       <div id="summary">Running…</div>
       <div id="out"></div>

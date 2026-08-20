@@ -47,6 +47,7 @@ import {
   sameFile,
 } from '../model.js';
 import { createStorage } from '../storage.js';
+import { headerSafe, pendingCode, authError } from '../dropbox.js';
 import {
   buildBrief,
   buildTaskBrief,
@@ -1929,6 +1930,296 @@ storageTest('a file whose id another file claimed is left where it is', async ()
   assert('wireframes 1.md' in directory.dump(), 'the copy must survive');
   assert(directory.dump()['wireframes 1.md'].includes('A copy.'));
   assert('wireframes.md' in files);
+});
+
+/* ------------------------------------------------------------- dropbox */
+
+/**
+ * Enough of the Dropbox API for storage.js, behind a stubbed `fetch`.
+ *
+ * It keeps a `rev` per file and a clock, because those are the two things the backend leans
+ * on: an upload carrying a stale `rev` must be refused the way the server refuses it, and a
+ * cursor must be able to answer "nothing has changed" without listing anything.
+ */
+function fakeDropbox(seed = {}) {
+  const files = new Map(); // path -> { text, rev, version }
+  const log = [];
+  const calls = [];
+  let clock = 0;
+  let revs = 0;
+
+  /** Write as another device would: a new revision, at a later moment. */
+  const put = (path, text) => {
+    clock += 1;
+    revs += 1;
+    files.set(path, { text, rev: `rev${revs}`, version: clock });
+  };
+  const drop = (path) => {
+    clock += 1;
+    files.delete(path);
+  };
+  for (const [path, text] of Object.entries(seed)) put(path, text);
+
+  const reply = (status, payload) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    async json() {
+      return payload;
+    },
+    async text() {
+      return typeof payload === 'string' ? payload : JSON.stringify(payload);
+    },
+  });
+  const conflict = (summary) => reply(409, { error_summary: summary });
+  const entriesNow = () =>
+    [...files].map(([path, file]) => ({ '.tag': 'file', path_display: `/${path}`, rev: file.rev }));
+
+  async function route(url, options = {}) {
+    calls.push(url);
+    const args = () => JSON.parse(options.body ?? 'null');
+    const headerArgs = () => JSON.parse(options.headers['Dropbox-API-Arg']);
+    const at = (path) => String(path).replace(/^\//, '');
+
+    if (url.endsWith('/oauth2/token')) {
+      return reply(200, { access_token: 'test-token', expires_in: 14400 });
+    }
+    if (url.endsWith('/2/users/get_current_account')) {
+      return reply(200, { email: 'georg@example.com' });
+    }
+    if (url.endsWith('/2/files/list_folder')) {
+      return reply(200, { entries: entriesNow(), cursor: `c${clock}`, has_more: false });
+    }
+    if (url.endsWith('/2/files/list_folder/continue')) {
+      const since = Number(String(args().cursor).slice(1));
+      const changed = entriesNow().filter(
+        (entry) => files.get(at(entry.path_display)).version > since
+      );
+      return reply(200, { entries: changed, cursor: `c${clock}`, has_more: false });
+    }
+    if (url.endsWith('/2/files/download')) {
+      const file = files.get(at(headerArgs().path));
+      if (!file) return conflict('path/not_found/...');
+      return reply(200, file.text);
+    }
+    if (url.endsWith('/2/files/upload')) {
+      const { path, mode } = headerArgs();
+      const name = at(path);
+      const existing = files.get(name);
+      // `add` onto something that is already there, and `update` against anything but the
+      // revision the caller last saw, are both refusals rather than overwrites.
+      if (mode === 'add' ? existing : !existing || existing.rev !== mode.update) {
+        return conflict('path/conflict/file/...');
+      }
+      put(name, options.body);
+      log.push(`upload ${name}`);
+      return reply(200, { path_display: path, rev: files.get(name).rev });
+    }
+    if (url.endsWith('/2/files/delete_v2')) {
+      const { path, parent_rev: rev } = args();
+      const name = at(path);
+      const existing = files.get(name);
+      if (!existing) return conflict('path_lookup/not_found/...');
+      if (rev && existing.rev !== rev) return conflict('path_write/conflict/file/...');
+      drop(name);
+      log.push(`delete ${name}`);
+      return reply(200, { metadata: { path_display: path } });
+    }
+    throw new Error(`unexpected call: ${url}`);
+  }
+
+  return {
+    log,
+    calls,
+    put,
+    drop,
+    fetch: route,
+    /** Current contents as a `path -> text` map, for assertions. */
+    dump: () => Object.fromEntries([...files].map(([path, file]) => [path, file.text])),
+  };
+}
+
+/** Like `storageTest`, but with a fake Dropbox connected and this browser's keys put back. */
+function dropboxTest(name, fn) {
+  const KEYS = ['tasks.files', 'tasks.backend', 'tasks.dropbox.appKey', 'tasks.dropbox.refresh'];
+  test(name, async () => {
+    const saved = KEYS.map((key) => [key, localStorage.getItem(key)]);
+    const realFetch = globalThis.fetch;
+    try {
+      await fn();
+    } finally {
+      globalThis.fetch = realFetch;
+      for (const [key, value] of saved) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      }
+    }
+  });
+}
+
+/** A storage reading a fake Dropbox app folder, with its log cleared. */
+async function dropboxWith(seed) {
+  const remote = fakeDropbox(seed);
+  globalThis.fetch = remote.fetch;
+  localStorage.setItem('tasks.dropbox.appKey', 'test-key');
+  localStorage.setItem('tasks.dropbox.refresh', 'test-refresh');
+  const storage = createStorage({ sameFile });
+  const files = await storage.connectDropbox();
+  remote.log.length = 0;
+  remote.calls.length = 0;
+  return { storage, remote, files };
+}
+
+describe('dropbox');
+
+test('a header carries a path no header may hold', () => {
+  const encoded = headerSafe({ path: '/prosjekt/mål og ræl.md' });
+  // Every byte inside printable ASCII, and still the same path once Dropbox parses it back.
+  assert(/^[\x20-\x7e]*$/.test(encoded), encoded);
+  assertEqual(JSON.parse(encoded).path, '/prosjekt/mål og ræl.md');
+});
+
+test('a returning sign-in is read from the address it arrived on', () => {
+  // main.js wipes the query before asking, so both of these have to answer from what it kept.
+  sessionStorage.setItem('tasks.dropbox.state', 'nonce');
+  try {
+    assertEqual(pendingCode('?code=abc&state=nonce'), 'abc');
+    // Somebody else's link, or another tab's flow: not ours to spend.
+    assertEqual(pendingCode('?code=abc&state=elsewhere'), null);
+    assertEqual(pendingCode(''), null);
+    assertEqual(authError('?error=access_denied&error_description=Nope'), 'Nope');
+    assertEqual(authError('?code=abc'), null);
+  } finally {
+    sessionStorage.removeItem('tasks.dropbox.state');
+  }
+});
+
+dropboxTest('the app folder reads by the same rules as a local folder', async () => {
+  const { storage, files } = await dropboxWith({
+    'wireframes.md': TASK_MD,
+    [CONFLICT_NAME]: TASK_MD,
+    'website/_project-website.md': '---\nid: website\ntitle: Website\n---\n',
+    'website/notes.md': TASK_MD.replace('id: wireframes', 'id: notes'),
+    'holiday/packing.md': TASK_MD.replace('id: wireframes', 'id: packing'),
+  });
+  assertEqual(storage.state.mode, 'dropbox');
+  assert(storage.state.writable, 'Dropbox has no mid-sync moment, so no read-only gate');
+  assertEqual(Object.keys(files).sort(), [
+    'website/_project-website.md',
+    'website/notes.md',
+    'wireframes.md',
+  ]);
+  assertEqual(storage.state.conflictFiles, [CONFLICT_NAME]);
+});
+
+dropboxTest('a file whose revision moved is not written over', async () => {
+  const { storage, remote, files } = await dropboxWith({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  remote.put('wireframes.md', TASK_MD.replace('Some notes.', 'Written on the other machine.'));
+
+  const result = await storage.save({
+    ...files,
+    'wireframes.md': TASK_MD.replace('Some notes.', 'Written here.'),
+    'doomed.md': DOOMED_MD.replace('Doomed', 'Spared'),
+  });
+
+  assertEqual(result, { blocked: ['wireframes.md'] });
+  assertEqual(remote.log, ['upload doomed.md']);
+  assert(remote.dump()['wireframes.md'].includes('Written on the other machine.'));
+});
+
+dropboxTest('a path we have never read is not created over something', async () => {
+  const { storage, remote, files } = await dropboxWith({ 'wireframes.md': TASK_MD });
+  remote.put('worktop.md', '---\nid: worktop\ntitle: Worktop\n---\nTheirs.\n');
+
+  const result = await storage.save({
+    ...files,
+    'worktop.md': '---\nid: worktop\ntitle: Worktop\n---\nOurs.\n',
+  });
+  assertEqual(result, { blocked: ['worktop.md'] });
+  assertEqual(remote.log, []);
+  assert(remote.dump()['worktop.md'].includes('Theirs.'));
+});
+
+dropboxTest('a file whose revision moved is not deleted', async () => {
+  const { storage, remote, files } = await dropboxWith({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  remote.put('doomed.md', DOOMED_MD.replace('Doomed', 'Not any more'));
+
+  const { 'doomed.md': _gone, ...without } = files;
+  const result = await storage.save(without);
+
+  assertEqual(result, { blocked: ['doomed.md'] });
+  assertEqual(remote.log, []);
+  assert('doomed.md' in remote.dump(), 'the file must still be there');
+});
+
+dropboxTest('a file already deleted elsewhere is not a failure', async () => {
+  const { storage, remote, files } = await dropboxWith({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  // Another machine deleted it first. The board and the folder agree after all, so this is
+  // a delete that has already happened rather than a conflict to report.
+  remote.drop('doomed.md');
+
+  const { 'doomed.md': _gone, ...without } = files;
+  assertEqual(await storage.save(without), {});
+  assertEqual(remote.log, []);
+  // And it is no longer ours, so a second save does not go looking for it again.
+  assertEqual(await storage.save(without), {});
+  assertEqual(remote.calls.filter((url) => url.endsWith('delete_v2')).length, 1);
+});
+
+dropboxTest('uploads are issued one at a time', async () => {
+  const { storage, remote, files } = await dropboxWith({
+    'wireframes.md': TASK_MD,
+    'doomed.md': DOOMED_MD,
+  });
+  // Writes to one account queue on a namespace lock, so overlapping saves must not interleave.
+  const first = storage.save({
+    ...files,
+    'wireframes.md': TASK_MD.replace('Some notes.', 'First.'),
+    'doomed.md': DOOMED_MD.replace('Doomed', 'First'),
+  });
+  const second = storage.save({
+    ...files,
+    'wireframes.md': TASK_MD.replace('Some notes.', 'Second.'),
+    'doomed.md': DOOMED_MD.replace('Doomed', 'Second'),
+  });
+  await Promise.all([first, second]);
+
+  assertEqual(remote.log, [
+    'upload wireframes.md',
+    'upload doomed.md',
+    'upload wireframes.md',
+    'upload doomed.md',
+  ]);
+  assert(remote.dump()['wireframes.md'].includes('Second.'));
+});
+
+dropboxTest('an unchanged folder is settled in one request', async () => {
+  const { storage, remote } = await dropboxWith({ 'wireframes.md': TASK_MD });
+
+  const quiet = await storage.revalidate();
+  assertEqual(quiet.changed, false);
+  // The cursor answers on its own: nothing is listed again and nothing is downloaded.
+  assertEqual(remote.calls.length, 1);
+  assert(remote.calls[0].endsWith('/list_folder/continue'), remote.calls[0]);
+
+  remote.put('wireframes.md', TASK_MD.replace('Some notes.', 'Theirs.'));
+  const moved = await storage.revalidate();
+  assert(moved.changed, 'an edit elsewhere is a change');
+  assert(moved.files['wireframes.md'].includes('Theirs.'));
+
+  // Having taken the folder's version, saving it back writes nothing at all.
+  remote.log.length = 0;
+  await storage.save(moved.files);
+  assertEqual(remote.log, []);
 });
 
 /* ---------------------------------------------------------------- run */

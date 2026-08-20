@@ -1,19 +1,21 @@
 /**
  * Where the markdown lives.
  *
- * Two backends behind one interface:
- *   - `folder`: real `.md` files in a directory chosen with the File System Access API
- *     (Chrome/Edge). Point it at a folder inside an Obsidian vault and it works today.
- *   - `local`:  a `filename -> text` map in localStorage. Every browser.
+ * Three backends behind one interface:
+ *   - `folder`:  real `.md` files in a directory chosen with the File System Access API
+ *                (Chrome/Edge). Point it at a folder inside an Obsidian vault and it works today.
+ *   - `dropbox`: the same `.md` files over Dropbox's HTTP API, for phones — where no browser
+ *                implements the directory picker, and there is no synced folder to pick.
+ *   - `local`:   a `filename -> text` map in localStorage. Every browser.
  *
  * The connected folder is a *parent*: its own `.md` files are the board's unfiled tasks, and
  * each subfolder holding a `_project-*.md` is a project. Keys are therefore paths —
  * `website/wireframes.md` — one level deep and no further.
  *
- * localStorage is kept as a mirror in both modes, but is never written *back* to a
- * folder — when a folder is connected the folder is the single source of truth. This
- * is the only module that knows where bytes live: an Obsidian plugin reimplements just
- * this file against the vault API.
+ * localStorage is kept as a mirror in every mode, but is never written *back* to a folder —
+ * when one is connected, whether on disk or in Dropbox, it is the single source of truth.
+ * This is the only module that knows where bytes live: an Obsidian plugin reimplements just
+ * this file against the vault API, and `dropbox.js` is the same idea already done once.
  *
  * A connected folder opens *read-only*. The folder may be inside a vault that syncs, and
  * nothing here can tell a folder that has finished syncing from one that is mid-pull — so
@@ -32,8 +34,11 @@
 // The one thing this layer needs from the domain: which subfolders are projects, and so
 // which are none of its business. Everything else about a file's meaning stays in model.js.
 import { PROJECT_PREFIX } from './model.js';
+import * as dropbox from './dropbox.js';
 
 const MIRROR_KEY = 'tasks.files';
+/** Which backend this browser last chose, so a reload comes back to the same board. */
+const BACKEND_KEY = 'tasks.backend';
 const IDB_NAME = 'tasks-storage';
 const IDB_STORE = 'handles';
 const HANDLE_KEY = 'directory';
@@ -115,66 +120,126 @@ const CONFLICT_PATTERNS = [
 const isConflictCopy = (name) => CONFLICT_PATTERNS.some((pattern) => pattern.test(name));
 
 /**
- * Every `.md` entry in one directory, as `[name, handle]`, without reading any contents.
- * Conflict copies are separated out here rather than filtered later, so nothing downstream —
- * including the test for whether this folder is a project at all — can see them.
+ * Which of these paths the board owns, out of everything in the connected folder.
+ *
+ * The rule, in one place because two backends have to agree on it exactly: `.md` files in the
+ * parent, and `.md` files one level down in a subfolder that holds a `_project-*.md`. Nothing
+ * deeper, nothing in a folder that is not a project's — the parent is often a whole vault, so
+ * most of what is in it is none of this app's business, and a folder it never reads is a
+ * folder it can never damage.
+ *
+ * Conflict copies come back separately: they are skipped whatever they are named after, but a
+ * copy sitting in someone else's folder is not this app's to count either.
  */
-async function markdownEntries(handle) {
-  const found = [];
-  const conflicts = [];
-  for await (const [name, entry] of handle.entries()) {
-    if (entry.kind !== 'file' || !isMarkdown(name)) continue;
-    if (isConflictCopy(name)) conflicts.push(name);
-    else found.push([name, entry]);
+function selectMarkdown(paths) {
+  const projectFolders = new Set();
+  const within = (path) => {
+    const cut = path.indexOf('/');
+    if (cut === -1) return { folder: '', base: path };
+    return { folder: path.slice(0, cut), base: path.slice(cut + 1) };
+  };
+
+  for (const path of paths) {
+    const { folder, base } = within(path);
+    if (!folder || base.includes('/')) continue;
+    if (isMarkdown(base) && !isConflictCopy(base) && base.startsWith(PROJECT_PREFIX)) {
+      projectFolders.add(folder);
+    }
   }
-  return { found, conflicts };
+
+  const keep = [];
+  const conflicts = [];
+  for (const path of paths) {
+    const { folder, base } = within(path);
+    if (folder && (base.includes('/') || !projectFolders.has(folder))) continue;
+    if (!isMarkdown(base)) continue;
+    if (isConflictCopy(base)) conflicts.push(path);
+    else keep.push(path);
+  }
+  return { keep, conflicts };
 }
 
 /**
  * The parent folder and its project subfolders, one level deep.
  *
- * A subfolder counts as a project only if it holds a `_project-*.md`, and that is decided
- * from the file *names* — a folder that is not a project is never read, never written to and
- * never deleted from. The parent is often a whole vault, so most of what is in it is none of
- * this app's business.
+ * Names first, contents second: what a folder is gets decided from the file *names* it holds,
+ * and only then is anything read.
  */
 async function readDirectory(handle) {
-  const files = {};
-  /** What each file said it was when we read it, for `save` to check against later. */
-  const stats = new Map();
-  const conflicts = [];
+  /** `path -> file entry`, for everything that might matter. Nothing is read yet. */
+  const entries = new Map();
   const subdirectories = [];
-
-  // `lastModified` and `size` come with the `File` we are reading anyway, so the record of
-  // what was on disk at this moment costs nothing beyond keeping it.
-  const take = async (path, entry) => {
-    const file = await entry.getFile();
-    files[path] = await file.text();
-    stats.set(path, { mtime: file.lastModified, size: file.size });
-  };
 
   for await (const [name, entry] of handle.entries()) {
     if (entry.kind === 'directory') subdirectories.push([name, entry]);
-    else if (entry.kind === 'file' && isMarkdown(name)) {
-      if (isConflictCopy(name)) conflicts.push(name);
-      else await take(name, entry);
+    else if (entry.kind === 'file' && isMarkdown(name)) entries.set(name, entry);
+  }
+  for (const [folder, directoryHandle] of subdirectories) {
+    for await (const [name, entry] of directoryHandle.entries()) {
+      if (entry.kind === 'file' && isMarkdown(name)) entries.set(`${folder}/${name}`, entry);
     }
   }
 
-  for (const [folder, directoryHandle] of subdirectories) {
-    const { found, conflicts: theirs } = await markdownEntries(directoryHandle);
-    if (!found.some(([name]) => name.startsWith(PROJECT_PREFIX))) continue;
-    // Only now that this folder is known to be a project's: a conflict copy in a folder we
-    // have no business in is not this app's to count either.
-    for (const name of theirs) conflicts.push(`${folder}/${name}`);
-    for (const [name, entry] of found) await take(`${folder}/${name}`, entry);
+  const { keep, conflicts } = selectMarkdown([...entries.keys()]);
+  const files = {};
+  const stamps = new Map();
+  for (const path of keep) {
+    // `lastModified` and `size` come with the `File` we are reading anyway, so the record of
+    // what was on disk at this moment costs nothing beyond keeping it.
+    const file = await entries.get(path).getFile();
+    files[path] = await file.text();
+    stamps.set(path, { mtime: file.lastModified, size: file.size });
   }
 
-  return { files, stats, conflicts };
+  return { files, stamps, conflicts };
+}
+
+/** How many files to pull from Dropbox at once. Reads do not contend; a phone's radio does. */
+const DOWNLOAD_AT_ONCE = 6;
+
+async function inParallel(items, limit, run) {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await run(items[next++]);
+  });
+  await Promise.all(workers);
+}
+
+/**
+ * The same read, against the app folder in Dropbox.
+ *
+ * One listing settles the shape — including which subfolders are projects — and only the
+ * files that survive that are downloaded. The cursor that comes back is what lets a later
+ * check ask "anything new?" in a single request instead of listing everything again.
+ */
+async function readRemote() {
+  const { entries, cursor } = await dropbox.listAll();
+  const revs = new Map();
+  for (const entry of entries) {
+    if (entry['.tag'] !== 'file') continue;
+    revs.set(entry.path_display.replace(/^\//, ''), entry.rev);
+  }
+
+  const { keep, conflicts } = selectMarkdown([...revs.keys()]);
+  const files = {};
+  const stamps = new Map();
+  await inParallel(keep, DOWNLOAD_AT_ONCE, async (path) => {
+    files[path] = await dropbox.download(path);
+    stamps.set(path, { rev: revs.get(path) });
+  });
+
+  return { files, stamps, conflicts, cursor };
 }
 
 export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
   let directory = null;
+  /**
+   * Connected to Dropbox rather than to a folder. The two are exclusive: whichever backend
+   * this browser chose is the one source of truth, and the other is not consulted at all.
+   */
+  let remote = false;
+  /** Where Dropbox's account of the folder had got to when we last read it. */
+  let cursor = null;
   /** Whether writes to the connected folder have been authorised. See `unlock`. */
   let unlocked = false;
 
@@ -224,17 +289,24 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
 
   const state = {
     get mode() {
-      return directory ? 'folder' : 'local';
+      if (directory) return 'folder';
+      return remote ? 'dropbox' : 'local';
     },
     get folderName() {
-      return directory?.name ?? '';
+      if (directory) return directory.name;
+      return remote ? (dropbox.getAccountName() || 'Dropbox') : '';
     },
     supportsFolder,
     /** True when a folder was connected previously but needs a click to re-authorise. */
     reconnectable: false,
     /** Sync conflict copies seen in the folder, left untouched. Named so the app can say so. */
     conflictFiles: [],
-    /** False while a connected folder is still read-only. Browser-only storage is always writable. */
+    /**
+     * False while a connected folder is still read-only. Browser-only storage is always
+     * writable, and so is Dropbox: the read-only gate exists because a local folder can be
+     * caught mid-sync with nothing able to tell, and an API answers for the folder as it
+     * actually stands. There is no moment to be careful about.
+     */
     get writable() {
       return !directory || unlocked;
     },
@@ -262,16 +334,42 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
     return false;
   }
 
+  /**
+   * Pick a backend back up on boot.
+   *
+   * Whichever one was chosen last wins, so a desktop that has both a folder handle and a
+   * Dropbox grant comes back to the board it was actually using. Only when nothing was
+   * recorded does it fall back to looking for a folder, which is what every existing
+   * installation will find.
+   */
+  async function tryRestore() {
+    const chosen = localStorage.getItem(BACKEND_KEY);
+    if (chosen !== 'folder' && dropbox.isConnected()) {
+      remote = true;
+      return true;
+    }
+    return tryRestoreFolder();
+  }
+
+  function adopt(files, stamps, conflicts) {
+    snapshot = new Map(
+      Object.entries(files).map(([path, text]) => [path, { text, ...stamps.get(path) }])
+    );
+    state.conflictFiles = conflicts;
+    writeMirror(files);
+    return files;
+  }
+
   async function loadNow() {
-    if (!directory) await tryRestoreFolder();
+    if (!directory && !remote) await tryRestore();
     if (directory) {
-      const { files, stats, conflicts } = await readDirectory(directory);
-      snapshot = new Map(
-        Object.entries(files).map(([path, text]) => [path, { text, ...stats.get(path) }])
-      );
-      state.conflictFiles = conflicts;
-      writeMirror(files);
-      return files;
+      const { files, stamps, conflicts } = await readDirectory(directory);
+      return adopt(files, stamps, conflicts);
+    }
+    if (remote) {
+      const read = await readRemote();
+      cursor = read.cursor;
+      return adopt(read.files, read.stamps, read.conflicts);
     }
     return readMirror() ?? {};
   }
@@ -297,15 +395,13 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
   const moved = (recorded, current) =>
     current.mtime !== recorded.mtime || current.size !== recorded.size;
 
-  async function saveNow(files) {
-    // Before the mirror, not after: a board that was never allowed onto disk must not be
-    // left behind in localStorage either, where a later session could write it back out.
-    if (directory && !unlocked) return { skipped: 'read-only' };
-    writeMirror(files);
-    if (!directory) return {};
-    /** Paths where the folder had moved on, so we left it alone. The caller has to say so. */
-    const blocked = [];
-
+  /**
+   * What a save would change: the files whose text has actually moved, and the ones we own
+   * that the board no longer has. Both backends need the same answer before they differ on
+   * how to act on it.
+   */
+  function pending(files) {
+    const writes = [];
     for (const [name, text] of Object.entries(files)) {
       // Only touch files that actually changed, and judge that by what the file *says*
       // rather than by its bytes. A note hand-written in a vault rarely matches this app's
@@ -314,7 +410,20 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
       // every one of them to the next sync as a change to reconcile.
       const previous = snapshot.get(name);
       if (previous && sameFile(name, previous.text, text)) continue;
+      writes.push([name, text]);
+    }
+    // Remove only files we ourselves put there, so unrelated notes in a vault survive. A
+    // task retagged into another project shows up here as a delete of its old path, the new
+    // one having just been written above — which is the whole of moving a file between
+    // project folders. Emptied directories are left alone: a project folder always keeps its
+    // project file, and removing a directory in someone's vault is not this app's business.
+    const removals = [...snapshot.keys()].filter((name) => !(name in files));
+    return { writes, removals };
+  }
 
+  async function writeToFolder(writes, removals, blocked) {
+    for (const [name, text] of writes) {
+      const previous = snapshot.get(name);
       // The check the whole file exists for: is this still the file we read? A folder in
       // Dropbox is written to by other machines while this tab sits open, and the edit in
       // hand was made against what we read, so overwriting a newer file loses whatever it
@@ -340,13 +449,8 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
       snapshot.set(name, { text, mtime: after.lastModified, size: after.size });
     }
 
-    // Remove only files we ourselves put there, so unrelated notes in a vault survive. A
-    // task retagged into another project shows up here as a delete of its old path, the new
-    // one having just been written above — which is the whole of moving a file between
-    // project folders. Emptied directories are left alone: a project folder always keeps its
-    // project file, and removing a directory in someone's vault is not this app's business.
-    for (const [name, previous] of [...snapshot]) {
-      if (name in files) continue;
+    for (const name of removals) {
+      const previous = snapshot.get(name);
       const current = await statOnDisk(name);
       if (current && moved(previous, current)) {
         // Deleting is the one thing there is no recovering from, so a file that has changed
@@ -364,7 +468,56 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
       }
       snapshot.delete(name);
     }
+  }
 
+  /**
+   * The same save, asked of Dropbox — which answers the question the folder backend has to
+   * ask for itself.
+   *
+   * Every upload carries the `rev` we last saw, so the server refuses the write if the file
+   * has moved on rather than us checking and then hoping nothing happened in between; a path
+   * we have never read is sent as `add`, which fails if anything is already there. One at a
+   * time, because writes to one account queue on a namespace lock and firing them together
+   * earns 429s rather than speed.
+   */
+  async function writeToRemote(writes, removals, blocked) {
+    for (const [name, text] of writes) {
+      const previous = snapshot.get(name);
+      try {
+        const metadata = await dropbox.upload(name, text, previous?.rev ?? null);
+        snapshot.set(name, { text, rev: metadata.rev });
+      } catch (error) {
+        if (!dropbox.isConflict(error)) throw error;
+        blocked.push(name);
+      }
+    }
+
+    for (const name of removals) {
+      try {
+        await dropbox.remove(name, snapshot.get(name)?.rev ?? null);
+      } catch (error) {
+        if (dropbox.isConflict(error)) {
+          blocked.push(name);
+          continue;
+        }
+        // Already gone is not a failure: the board and the folder agree after all.
+        if (!dropbox.isMissing(error)) throw error;
+      }
+      snapshot.delete(name);
+    }
+  }
+
+  async function saveNow(files) {
+    // Before the mirror, not after: a board that was never allowed onto disk must not be
+    // left behind in localStorage either, where a later session could write it back out.
+    if (directory && !unlocked) return { skipped: 'read-only' };
+    writeMirror(files);
+    if (!directory && !remote) return {};
+    /** Paths where the folder had moved on, so we left it alone. The caller has to say so. */
+    const blocked = [];
+    const { writes, removals } = pending(files);
+    if (directory) await writeToFolder(writes, removals, blocked);
+    else await writeToRemote(writes, removals, blocked);
     return blocked.length ? { blocked } : {};
   }
 
@@ -378,7 +531,15 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
    * count as the folder having changed.
    */
   async function revalidateNow() {
-    if (!directory || !unlocked) return { files: null, changed: false };
+    if (directory ? !unlocked : !remote) return { files: null, changed: false };
+    // Dropbox will say whether anything moved for the price of one request, so ask that
+    // before pulling the folder down again. Deletions come back as entries too, so an empty
+    // answer really does mean untouched.
+    if (remote && cursor) {
+      const delta = await dropbox.listSince(cursor);
+      cursor = delta.cursor;
+      if (!delta.entries.length) return { files: null, changed: false };
+    }
     const previous = snapshot;
     const files = await loadNow();
     const paths = new Set([...previous.keys(), ...Object.keys(files)]);
@@ -428,6 +589,25 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
     unlocked = false;
   }
 
+  /**
+   * Use the Dropbox app folder, on a browser that has already been authorised.
+   *
+   * No prompt and no gate: the grant was given once, and what comes back is the folder as the
+   * server has it. Returns its contents, which replace whatever was loaded.
+   */
+  function connectDropbox() {
+    return serialise(async () => {
+      if (!dropbox.isConnected()) throw new Error('Not connected to Dropbox.');
+      directory = null;
+      remote = true;
+      cursor = null;
+      unlocked = false;
+      state.reconnectable = false;
+      localStorage.setItem(BACKEND_KEY, 'dropbox');
+      return loadNow();
+    });
+  }
+
   /** Prompt for a directory. Returns its contents, which replace whatever was loaded. */
   async function connectFolder() {
     if (!supportsFolder) throw new Error('This browser cannot open folders.');
@@ -437,20 +617,26 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
       throw new Error('Permission to use that folder was declined.');
     }
     directory = handle;
+    remote = false;
     unlocked = false;
     state.reconnectable = false;
+    localStorage.setItem(BACKEND_KEY, 'folder');
     // Failing to *remember* the folder is no reason to refuse to use it: private windows and
     // blocked storage both land here, and the folder itself works fine for this session.
     await idbSet(handle).catch(() => {});
     return load();
   }
 
+  /** Back to this browser only. The Dropbox grant itself is dropped by `dropbox.signOut`. */
   function disconnectFolder() {
     directory = null;
+    remote = false;
+    cursor = null;
     unlocked = false;
     snapshot = new Map();
     state.conflictFiles = [];
     state.reconnectable = false;
+    localStorage.removeItem(BACKEND_KEY);
     idbSet(null).catch(() => {});
   }
 
@@ -459,6 +645,7 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
     load,
     save,
     revalidate,
+    connectDropbox,
     disown,
     unlock,
     lock,
