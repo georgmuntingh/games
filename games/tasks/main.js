@@ -41,6 +41,7 @@ import {
 import { createGraph, LEVEL_SEPARATION_DEFAULT } from './graph.js';
 import { createPanel } from './panel.js';
 import { createMenu, createContextMenu } from './menu.js';
+import { createCompactToolbar } from './toolbar.js';
 import { createStorage } from './storage.js';
 import { createHistory } from './undo.js';
 import { createZip } from './zip.js';
@@ -1385,11 +1386,27 @@ function blocksResolved(files) {
   return [...blockedPaths].every((path) => sameFile(path, files[path] ?? '', ours[path] ?? ''));
 }
 
-/** Take the folder's version, at the user's asking rather than on a hunch. */
-async function reloadFromFolder() {
+/**
+ * Take the folder's version, at the user's asking rather than on a hunch.
+ *
+ * Forced, because the two shortcuts that keep the background check cheap are exactly wrong
+ * for someone who has just tapped a button: a read-only folder is skipped entirely, and
+ * Dropbox is taken at its word about nothing having moved. On a phone that word arrives
+ * before the Dropbox app has finished writing the file you came here to see.
+ *
+ * `announce` is for that tap: a button that sometimes says nothing at all reads as broken.
+ */
+async function reloadFromFolder({ announce = false } = {}) {
+  if (storage.state.mode === 'local') return;
   try {
-    const { files } = await storage.revalidate();
+    const { files, changed } = await storage.revalidate({ force: true });
     if (!files) return;
+    // Unchanged, and nothing was refused: the board already is the folder, so rebuilding
+    // from identical files would only throw away the selection and the filters.
+    if (!changed && !blockedPaths.size) {
+      if (announce) status(`Already up to date with “${storage.state.folderName}”.`);
+      return;
+    }
     blockedPaths.clear();
     await setBoardFromFiles(files, `Reloaded “${storage.state.folderName}” from the folder.`);
     refreshReadOnly();
@@ -1925,6 +1942,11 @@ function refreshStorageState() {
         ? 'Use Dropbox'
         : 'Connect Dropbox…';
   $('disconnect-folder').disabled = mode === 'local';
+  $('refresh-folder').disabled = mode === 'local';
+  $('refresh-folder').title =
+    mode === 'local'
+      ? 'Nothing to reload — this board is saved in the browser only'
+      : `Reload “${folderName}” from the folder`;
 
   const moves = pendingMoves(board(), organisedBoard());
   $('organise-folders').disabled = !moves || !writable;
@@ -2024,6 +2046,17 @@ function wireEvents() {
 
   peopleMenu = createMenu($('people-menu'), $('people-options'));
   contextMenu = createContextMenu($('context-menu'));
+
+  const moreMenu = createMenu($('toolbar-more'), $('toolbar-more-panel'));
+  // Both menus are anchored to buttons that a change of layout may move or hide, and the
+  // people panel is about to stop being a popover, so neither may be open across one.
+  createCompactToolbar({
+    panel: $('toolbar-more-panel'),
+    onChange: () => {
+      moreMenu.close();
+      peopleMenu?.close();
+    },
+  });
 
   const setPeopleFilter = (names) => {
     ui.people.clear();
@@ -2144,6 +2177,20 @@ function wireEvents() {
     status('API key cleared.');
   });
   $('model-picker').addEventListener('change', (event) => llm.setModel(event.target.value));
+  $('refresh-folder').addEventListener('click', async () => {
+    const button = $('refresh-folder');
+    // A Dropbox round trip on a phone is slow enough that a tap with no answer for a second
+    // reads as a tap that missed, so the button says it is busy for as long as it is.
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    try {
+      await reloadFromFolder({ announce: true });
+    } finally {
+      button.removeAttribute('aria-busy');
+      refreshStorageState();
+    }
+  });
+
   $('refresh-models').addEventListener('click', loadModels);
 
   $('connect-folder').addEventListener('click', async () => {
