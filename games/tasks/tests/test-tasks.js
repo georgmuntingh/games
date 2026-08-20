@@ -1676,6 +1676,20 @@ storageTest('a read-only folder is not written to, and nothing is deleted', asyn
   assertEqual(localStorage.getItem('tasks.files'), mirror, 'the mirror must not move either');
 });
 
+storageTest('a forced re-read reaches into a locked folder, and still writes nothing', async () => {
+  const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
+  // The vault finishes syncing while the tab sits there locked. The background check is
+  // meant to leave a read-only folder alone; someone tapping Refresh is not.
+  directory.put('wireframes.md', TASK_MD.replace('Some notes.', 'Notes from my phone.'));
+
+  assertEqual(await storage.revalidate(), { files: null, changed: false });
+
+  const { files, changed } = await storage.revalidate({ force: true });
+  assert(changed, 'the folder moved, so a forced read has to say so');
+  assert(files['wireframes.md'].includes('Notes from my phone.'));
+  assertEqual(directory.log, [], 'reading is not writing, locked or not');
+});
+
 storageTest('unlocking re-reads the folder', async () => {
   const { storage, directory } = await connectedTo({ 'wireframes.md': TASK_MD });
   // Another device gets there first, after this tab has already read the folder.
@@ -2110,6 +2124,22 @@ dropboxTest('the app folder reads by the same rules as a local folder', async ()
     'wireframes.md',
   ]);
   assertEqual(storage.state.conflictFiles, [CONFLICT_NAME]);
+});
+
+dropboxTest('a forced re-read goes and looks rather than trusting the delta', async () => {
+  const { storage, remote } = await dropboxWith({ 'wireframes.md': TASK_MD });
+  const asked = (end) => remote.calls.some((url) => url.endsWith(end));
+
+  // Nothing moved, so the background check costs one delta request and no downloads.
+  assertEqual(await storage.revalidate(), { files: null, changed: false });
+  assert(asked('/2/files/list_folder/continue'), 'the cheap check goes through the delta');
+  assert(!asked('/2/files/download'), 'and stops there when Dropbox says nothing moved');
+
+  // Which is exactly the answer a phone gets while the Dropbox app is still catching up.
+  remote.calls.length = 0;
+  const { files } = await storage.revalidate({ force: true });
+  assert(!asked('/2/files/list_folder/continue'), 'a forced read takes no such answer');
+  assertEqual(Object.keys(files), ['wireframes.md']);
 });
 
 dropboxTest('a file whose revision moved is not written over', async () => {
