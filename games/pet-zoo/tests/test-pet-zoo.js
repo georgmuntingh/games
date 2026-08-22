@@ -38,6 +38,9 @@ import {
   nextItem,
   qualityOf,
   refreshTier,
+  FORM_COUNT,
+  FORM_THRESHOLDS,
+  formFor,
   RELEARN_DELAY,
   review,
 } from '../srs.js';
@@ -62,9 +65,21 @@ import {
   startSession,
   STALE_SESSION_MS,
 } from '../session.js';
-import { clear, createSaver, freshState, load, STORAGE_KEY, touchDay, VERSION, write } from '../store.js';
 import {
+  clear,
+  createSaver,
+  freshState,
+  load,
+  migrateItems,
+  STORAGE_KEY,
+  touchDay,
+  VERSION,
+  write,
+} from '../store.js';
+import {
+  anatomyFor,
   appearanceFor,
+  appearanceOf,
   defaultName,
   isCrowned,
   LOUD_FAMILIES,
@@ -81,6 +96,7 @@ import {
 } from '../pets.js';
 import {
   ACCESSORIES,
+  ANATOMY,
   BODIES,
   BROWS,
   EYES,
@@ -89,6 +105,8 @@ import {
   HAIR,
   HAIR_CROWN,
   MARKINGS,
+  SIGNATURES,
+  stageOf,
   TEXTURES,
   TOPPER_CROWN,
   TOPPERS,
@@ -1258,6 +1276,228 @@ test('the blink hook survives on every eye style', () => {
   for (const id of Object.keys(SPECIES)) {
     assert(petSvg(id, { mood: 'content' }).includes('class="pet-eye"'), `${id} lost its blink hook`);
   }
+});
+
+/* ----------------------------------------------------------- evolution */
+
+describe('evolution — earning a form');
+
+test('a form is earned by feeding, and an egg has no form at all', () => {
+  assertEqual(formFor(0), 0, 'nothing fed yet');
+  assertEqual(formFor(FORM_THRESHOLDS[0]), 1);
+  assertEqual(formFor(FORM_THRESHOLDS[1]), 2);
+  assertEqual(formFor(FORM_THRESHOLDS[2]), 3);
+  assertEqual(formFor(999), FORM_COUNT, 'and it stops at the final form');
+});
+
+test('form never decreases as feeds accumulate', () => {
+  let previous = 0;
+  for (let feeds = 0; feeds <= 40; feeds += 1) {
+    const form = formFor(feeds);
+    assert(form >= previous, `form fell at ${feeds} feeds`);
+    previous = form;
+  }
+});
+
+test('hatching is not reported as an evolution', () => {
+  let item = seed();
+  for (let i = 1; i <= GRADUATION_STREAK; i += 1) {
+    const r = review(item, { correct: true, ms: 3000, reviewClock: i, now: 0 });
+    item = r.item;
+    if (r.events.hatched) assertEqual(r.events.evolved, 0, 'the hatch is its own beat');
+  }
+  assertEqual(formFor(item.feeds), 1, 'a freshly hatched pet is a baby');
+});
+
+test('the evolution event fires exactly once per form, at the right feed', () => {
+  let item = seed();
+  let clock = 0;
+  const fired = [];
+  for (let i = 0; i < 12; i += 1) {
+    clock += 1;
+    const r = review(item, { correct: true, ms: 3000, reviewClock: clock, now: 0 });
+    item = r.item;
+    if (r.events.evolved) fired.push([item.feeds, r.events.evolved]);
+  }
+  assertEqual(JSON.stringify(fired), JSON.stringify([[FORM_THRESHOLDS[1], 2], [FORM_THRESHOLDS[2], 3]]));
+});
+
+describe('evolution — a form is never taken away');
+
+test('a lapse resets reps but never costs a form', () => {
+  // The trap this guards: `reps` is reset to 0 by a lapse, so a form derived from it
+  // would de-evolve a pet the moment a child forgot a time — turning a design decision
+  // that was explicitly ruled out into a bug.
+  let item = seed();
+  let clock = 0;
+  while (formFor(item.feeds) < FORM_COUNT) {
+    clock += 1;
+    item = review(item, { correct: true, ms: 3000, reviewClock: clock, now: 0 }).item;
+  }
+  assertEqual(formFor(item.feeds), FORM_COUNT);
+
+  const lapsed = review(item, { correct: false, ms: 9000, reviewClock: ++clock, now: 0 });
+  assertEqual(lapsed.item.reps, 0, 'reps really is reset');
+  assertEqual(formFor(lapsed.item.feeds), FORM_COUNT, 'and the form survives it');
+  assertEqual(lapsed.item.feeds, item.feeds, 'feeds never goes backwards');
+});
+
+test('the pet a lapsed child sees is still the grown-up one', () => {
+  // The data-level test above is not enough on its own: the form could still be read off
+  // the wrong field at render time. This asserts the guarantee where the child meets it.
+  let item = seed();
+  let clock = 0;
+  while (formFor(item.feeds) < FORM_COUNT) {
+    clock += 1;
+    item = review(item, { correct: true, ms: 3000, reviewClock: clock, now: 0 }).item;
+  }
+  const before = appearanceOf(item);
+  const lapsed = review(item, { correct: false, ms: 9000, reviewClock: ++clock, now: 0 }).item;
+  const after = appearanceOf(lapsed);
+  assertEqual(after.form, FORM_COUNT, 'the drawn form dropped after a lapse');
+  assertEqual(after.signature, before.signature, 'it lost its grown-up crown');
+  assertEqual(after.anatomy.join(), before.anatomy.join(), 'it lost anatomy it had grown');
+});
+
+test('feeds only ever rises, across a long mixed run of right and wrong answers', () => {
+  let item = seed();
+  let clock = 0;
+  let previous = 0;
+  for (let i = 0; i < 60; i += 1) {
+    clock += 1;
+    const correct = i % 3 !== 2; // a miss every third answer
+    item = review(item, { correct, ms: 4000, reviewClock: clock, now: i * DAY_MS }).item;
+    assert(item.feeds >= previous, `feeds fell at step ${i}`);
+    previous = item.feeds;
+  }
+});
+
+describe('evolution — how a form is drawn');
+
+test('pets get bigger and their faces get proportionally smaller', () => {
+  for (let form = 2; form <= FORM_COUNT; form += 1) {
+    assert(stageOf(form).scale > stageOf(form - 1).scale, `form ${form} is not bigger`);
+    assert(stageOf(form).face < stageOf(form - 1).face, `form ${form}'s face is not smaller`);
+    assert(stageOf(form).faceY < stageOf(form - 1).faceY, `form ${form}'s face does not ride higher`);
+  }
+});
+
+test('anatomy accumulates and is never lost on the way up', () => {
+  for (const id of Object.keys(SPECIES)) {
+    const [one, two, three] = [1, 2, 3].map((f) => anatomyFor(id, f));
+    assertEqual(one.length, 0, `${id} baby has grown nothing yet`);
+    assertEqual(two.length, 1);
+    assertEqual(three.length, 2);
+    assertEqual(three.slice(0, 1).join(), two.join(), `${id} lost a part when it grew`);
+  }
+});
+
+test('every species grows along its own line and ends on its own signature', () => {
+  const signatures = new Set();
+  for (const [id, spec] of Object.entries(SPECIES)) {
+    assertEqual(spec.grows.length, 2, `${id} declares the wrong number of stages`);
+    assert(spec.grows[0] !== spec.grows[1], `${id} grows the same part twice`);
+    assert(SIGNATURES[spec.signature], `${id} signature ${spec.signature} does not exist`);
+    signatures.add(spec.signature);
+  }
+  assertEqual(signatures.size, Object.keys(SPECIES).length, 'two species share a signature');
+});
+
+test('no anatomy part is shared by more than three species at the same form', () => {
+  // Sixteen species all sprouting one crest is the "everything evolves the same way"
+  // failure, one level up from the shared faces.
+  for (const slot of [0, 1]) {
+    const counts = {};
+    for (const spec of Object.values(SPECIES)) {
+      counts[spec.grows[slot]] = (counts[spec.grows[slot]] ?? 0) + 1;
+    }
+    for (const [part, n] of Object.entries(counts)) {
+      assert(n <= 3, `${n} species share ${part} at stage ${slot + 2}`);
+    }
+  }
+});
+
+test('every anatomy id a species names exists in the parts library', () => {
+  for (const [id, spec] of Object.entries(SPECIES)) {
+    for (const part of spec.grows) assert(ANATOMY[part], `${id} names missing anatomy ${part}`);
+  }
+});
+
+test('the final form replaces the topper; earlier forms keep it', () => {
+  assertEqual(speciesAppearance('glim', 1).signature, null);
+  assertEqual(speciesAppearance('glim', 2).signature, null);
+  assertEqual(speciesAppearance('glim', FORM_COUNT).signature, SPECIES.glim.signature);
+});
+
+test('individual traits carry up unchanged through every form', () => {
+  // The child's pet has to stay recognisably theirs through the transformation.
+  for (const { h, m } of ALL_ITEMS.slice(0, 40)) {
+    const base = appearanceFor(h, m, 1);
+    for (const form of [2, 3]) {
+      const grown = appearanceFor(h, m, form);
+      for (const key of LOUD_KEYS.concat('markings')) {
+        assertEqual(grown[key], base[key], `${timeId(h, m)} lost its ${key} at form ${form}`);
+      }
+    }
+  }
+});
+
+test('all 144 pets stay distinct at every form', () => {
+  for (const form of [1, 2, 3]) {
+    const seen = new Set();
+    for (const { h, m } of ALL_ITEMS) seen.add(appearanceKey(appearanceFor(h, m, form)));
+    assertEqual(seen.size, 144, `form ${form} has lookalikes`);
+  }
+});
+
+test('every species renders in every form and every mood', () => {
+  for (const id of Object.keys(SPECIES)) {
+    for (const form of [1, 2, 3]) {
+      for (const mood of MOODS) {
+        const svg = petSvg(speciesAppearance(id, form), { mood });
+        assert(svg.length > 400, `${id} form ${form} ${mood} rendered almost nothing`);
+        assert(!svg.includes('undefined'), `${id} form ${form} ${mood}: undefined`);
+        assert(!svg.includes('NaN'), `${id} form ${form} ${mood}: NaN`);
+        assert(!/\$\{/.test(svg), `${id} form ${form} ${mood}: unfilled template`);
+      }
+    }
+  }
+});
+
+test('an out-of-range form is clamped rather than rendering nothing', () => {
+  assertEqual(speciesAppearance('mochi', 0).form, 1);
+  assertEqual(speciesAppearance('mochi', 99).form, FORM_COUNT);
+  assert(petSvg(speciesAppearance('mochi', 99)).length > 400);
+});
+
+test('appearanceOf reads the form straight off the item', () => {
+  const at = (feeds) => appearanceOf({ ...seed(), feeds });
+  assertEqual(at(0).form, 1, 'an unhatched item still draws as a baby');
+  assertEqual(at(FORM_THRESHOLDS[1]).form, 2);
+  assertEqual(at(FORM_THRESHOLDS[2]).form, 3);
+});
+
+describe('evolution — saves written before forms existed');
+
+test('an old pet loads at the form it had already earned', () => {
+  const migrated = migrateItems({
+    '4:15': { h: 4, m: 15, reps: 4, hatchedAt: 123 },
+    '1:00': { h: 1, m: 0, reps: 0, hatchedAt: null },
+    '2:00': { h: 2, m: 0, reps: 0, hatchedAt: 99 },
+  });
+  assertEqual(formFor(migrated['4:15'].feeds), 2, 'a well-known time keeps its progress');
+  assertEqual(formFor(migrated['1:00'].feeds), 0, 'an egg is still an egg');
+  assertEqual(formFor(migrated['2:00'].feeds), 1, 'hatched but lapsed is a baby');
+});
+
+test('migration leaves an already-migrated item completely alone', () => {
+  const item = { h: 4, m: 15, reps: 0, feeds: 5, hatchedAt: 1 };
+  assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
+});
+
+test('migration survives a missing or empty item map', () => {
+  assertEqual(Object.keys(migrateItems(undefined)).length, 0);
+  assertEqual(Object.keys(migrateItems({})).length, 0);
 });
 
 /* -------------------------------------------------------- run and report */

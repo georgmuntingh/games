@@ -11,6 +11,7 @@ import { ALL_ITEMS, TIERS } from './curriculum.js';
 import { DEFAULT_LANGUAGE, NAMES } from './i18n.js';
 import {
   ACCESSORIES,
+  ANATOMY,
   BODIES,
   BROW_MOOD,
   BROWS,
@@ -22,39 +23,43 @@ import {
   HAIR,
   HAIR_CROWN,
   INK,
+  faceTransform,
+  growTransform,
   MARKINGS,
   MOUTHS,
   SIDES,
+  SIGNATURES,
   sleepingEyes,
   TEXTURES,
   TOPPER_CROWN,
   TOPPERS,
 } from './pet-parts.js';
+import { FORM_COUNT, formFor } from './srs.js';
 
 /* --------------------------------------------------------------- species */
 
 // Sixteen identities. Every pair differs in at least two of {body, topper, eyes, brows},
 // so no two species can be told apart by colour alone — which was the whole complaint.
 export const SPECIES = {
-  mochi:    { name: 'Mochi',    body: 'round',  texture: 'smooth', topper: 'roundears', eyes: 'round',   brows: 'none',    palette: ['#ffd9e2', '#fff1f4', '#ff9ec0'] },
-  bloop:    { name: 'Bloop',    body: 'bean',   texture: 'smooth', topper: 'antenna',   eyes: 'sparkle', brows: 'none',    palette: ['#a5d8ff', '#e3f2ff', '#5fb3f5'] },
-  pip:      { name: 'Pip',      body: 'tall',   texture: 'fluffy', topper: 'tuft',      eyes: 'oval',    brows: 'arched',  palette: ['#b2f2d7', '#e6fff5', '#4fd6a0'] },
-  waddle:   { name: 'Waddle',   body: 'wide',   texture: 'smooth', topper: 'none',      eyes: 'beady',   brows: 'thick',   palette: ['#ffe9a8', '#fff8dd', '#f7b955'] },
+  mochi:    { name: 'Mochi',    body: 'round',  texture: 'smooth', topper: 'roundears', eyes: 'round',   brows: 'none',    palette: ['#ffd9e2', '#fff1f4', '#ff9ec0'], grows: ['mane', 'tail'], signature: 'bigEars' },
+  bloop:    { name: 'Bloop',    body: 'bean',   texture: 'smooth', topper: 'antenna',   eyes: 'sparkle', brows: 'none',    palette: ['#a5d8ff', '#e3f2ff', '#5fb3f5'], grows: ['tail', 'wings'], signature: 'antennaArray' },
+  pip:      { name: 'Pip',      body: 'tall',   texture: 'fluffy', topper: 'tuft',      eyes: 'oval',    brows: 'arched',  palette: ['#b2f2d7', '#e6fff5', '#4fd6a0'], grows: ['crest', 'plume'], signature: 'tallTuft' },
+  waddle:   { name: 'Waddle',   body: 'wide',   texture: 'smooth', topper: 'none',      eyes: 'beady',   brows: 'thick',   palette: ['#ffe9a8', '#fff8dd', '#f7b955'], grows: ['tail', 'mane'], signature: 'crownSpikes' },
 
-  puff:     { name: 'Puff',     body: 'round',  texture: 'fluffy', topper: 'ears',      eyes: 'lashed',  brows: 'arched',  palette: ['#d9c8ff', '#f2ecff', '#a884f5'] },
-  nibbles:  { name: 'Nibbles',  body: 'tall',   texture: 'smooth', topper: 'rabbit',    eyes: 'round',   brows: 'worried', palette: ['#ffd0b0', '#fff0e5', '#f79a63'] },
-  snug:     { name: 'Snug',     body: 'wide',   texture: 'fluffy', topper: 'roundears', eyes: 'sleepy',  brows: 'bushy',   palette: ['#cfe6c0', '#eefae6', '#8cc472'] },
-  glim:     { name: 'Glim',     body: 'pear',   texture: 'smooth', topper: 'horn',      eyes: 'sparkle', brows: 'thick',   palette: ['#ffc2b8', '#fff0ed', '#ff8a75'] },
+  puff:     { name: 'Puff',     body: 'round',  texture: 'fluffy', topper: 'ears',      eyes: 'lashed',  brows: 'arched',  palette: ['#d9c8ff', '#f2ecff', '#a884f5'], grows: ['mane', 'wings'], signature: 'longEars' },
+  nibbles:  { name: 'Nibbles',  body: 'tall',   texture: 'smooth', topper: 'rabbit',    eyes: 'round',   brows: 'worried', palette: ['#ffd0b0', '#fff0e5', '#f79a63'], grows: ['wings', 'plume'], signature: 'hugeRabbit' },
+  snug:     { name: 'Snug',     body: 'wide',   texture: 'fluffy', topper: 'roundears', eyes: 'sleepy',  brows: 'bushy',   palette: ['#cfe6c0', '#eefae6', '#8cc472'], grows: ['wings', 'crest'], signature: 'ramCurl' },
+  glim:     { name: 'Glim',     body: 'pear',   texture: 'smooth', topper: 'horn',      eyes: 'sparkle', brows: 'thick',   palette: ['#ffc2b8', '#fff0ed', '#ff8a75'], grows: ['finback', 'wings'], signature: 'twinHorns' },
 
-  noodle:   { name: 'Noodle',   body: 'tall',   texture: 'smooth', topper: 'antlers',   eyes: 'beady',   brows: 'worried', palette: ['#9fe5e0', '#e4fbfa', '#48c4bc'] },
-  fizz:     { name: 'Fizz',     body: 'chunky', texture: 'spiky',  topper: 'tuft',      eyes: 'sparkle', brows: 'none',    palette: ['#ffc7ea', '#fff0fa', '#f778c4'] },
-  cloudlet: { name: 'Cloudlet', body: 'wide',   texture: 'fluffy', topper: 'fin',       eyes: 'oval',    brows: 'none',    palette: ['#c9dcff', '#eef4ff', '#7ba2f0'] },
-  pebble:   { name: 'Pebble',   body: 'round',  texture: 'smooth', topper: 'none',      eyes: 'sleepy',  brows: 'thick',   palette: ['#dcd6e8', '#f4f1f9', '#a99cc4'] },
+  noodle:   { name: 'Noodle',   body: 'tall',   texture: 'smooth', topper: 'antlers',   eyes: 'beady',   brows: 'worried', palette: ['#9fe5e0', '#e4fbfa', '#48c4bc'], grows: ['finback', 'tail'], signature: 'bigAntlers' },
+  fizz:     { name: 'Fizz',     body: 'chunky', texture: 'spiky',  topper: 'tuft',      eyes: 'sparkle', brows: 'none',    palette: ['#ffc7ea', '#fff0fa', '#f778c4'], grows: ['crest', 'plume'], signature: 'flameCrest' },
+  cloudlet: { name: 'Cloudlet', body: 'wide',   texture: 'fluffy', topper: 'fin',       eyes: 'oval',    brows: 'none',    palette: ['#c9dcff', '#eef4ff', '#7ba2f0'], grows: ['finback', 'crest'], signature: 'stormFin' },
+  pebble:   { name: 'Pebble',   body: 'round',  texture: 'smooth', topper: 'none',      eyes: 'sleepy',  brows: 'thick',   palette: ['#dcd6e8', '#f4f1f9', '#a99cc4'], grows: ['plume', 'mane'], signature: 'crystal' },
 
-  sprout:   { name: 'Sprout',   body: 'pear',   texture: 'smooth', topper: 'leaf',      eyes: 'round',   brows: 'arched',  palette: ['#c4e8a0', '#eefada', '#82c44e'] },
-  bubs:     { name: 'Bubs',     body: 'round',  texture: 'smooth', topper: 'floppy',    eyes: 'lashed',  brows: 'none',    palette: ['#f0c2d8', '#fdeef5', '#d97fae'] },
-  zzz:      { name: 'Zzz',      body: 'bean',   texture: 'fluffy', topper: 'hound',     eyes: 'sleepy',  brows: 'worried', palette: ['#bcc4f0', '#e8ebfd', '#7d8be0'] },
-  tumble:   { name: 'Tumble',   body: 'chunky', texture: 'spiky',  topper: 'ram',       eyes: 'oval',    brows: 'bushy',   palette: ['#ffdcb0', '#fff4e4', '#f0a552'] },
+  sprout:   { name: 'Sprout',   body: 'pear',   texture: 'smooth', topper: 'leaf',      eyes: 'round',   brows: 'arched',  palette: ['#c4e8a0', '#eefada', '#82c44e'], grows: ['mane', 'crest'], signature: 'foliageCrown' },
+  bubs:     { name: 'Bubs',     body: 'round',  texture: 'smooth', topper: 'floppy',    eyes: 'lashed',  brows: 'none',    palette: ['#f0c2d8', '#fdeef5', '#d97fae'], grows: ['tail', 'mane'], signature: 'longFlop' },
+  zzz:      { name: 'Zzz',      body: 'bean',   texture: 'fluffy', topper: 'hound',     eyes: 'sleepy',  brows: 'worried', palette: ['#bcc4f0', '#e8ebfd', '#7d8be0'], grows: ['plume', 'tail'], signature: 'moonHorns' },
+  tumble:   { name: 'Tumble',   body: 'chunky', texture: 'spiky',  topper: 'ram',       eyes: 'oval',    brows: 'bushy',   palette: ['#ffdcb0', '#fff4e4', '#f0a552'], grows: ['crest', 'finback'], signature: 'doubleRam' },
 };
 
 export const SPECIES_IDS = Object.keys(SPECIES);
@@ -105,10 +110,26 @@ export const petName = (item, lang = DEFAULT_LANGUAGE) =>
 
 const PLAIN = { eyewear: 'none', hair: 'none', facialHair: 'none', markings: 'none', accessory: 'none' };
 
-/** A species drawn plain, with no individual traits — for the tier-unlock exemplars. */
-export function speciesAppearance(speciesId) {
+/** The extra anatomy a species has grown by a given form — cumulative, never lost. */
+export const anatomyFor = (speciesId, form) =>
+  (SPECIES[speciesId]?.grows ?? []).slice(0, Math.max(0, Math.min(form, FORM_COUNT) - 1));
+
+/**
+ * A species drawn plain, with no individual traits. The tier-unlock exemplars use this at
+ * form 1, so evolution stays a surprise the child has to earn rather than a preview.
+ */
+export function speciesAppearance(speciesId, form = 1) {
   const id = speciesId in SPECIES ? speciesId : 'mochi';
-  return { species: id, ...SPECIES[id], ...PLAIN };
+  const stage = Math.max(1, Math.min(Math.round(form) || 1, FORM_COUNT));
+  return {
+    species: id,
+    ...SPECIES[id],
+    ...PLAIN,
+    form: stage,
+    anatomy: anatomyFor(id, stage),
+    // Its own topper, grown up — so sixteen species do not converge on one silhouette.
+    signature: stage >= FORM_COUNT ? SPECIES[id].signature : null,
+  };
 }
 
 // "Loud" traits are the ones you notice across a room. A pet may carry at most two, which
@@ -170,6 +191,10 @@ for (const item of [...ALL_ITEMS].sort((a, b) => a.h - b.h || a.m - b.m)) {
 
 export const timesOfSpecies = (speciesId) => SPECIES_TIMES.get(speciesId) ?? [];
 
+/** The look of a pet as its item currently stands, at whichever form it has earned. */
+export const appearanceOf = (item) =>
+  appearanceFor(item.h, item.m, formFor(item.feeds ?? 0) || 1);
+
 /**
  * The complete look of the pet that keeps a given time: its species, plus the individual
  * traits that tell it apart from the two dozen others of the same species in a full zoo.
@@ -178,12 +203,12 @@ export const timesOfSpecies = (speciesId) => SPECIES_TIMES.get(speciesId) ?? [];
  * through them — means consecutive times land far apart in the space, so 1:00 and 2:00
  * differ by a whole accessory rather than by a freckle.
  */
-export function appearanceFor(h, m) {
+export function appearanceFor(h, m, form = 1) {
   const species = speciesFor(h, m);
   const index = Math.max(0, timesOfSpecies(species).indexOf(timeId(h, m)));
   const list = validLoudFor(species);
   return {
-    ...speciesAppearance(species),
+    ...speciesAppearance(species, form),
     ...list[(index * TRAIT_STRIDE) % list.length],
     markings: MARKING_IDS[index % MARKING_IDS.length],
   };
@@ -226,7 +251,14 @@ export function petSvg(appearance, { mood = 'content', className = '', title = '
   const colors = { body, belly, accent };
   const shape = BODIES[a.body] ?? BODIES.round;
   const texture = (TEXTURES[a.texture] ?? TEXTURES.smooth)(shape.halo);
-  const topper = (TOPPERS[a.topper] ?? TOPPERS.none)(accent);
+  const form = Math.max(1, Math.min(a.form ?? 1, 3));
+  // At the final form the species' own topper is replaced by its grown-up version.
+  const crown = a.signature && SIGNATURES[a.signature]
+    ? SIGNATURES[a.signature](colors)
+    : (TOPPERS[a.topper] ?? TOPPERS.none)(accent);
+  const grown = (a.anatomy ?? [])
+    .map((part) => (ANATOMY[part] ? ANATOMY[part](colors) : ''))
+    .join('');
   const label = title || a.name || 'pet';
 
   const pick = (family, id, fallback) => (family[id] ?? family[fallback])(colors);
@@ -240,17 +272,19 @@ export function petSvg(appearance, { mood = 'content', className = '', title = '
   // the other way round swallows its own ears. Everything from the eyes forward is drawn
   // in the order it must overlap.
   return `
-<svg class="pet ${className}" viewBox="0 0 100 100" role="img" aria-label="${label}" focusable="false">
+<svg class="pet form-${form} ${className}" viewBox="0 0 100 100" role="img" aria-label="${label}" focusable="false">
   ${title ? `<title>${title}</title>` : ''}
+  <g class="pet-grow" transform="${growTransform(form)}">
   <g class="pet-inner">
     <g fill="${a.texture === 'spiky' ? accent : body}">${texture}</g>
-    <g fill="${accent}">${topper}</g>
+    <g fill="${accent}">${grown}</g>
+    <g fill="${accent}">${crown}</g>
     ${worn.back}
     <g fill="${accent}">${FEET}</g>
     <g class="pet-body" fill="${body}">${shape.shape}</g>
     <ellipse cx="50" cy="64" rx="21" ry="17" fill="${belly}" />
     ${marks.back}${facial.back}
-    <g class="pet-face">
+    <g class="pet-face" transform="${faceTransform(form)}">
       ${eyesMarkup(a, mood)}
       ${eyewear.front}
       ${hair.front}
@@ -262,6 +296,7 @@ export function petSvg(appearance, { mood = 'content', className = '', title = '
       ${facial.front}
     </g>
     ${worn.front}
+  </g>
   </g>
 </svg>`;
 }

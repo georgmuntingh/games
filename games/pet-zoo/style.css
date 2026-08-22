@@ -505,6 +505,16 @@ main {
   fill: #43354f;
 }
 
+.pen-rank {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--pz-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .pen-flag {
   position: absolute;
   top: 0.4rem;
@@ -798,6 +808,11 @@ main {
   animation: pz-wobble 0.42s ease-in-out 3;
 }
 
+/* The white-out: the pet blows out to light, then what comes back is bigger. */
+.pet.evolving .pet-inner {
+  animation: pz-evolve 0.95s ease-in-out;
+}
+
 .pet.arriving .pet-inner {
   animation: pz-arrive 0.62s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
@@ -836,6 +851,25 @@ main {
   }
 }
 
+@keyframes pz-evolve {
+  0% {
+    filter: brightness(1);
+    transform: scale(1);
+  }
+  35% {
+    filter: brightness(2.6) saturate(0.4);
+    transform: scale(1.12);
+  }
+  70% {
+    filter: brightness(7) saturate(0);
+    transform: scale(0.88);
+  }
+  100% {
+    filter: brightness(1);
+    transform: scale(1);
+  }
+}
+
 @keyframes pz-arrive {
   from {
     transform: scale(0.2);
@@ -859,6 +893,7 @@ main {
   .pet.breathe .pet-inner,
   .pet .pet-eye,
   .pet.hatching .pet-inner,
+  .pet.evolving .pet-inner,
   .pet.arriving .pet-inner {
     animation: none;
   }

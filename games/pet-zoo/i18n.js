@@ -125,6 +125,10 @@ const STRINGS = {
     'cheer.streak': '{cheer} {n} in a row!',
     'hatch.now': 'It hatched!',
     'hatch.hello': '{name} says hello!',
+    'evolve.now': 'Something is happening…',
+    'evolve.done': '{name} is now {label}!',
+    'form.2': 'the Bold',
+    'form.3': 'the Grand',
 
     'teach.nearMiss': 'So close! ',
     'teach.hourExact': 'At {hour} o’clock the short fat hand points straight at the {hour}.',
@@ -220,6 +224,10 @@ const STRINGS = {
     'cheer.streak': '{cheer} {n} på rad!',
     'hatch.now': 'Det klekket!',
     'hatch.hello': '{name} sier hei!',
+    'evolve.now': 'Noe skjer …',
+    'evolve.done': '{name} er nå {label}!',
+    'form.2': 'den modige',
+    'form.3': 'den store',
 
     'teach.nearMiss': 'Nesten! ',
     'teach.hourExact': 'Når klokka er {hour}, peker den korte tjukke viseren rett på {hourNum}-tallet.',

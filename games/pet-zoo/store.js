@@ -46,10 +46,31 @@ export function load(now, storage = safeStorage()) {
     if (!parsed || parsed.version !== VERSION || typeof parsed.items !== 'object') {
       return freshState(now);
     }
-    return { ...freshState(now), ...parsed, settings: { ...freshState(now).settings, ...parsed.settings } };
+    return {
+      ...freshState(now),
+      ...parsed,
+      settings: { ...freshState(now).settings, ...parsed.settings },
+      items: migrateItems(parsed.items),
+    };
   } catch {
     return freshState(now);
   }
+}
+
+/**
+ * Bring saved pets up to the current item shape. Saves written before forms existed have
+ * no `feeds`, so it is reconstructed from `reps` — a pet that was already well known
+ * simply appears at the form it had earned, rather than starting again from a baby.
+ */
+export function migrateItems(items) {
+  const out = {};
+  for (const [id, item] of Object.entries(items ?? {})) {
+    out[id] =
+      typeof item?.feeds === 'number'
+        ? item
+        : { ...item, feeds: item?.reps || (item?.hatchedAt ? 1 : 0) };
+  }
+  return out;
 }
 
 export function write(state, storage = safeStorage()) {

@@ -20,7 +20,7 @@ import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
 import { createItem, nextItem, refreshTier, review } from './srs.js';
 import * as session from './session.js';
 import {
-  appearanceFor,
+  appearanceOf,
   collarClock,
   eggSvg,
   moodOf,
@@ -30,6 +30,7 @@ import {
   speciesFor,
   SPECIES,
 } from './pets.js';
+import { formFor } from './srs.js';
 import { createSaver, freshState, load, clear, touchDay } from './store.js';
 import { audio } from './audio.js';
 import { buzz, confetti, flyHeart, pop, reduceMotion, setHaptics, wiggle } from './juice.js';
@@ -324,11 +325,19 @@ function promptFor(item) {
   return { line: t(key, { name }), button: t('button.feed', { name }) };
 }
 
+/** A pet's species with the title it has earned — shown only from form 2, so the line
+ *  appearing at all is itself part of the reward. */
+function formLabel(item) {
+  const species = SPECIES[appearanceOf(item).species]?.name ?? '';
+  const form = formFor(item.feeds ?? 0);
+  return form >= 2 ? `${species} ${t(`form.${form}`)}` : species;
+}
+
 function renderPetStage(item, mood) {
   const markup =
     item.hatchedAt === null
-      ? eggSvg(appearanceFor(item.h, item.m).species, { title: t('zoo.eggTitle') })
-      : petSvg(appearanceFor(item.h, item.m), { mood, title: escape(petName(item, t.lang)) });
+      ? eggSvg(appearanceOf(item).species, { title: t('zoo.eggTitle') })
+      : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
   el.petStage.innerHTML = markup;
   const pet = el.petStage.querySelector('.pet');
   pet.classList.add('breathe');
@@ -464,6 +473,24 @@ async function celebrate(outcome) {
   const item = outcome.item;
   const streak = state.stats.streak;
 
+  if (outcome.events.evolved) {
+    // The same shape as hatching, one size up: the pet whites out, and what comes back is
+    // bigger. This is the only reward the SRS's long tail has, so it gets the full beat.
+    const name = petName(item, t.lang);
+    el.feedback.textContent = t('evolve.now');
+    el.feedback.className = 'feedback good';
+    el.petStage.querySelector('.pet')?.classList.add('evolving');
+    audio.play('evolve');
+    buzz([16, 50, 16, 50, 30]);
+    await wait(reduceMotion() ? 250 : 950);
+    renderPetStage(item, 'happy');
+    el.petStage.querySelector('.pet')?.classList.add('arriving');
+    confetti(el.petStage, el.fx, { power: 2.2 });
+    el.feedback.textContent = t('evolve.done', { name, label: formLabel(item) });
+    await wait(1800);
+    return;
+  }
+
   if (outcome.events.hatched) {
     // The egg was the last thing standing between the child and a pet of their own —
     // this is the biggest moment the game has, so it gets its own beat.
@@ -542,7 +569,7 @@ function renderNapPets() {
   const shown = sleepers.length ? sleepers : [{ h: 1, m: 0 }, { h: 2, m: 0 }, { h: 3, m: 0 }];
   el.napPets.innerHTML = shown
     .map((item) =>
-      petSvg(appearanceFor(item.h, item.m), { mood: 'sleep', title: t('nap.sleeping') })
+      petSvg(appearanceOf(item), { mood: 'sleep', title: t('nap.sleeping') })
     )
     .join('');
 }
@@ -611,8 +638,8 @@ function renderZoo() {
       const isEgg = item.hatchedAt === null;
       const mood = moodOf(item, at, { napping });
       const art = isEgg
-        ? eggSvg(appearanceFor(item.h, item.m).species, { title: t('zoo.eggTitle') })
-        : petSvg(appearanceFor(item.h, item.m), { mood, title: escape(petName(item, t.lang)) });
+        ? eggSvg(appearanceOf(item).species, { title: t('zoo.eggTitle') })
+        : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
       const flag = isEgg
         ? `${'●'.repeat(item.correctStreak)}${'○'.repeat(Math.max(0, 3 - item.correctStreak))}`
         : mood === 'hungry'
@@ -620,14 +647,16 @@ function renderZoo() {
           : '';
       const label = escape(
         isEgg
-          ? t('zoo.egg', { species: SPECIES[item.species]?.name ?? '?' })
+          ? t('zoo.egg', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
           : petName(item, t.lang)
       );
+      const rank = !isEgg && formFor(item.feeds ?? 0) >= 2 ? escape(formLabel(item)) : '';
       return `
         <button class="pen${isEgg ? ' is-egg' : ''}" type="button" data-id="${id}">
           <span class="pen-flag">${flag}</span>
           ${art}
           <span class="pen-name">${label}</span>
+          ${rank ? `<span class="pen-rank">${rank}</span>` : ''}
           <span class="pen-time">${collarClock(item.h, item.m)}${timeId(item.h, item.m)}</span>
         </button>`;
     })

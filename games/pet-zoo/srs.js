@@ -19,6 +19,22 @@ export const RELEARN_DELAY = 2; // a missed time returns as the question after n
 export const GRADUATION_STREAK = 3; // three in a row hatches the egg
 export const MAX_LEARNING = 7; // never juggle more than a handful at once
 
+// Forms. A pet's shape is earned by feeding it successfully over the long haul, so a form
+// is the visible proof that a time is genuinely known — the reward the SRS's long tail has
+// never had. Against the real interval ladder these land at roughly hatching day, day 4
+// and day 32.
+export const FORM_THRESHOLDS = [1, 3, 5]; // feeds needed to reach forms 1, 2, 3
+export const FORM_COUNT = FORM_THRESHOLDS.length;
+
+/** 0 for an egg, otherwise 1..FORM_COUNT. Monotonic in feeds, which never decreases. */
+export function formFor(feeds) {
+  let form = 0;
+  for (let i = 0; i < FORM_THRESHOLDS.length; i += 1) {
+    if (feeds >= FORM_THRESHOLDS[i]) form = i + 1;
+  }
+  return form;
+}
+
 export const EASE_START = 2.5;
 export const EASE_MIN = 1.3;
 export const EASE_MAX = 2.8;
@@ -42,6 +58,10 @@ export function createItem({ h, m, species, reviewClock = 0 }) {
     intervalDays: 0,
     dueAt: 0,
     reps: 0,
+    // `reps` is reset by a lapse; `feeds` never is. A pet's form is derived from feeds so
+    // that "a form once earned is kept" is structural rather than something every future
+    // change to the scheduler has to remember not to break.
+    feeds: 0,
     lapses: 0,
     correctStreak: 0,
     hatchedAt: null,
@@ -78,7 +98,7 @@ export const nextInterval = (reps, intervalDays, ease) => {
 export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now }) {
   const quality = qualityOf({ correct, ms, reversals });
   const next = { ...item, seen: item.seen + 1, lastMs: ms };
-  const events = { quality, graduated: false, hatched: false, lapsed: false };
+  const events = { quality, graduated: false, hatched: false, lapsed: false, evolved: 0 };
 
   if (correct) {
     next.correctStreak = item.correctStreak + 1;
@@ -86,6 +106,7 @@ export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now 
       if (next.correctStreak >= GRADUATION_STREAK) {
         next.phase = 'graduated';
         next.reps = 1;
+        next.feeds = item.feeds + 1;
         next.intervalDays = 1;
         next.dueAt = now + DAY_MS;
         next.dueStep = null;
@@ -101,6 +122,7 @@ export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now 
     } else {
       next.ease = applyEase(item.ease, quality);
       next.reps = item.reps + 1;
+      next.feeds = item.feeds + 1;
       next.intervalDays = nextInterval(next.reps, item.intervalDays, next.ease);
       next.dueAt = now + next.intervalDays * DAY_MS;
     }
@@ -118,6 +140,11 @@ export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now 
       events.lapsed = true;
     }
   }
+  // Hatching is its own event, so it does not also count as an evolution.
+  const wasForm = formFor(item.feeds);
+  const nowForm = formFor(next.feeds);
+  if (wasForm >= 1 && nowForm > wasForm) events.evolved = nowForm;
+
   return { item: next, events };
 }
 

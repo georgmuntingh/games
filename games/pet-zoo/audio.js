@@ -58,6 +58,15 @@ const SOUNDS = {
     tone(ac, { type: 'sine', freq: 400, duration: 0.16, gain: 0.07 });
     tone(ac, { type: 'sine', freq: 330, duration: 0.22, gain: 0.07, delay: 0.14 });
   },
+  // Evolution: a rising sweep into a bigger, higher version of the hatch fanfare.
+  evolve(ac) {
+    tone(ac, { type: 'sawtooth', freq: 160, endFreq: 1200, duration: 0.75, gain: 0.05 });
+    arpeggio(ac, [523, 659, 784, 1047, 1319, 1568, 2093], {
+      gain: 0.11,
+      spacing: 0.085,
+      duration: 0.4,
+    });
+  },
   hatch(ac) {
     tone(ac, { type: 'triangle', freq: 220, endFreq: 880, duration: 0.18, gain: 0.09 });
     arpeggio(ac, [784, 988, 1175, 1568, 2093], { gain: 0.1, spacing: 0.07, duration: 0.26 });

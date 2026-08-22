@@ -429,3 +429,145 @@ export const ACCESSORIES = {
              <path d="M12 71 H29" fill="none" />
            </g>`),
 };
+
+/* ==========================================================================
+   Evolution — forms 1, 2 and 3.
+
+   Two levers only, because they are the two that read as "grew up" and the two
+   that survive to a 76px zoo thumbnail: overall size, and the proportion of the
+   face to the body. A baby is drawn small in its frame with a face that fills
+   it; a final form is drawn large with a proportionally smaller face riding
+   higher. That single shift is most of the difference between a plush toy and
+   an animal.
+
+   Growth is anchored at the feet (50, 86) so pets grow *upward* from a shared
+   ground line, the way a height chart works.
+   ========================================================================== */
+
+export const GROUND = { x: 50, y: 86 };
+export const FACE_CENTRE = { x: 50, y: 55 };
+
+export const STAGES = {
+  1: { scale: 0.78, face: 1, faceY: 0 },
+  2: { scale: 0.9, face: 0.87, faceY: -5 },
+  3: { scale: 1.02, face: 0.74, faceY: -10 },
+};
+
+export const stageOf = (form) => STAGES[form] ?? STAGES[1];
+
+export const growTransform = (form) => {
+  const { scale } = stageOf(form);
+  return `translate(${GROUND.x} ${GROUND.y}) scale(${scale}) translate(${-GROUND.x} ${-GROUND.y})`;
+};
+
+export const faceTransform = (form) => {
+  const { face, faceY } = stageOf(form);
+  return `translate(0 ${faceY}) translate(${FACE_CENTRE.x} ${FACE_CENTRE.y}) scale(${face}) translate(${-FACE_CENTRE.x} ${-FACE_CENTRE.y})`;
+};
+
+/* ------------------------------------------------- shared stage anatomy */
+
+// Parts that simply were not there before. All drawn behind the body, so they read as
+// silhouette rather than as decoration stuck on the front.
+export const ANATOMY = {
+  tail: (c) =>
+    `<path d="M78 76 C92 74 96 62 90 52 C88 60 84 66 74 68 Z" fill="${c.accent}" />`,
+  wings: (c) => `
+    <path d="M26 46 C8 34 2 48 6 60 C10 72 22 72 30 64 Z" fill="${c.accent}" opacity="0.92" />
+    <path d="M74 46 C92 34 98 48 94 60 C90 72 78 72 70 64 Z" fill="${c.accent}" opacity="0.92" />`,
+  mane: (c) =>
+    Array.from({ length: 11 }, (_, i) => {
+      const a = ((-100 + i * 20) * Math.PI) / 180;
+      return `<circle cx="${(50 + Math.sin(a) * 36).toFixed(1)}" cy="${(58 - Math.cos(a) * 32).toFixed(1)}" r="9" />`;
+    }).join(''),
+  crest: (c) =>
+    // Reaching well clear of the skull: tucked closer, a fluffy species swallowed it whole.
+    Array.from({ length: 5 }, (_, i) => {
+      const x = 30 + i * 10;
+      const h = i === 2 ? 20 : 12;
+      return `<path d="M${x} 24 L${x + 5} ${24 - h - 10} L${x + 10} 24 Z" fill="${c.accent}"
+                    stroke="${INK}" stroke-width="1.8" stroke-linejoin="round" />`;
+    }).join(''),
+  finback: (c) =>
+    `<path d="M46 4 C66 14 80 32 84 54 C74 44 62 38 48 38 Z" fill="${c.accent}"
+           stroke="${INK}" stroke-width="2" stroke-linejoin="round" />`,
+  plume: (c) => `
+    <path d="M76 74 C94 68 98 50 92 36 C88 48 82 58 72 64 Z" fill="${c.accent}" opacity="0.85" />
+    <path d="M74 78 C90 76 96 64 94 52 C88 62 82 70 70 72 Z" fill="${c.accent}" />`,
+};
+
+/* --------------------------------------------- per-species signature parts */
+
+// The final form's bespoke flourish: each species' own topper, grown up. Replaces the
+// topper at form 3, so a species evolves along its own line instead of all sixteen
+// converging on one silhouette.
+export const SIGNATURES = {
+  bigEars: (c) => `
+    <circle cx="20" cy="26" r="18" /><circle cx="80" cy="26" r="18" />
+    <circle cx="20" cy="26" r="10" fill="${c.belly}" /><circle cx="80" cy="26" r="10" fill="${c.belly}" />`,
+  antennaArray: (c) => `
+    <g fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round">
+      <path d="M50 28 C48 16 52 10 50 2" /><path d="M38 30 C32 20 30 14 26 8" /><path d="M62 30 C68 20 70 14 74 8" />
+    </g>
+    <circle cx="50" cy="2" r="7" fill="${c.accent}" />
+    <circle cx="25" cy="7" r="5" fill="${c.accent}" /><circle cx="75" cy="7" r="5" fill="${c.accent}" />`,
+  tallTuft: (c) => `
+    <path d="M50 30 C40 20 42 8 52 0 C50 10 56 14 60 10 C62 20 58 26 50 30 Z" fill="${c.accent}" />
+    <circle cx="38" cy="24" r="7" /><circle cx="62" cy="24" r="7" />`,
+  crownSpikes: (c) => `
+    <path d="M26 30 L30 12 L38 24 L46 6 L54 24 L62 12 L70 30 Z" fill="${c.accent}"
+          stroke="${INK}" stroke-width="2.2" stroke-linejoin="round" />`,
+  longEars: (c) => `
+    <path d="M28 38 C16 22 16 6 26 2 C36 0 44 16 46 32 Z" />
+    <path d="M72 38 C84 22 84 6 74 2 C64 0 56 16 54 32 Z" />
+    <circle cx="24" cy="6" r="7" fill="${c.belly}" /><circle cx="76" cy="6" r="7" fill="${c.belly}" />`,
+  hugeRabbit: (c) => `
+    <ellipse cx="34" cy="10" rx="9" ry="26" transform="rotate(-10 34 10)" />
+    <ellipse cx="66" cy="10" rx="9" ry="26" transform="rotate(10 66 10)" />
+    <ellipse cx="34" cy="12" rx="4.4" ry="18" fill="${c.belly}" transform="rotate(-10 34 12)" />
+    <ellipse cx="66" cy="12" rx="4.4" ry="18" fill="${c.belly}" transform="rotate(10 66 12)" />`,
+  ramCurl: (c) => `
+    <g fill="none" stroke="${c.accent}" stroke-width="8" stroke-linecap="round">
+      <path d="M28 28 C10 28 4 14 16 6 C26 0 36 8 32 18" />
+      <path d="M72 28 C90 28 96 14 84 6 C74 0 64 8 68 18" />
+    </g>`,
+  twinHorns: (c) => `
+    <path d="M40 30 C40 16 36 6 30 0 C42 2 48 14 50 28 Z" fill="${c.accent}" />
+    <path d="M60 30 C60 16 64 6 70 0 C58 2 52 14 50 28 Z" fill="${c.accent}" />`,
+  bigAntlers: (c) => `
+    <g fill="none" stroke="${c.accent}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M40 30 L30 10 M30 10 L18 4 M30 10 L34 -2 M35 19 L24 16" />
+      <path d="M60 30 L70 10 M70 10 L82 4 M70 10 L66 -2 M65 19 L76 16" />
+    </g>`,
+  flameCrest: (c) => `
+    <path d="M50 30 C38 18 40 4 54 -4 C50 8 58 12 62 6 C68 18 62 26 50 30 Z" fill="${c.accent}" />
+    <path d="M36 28 C30 20 32 12 40 8 C36 16 40 22 44 24 Z" fill="${c.accent}" opacity="0.8" />`,
+  stormFin: (c) => `
+    <path d="M50 0 C66 12 72 26 68 34 L32 34 C28 26 34 12 50 0 Z" fill="${c.accent}" />
+    <path d="M50 6 L50 32 M40 16 L40 32 M60 16 L60 32" stroke="${c.belly}" stroke-width="2.4" opacity="0.7" />`,
+  crystal: (c) => `
+    <path d="M22 44 L28 16 L36 44 Z" fill="${c.accent}" opacity="0.85" />
+    <path d="M64 44 L72 20 L80 44 Z" fill="${c.accent}" opacity="0.85" />
+    <path d="M42 34 L50 2 L58 34 Z" fill="${c.accent}" />`,
+  foliageCrown: (c) => `
+    <g fill="${c.accent}">
+      <path d="M50 30 C50 14 58 4 72 0 C72 16 64 26 50 30 Z" />
+      <path d="M50 32 C50 18 42 8 28 4 C28 20 36 28 50 32 Z" />
+      <path d="M50 26 C50 12 50 4 50 -4 C56 6 56 16 50 26 Z" />
+    </g>`,
+  longFlop: (c) => `
+    <ellipse cx="14" cy="54" rx="10" ry="30" transform="rotate(-18 14 54)" />
+    <ellipse cx="86" cy="54" rx="10" ry="30" transform="rotate(18 86 54)" />
+    <ellipse cx="14" cy="58" rx="5" ry="20" fill="${c.belly}" transform="rotate(-18 14 58)" />
+    <ellipse cx="86" cy="58" rx="5" ry="20" fill="${c.belly}" transform="rotate(18 86 58)" />`,
+  moonHorns: (c) => `
+    <g fill="none" stroke="${c.accent}" stroke-width="7" stroke-linecap="round">
+      <path d="M32 26 C18 18 18 4 30 0" /><path d="M68 26 C82 18 82 4 70 0" />
+    </g>
+    <circle cx="50" cy="8" r="6" fill="${c.accent}" opacity="0.8" />`,
+  doubleRam: (c) => `
+    <g fill="none" stroke="${c.accent}" stroke-width="7" stroke-linecap="round">
+      <path d="M30 30 C8 28 2 10 18 2 C32 -4 44 8 38 20 C34 26 28 24 28 18" />
+      <path d="M70 30 C92 28 98 10 82 2 C68 -4 56 8 62 20 C66 26 72 24 72 18" />
+    </g>`,
+};
