@@ -2,6 +2,7 @@
 // this module owns the DOM, the pointer drag and the order things happen in.
 
 import {
+  advanceMinuteTo,
   angleOf,
   grade,
   hourAngle,
@@ -198,14 +199,6 @@ function svgVector(event) {
   };
 }
 
-/** Signed shortest distance in minutes, so a sweep past 12 counts as forward motion. */
-function minuteDelta(from, to) {
-  let d = (to - from) % 60;
-  if (d > 30) d -= 60;
-  if (d < -30) d += 60;
-  return d;
-}
-
 el.clock.addEventListener('pointerdown', (event) => {
   if (locked || !current) return;
   const v = svgVector(event);
@@ -233,11 +226,12 @@ el.clock.addEventListener('pointermove', (event) => {
   if (drag.hand === 'minute') {
     const m = snapMinute(deg);
     if (m === dial.m) return;
-    const delta = minuteDelta(dial.m, m);
-    const sign = Math.sign(delta);
+    // The hour comes along for the ride: past the 12 it carries, back past it it borrows.
+    const next = advanceMinuteTo(dial, m);
+    const sign = Math.sign(next.delta);
     if (sign && drag.lastSign && sign !== drag.lastSign) current.reversals += 1;
     if (sign) drag.lastSign = sign;
-    setDial(dial.h, m);
+    setDial(next.h, next.m);
   } else {
     const h = inferHour(deg, dial.m);
     if (h === dial.h) return;

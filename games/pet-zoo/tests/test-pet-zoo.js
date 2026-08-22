@@ -1,10 +1,12 @@
 import {
+  advanceMinuteTo,
   angleOf,
   angularDistance,
   grade,
   hourAngle,
   inferHour,
   minuteAngle,
+  minuteDelta,
   norm360,
   parseTimeId,
   pickHand,
@@ -167,6 +169,82 @@ test('inferHour reads every hour correctly at every five-minute offset', () => {
       assertEqual(inferHour(hourAngle(h, m), m), h, `hour ${h} at :${m}`);
     }
   }
+});
+
+describe('clock — the hands are geared together');
+
+test('minuteDelta takes the short way round the face', () => {
+  assertEqual(minuteDelta(10, 15), 5);
+  assertEqual(minuteDelta(15, 10), -5);
+  assertEqual(minuteDelta(55, 0), 5, 'across the top is five minutes forward');
+  assertEqual(minuteDelta(0, 55), -5, 'and five minutes back the other way');
+});
+
+test('an ordinary minute step leaves the hour alone', () => {
+  const next = advanceMinuteTo({ h: 4, m: 10 }, 15);
+  assertEqual(next.h, 4);
+  assertEqual(next.m, 15);
+});
+
+test('sweeping the minute hand forward past the 12 carries the hour', () => {
+  const next = advanceMinuteTo({ h: 4, m: 55 }, 0);
+  assertEqual(next.h, 5, 'four fifty-five plus five minutes is five o\'clock');
+  assertEqual(next.m, 0);
+});
+
+test('sweeping it back past the 12 borrows from the hour', () => {
+  const next = advanceMinuteTo({ h: 5, m: 0 }, 55);
+  assertEqual(next.h, 4, 'five o\'clock minus five minutes is four fifty-five');
+  assertEqual(next.m, 55);
+});
+
+test('the carry wraps round the top of the dial in both directions', () => {
+  assertEqual(advanceMinuteTo({ h: 12, m: 55 }, 0).h, 1, 'twelve carries to one, not to thirteen');
+  assertEqual(advanceMinuteTo({ h: 1, m: 0 }, 55).h, 12, 'one borrows back to twelve, not to zero');
+});
+
+test('the hour hand crosses the boundary by one tick, never snapping backwards', () => {
+  // The bug this guards: holding the hour still across the top made the hand jump back
+  // 27.5° — all the way to the numeral it had spent a full turn creeping away from.
+  const before = { h: 4, m: 55 };
+  const after = advanceMinuteTo(before, 0);
+  const step = hourAngle(after.h, after.m) - hourAngle(before.h, before.m);
+  assertClose(step, 2.5, 1e-9, 'the same half-degree-per-minute as every other tick');
+  assert(step > 0, 'forward motion of the minute hand never moves the hour hand back');
+});
+
+test('a full turn of the minute hand advances exactly one hour', () => {
+  let time = { h: 4, m: 0 };
+  for (let i = 0; i < 12; i += 1) {
+    time = advanceMinuteTo(time, (time.m + 5) % 60);
+  }
+  assertEqual(time.h, 5, 'twelve five-minute steps is one hour on');
+  assertEqual(time.m, 0);
+});
+
+test('winding the minute hand backwards a full turn undoes it exactly', () => {
+  let time = { h: 4, m: 0 };
+  for (let i = 0; i < 12; i += 1) {
+    time = advanceMinuteTo(time, (time.m + 55) % 60);
+  }
+  assertEqual(time.h, 3);
+  assertEqual(time.m, 0);
+});
+
+test('winding forward twelve hours returns to the same face', () => {
+  let time = { h: 4, m: 0 };
+  for (let i = 0; i < 12 * 12; i += 1) {
+    time = advanceMinuteTo(time, (time.m + 5) % 60);
+  }
+  assertEqual(time.h, 4, 'the hour never falls off the end of the dial');
+  assertEqual(time.m, 0);
+});
+
+test('advanceMinuteTo does not mutate the time it was given', () => {
+  const time = { h: 4, m: 55 };
+  advanceMinuteTo(time, 0);
+  assertEqual(time.h, 4);
+  assertEqual(time.m, 55);
 });
 
 describe('clock — grabbing a hand');

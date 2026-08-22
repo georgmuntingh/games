@@ -106,6 +106,34 @@ export function spokenTime(h, m) {
   return m === 0 ? `${HOUR_WORDS[h]} ${phrase}` : `${phrase} ${toHour}`;
 }
 
+/**
+ * Signed shortest distance in minutes, so a drag across the top of the face reads as a
+ * few minutes forward rather than a 55-minute leap backwards. A drag samples often
+ * enough that consecutive positions are always within half a turn of each other.
+ */
+export function minuteDelta(from, to) {
+  let d = (to - from) % 60;
+  if (d > 30) d -= 60;
+  if (d < -30) d += 60;
+  return d;
+}
+
+/**
+ * Move the minute hand to `next` and carry the hour with it. On a real clock the two
+ * hands are geared together: sweeping the minute hand forward past the 12 pulls the hour
+ * hand into the next hour, and sweeping it back past the 12 drags the hour hand into the
+ * previous one. Holding the hour still across that boundary would snap the hour hand
+ * backwards to the numeral it had just spent a whole turn creeping away from.
+ */
+export function advanceMinuteTo({ h, m }, next) {
+  const delta = minuteDelta(m, next);
+  const travelled = m + delta;
+  let hour = h;
+  if (travelled >= 60) hour = (h % 12) + 1;
+  else if (travelled < 0) hour = h === 1 ? 12 : h - 1;
+  return { h: hour, m: next, delta };
+}
+
 /** Circular distance in minutes, 0..30. */
 function minuteDistance(a, b) {
   const d = Math.abs(a - b) % 60;
