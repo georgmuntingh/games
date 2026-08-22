@@ -11,6 +11,7 @@
   --pz-accent: #7c5cd6;
   --pz-accent-soft: #efe7ff;
   --pz-good: #2e9e6b;
+  --pz-warn: #c2410c;
   --pz-warm: #ff9ec0;
   --pz-shadow: 0 6px 20px rgba(80, 60, 110, 0.13);
   --pz-face: #fffdf8;
@@ -31,6 +32,7 @@
     --pz-accent: #b79bff;
     --pz-accent-soft: #362c4e;
     --pz-good: #6ddba4;
+    --pz-warn: #f2a07a;
     --pz-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
     --pz-face: #f6f1ff;
     --pz-day-a: #1d2a44;
@@ -201,7 +203,10 @@ main {
   flex-wrap: wrap;
 }
 
-.digital {
+/* With the digits switched off the spoken phrase is the prompt, so it inherits the slot
+   they left rather than the card losing its focal point. */
+.digital,
+.spoken.is-lead {
   font-size: 2.1rem;
   font-weight: 800;
   letter-spacing: -0.03em;
@@ -212,6 +217,10 @@ main {
 .spoken {
   color: var(--pz-ink-soft);
   font-size: 0.95rem;
+}
+
+.spoken.is-lead {
+  color: var(--pz-accent);
 }
 
 /* ------------------------------------------------------------------- clock */
@@ -655,6 +664,88 @@ main {
   margin: 0.4rem 0 0;
   font-size: 0.85rem;
   color: var(--pz-ink-soft);
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.setting-toggle .setting-label {
+  margin-bottom: 0;
+}
+
+/* A switch rather than a tick box: the same chunky, thumb-sized target the play-time
+   slider is, for the same grown-up holding the same phone. */
+.setting-switch {
+  flex: none;
+  position: relative;
+  width: 60px;
+  height: 34px;
+  margin: 0;
+  appearance: none;
+  border-radius: 999px;
+  background: var(--pz-accent-soft);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.setting-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--pz-card);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s ease;
+}
+
+.setting-switch:checked {
+  background: var(--pz-accent);
+}
+
+.setting-switch:checked::after {
+  transform: translateX(26px);
+}
+
+.setting-switch:focus-visible {
+  outline: 3px solid var(--pz-accent);
+  outline-offset: 4px;
+}
+
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* `.ghost-btn` is a full-width block everywhere else in the game; in this row it pairs up
+   instead, so the four buttons cost two lines rather than four. */
+.setting-actions .ghost-btn {
+  flex: 1 1 8.5rem;
+  width: auto;
+  margin-top: 0;
+}
+
+.setting-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--pz-accent);
+  min-height: 1.2em;
+}
+
+/* A refused import has to be at least as visible as a successful one — quieter would be
+   exactly backwards. Warm rather than red: this panel belongs to a grown-up, but the
+   screen still belongs to a child. */
+.setting-status.is-bad {
+  color: var(--pz-warn);
 }
 
 .grownups {

@@ -3,6 +3,7 @@ import {
   angleOf,
   angularDistance,
   grade,
+  HOURS,
   hourAngle,
   inferHour,
   minuteAngle,
@@ -76,6 +77,20 @@ import {
   VERSION,
   write,
 } from '../store.js';
+import {
+  applyImport,
+  cleanItems,
+  CODE_PREFIX,
+  encodeCode,
+  exportFilename,
+  exportPayload,
+  parseTransfer,
+  payloadToJson,
+  petCount,
+  TRANSFER_APP,
+  TRANSFER_FORMAT,
+  TransferError,
+} from '../transfer.js';
 import {
   anatomyFor,
   appearanceFor,
@@ -1498,6 +1513,185 @@ test('migration leaves an already-migrated item completely alone', () => {
 test('migration survives a missing or empty item map', () => {
   assertEqual(Object.keys(migrateItems(undefined)).length, 0);
   assertEqual(Object.keys(migrateItems({})).length, 0);
+});
+
+describe('transfer — what crosses between devices');
+
+/** A save with a little of everything in it: a hatched pet, a stat line, a tier. */
+function playedState(now = 1000) {
+  const state = freshState(now);
+  state.items['4:15'] = {
+    ...createItem({ h: 4, m: 15, species: 'fizz', reviewClock: 0 }),
+    phase: 'graduated',
+    feeds: 4,
+    reps: 3,
+    hatchedAt: now,
+    name: 'Blåbær',
+  };
+  state.items['9:30'] = createItem({ h: 9, m: 30, species: 'fizz', reviewClock: 0 });
+  state.reviewClock = 12;
+  state.tier = 2;
+  state.stats = { totalAnswered: 40, totalCorrect: 31, streak: 2, bestStreak: 9, daysPlayed: ['2026-08-20'] };
+  return state;
+}
+
+/** What a second device looks like: empty, and set up the way its grown-up likes it. */
+function receivingState(now = 5000) {
+  const state = freshState(now);
+  state.settings = { ...state.settings, language: 'en', playMinutes: 12, showDigital: true };
+  return state;
+}
+
+test('an exported payload carries the pets, the schedule clock, the tier and the stats', () => {
+  const payload = exportPayload(playedState(), 2000);
+  assertEqual(payload.app, TRANSFER_APP);
+  assertEqual(payload.format, TRANSFER_FORMAT);
+  assertEqual(payload.reviewClock, 12);
+  assertEqual(payload.tier, 2);
+  assertEqual(payload.stats.bestStreak, 9);
+  assertEqual(payload.items['4:15'].feeds, 4);
+});
+
+test('an exported payload carries neither settings nor the session', () => {
+  const payload = exportPayload(playedState(), 2000);
+  assert(!('settings' in payload), 'settings travelled');
+  assert(!('session' in payload), 'the session travelled');
+});
+
+test('progress survives the round trip through a file', () => {
+  const from = playedState();
+  const json = payloadToJson(exportPayload(from, 2000));
+  const landed = applyImport(receivingState(), parseTransfer(json), 5000);
+  assertEqual(landed.reviewClock, 12);
+  assertEqual(landed.tier, 2);
+  assertEqual(landed.stats.totalAnswered, 40);
+  assertEqual(Object.keys(landed.items).length, 2);
+  assertEqual(landed.items['4:15'].feeds, 4);
+  assertEqual(landed.items['4:15'].phase, 'graduated');
+});
+
+test('a code round trip keeps a Norwegian pet name intact', () => {
+  const code = encodeCode(exportPayload(playedState(), 2000));
+  assert(code.startsWith(CODE_PREFIX), 'the code is not labelled');
+  const landed = applyImport(receivingState(), parseTransfer(code), 5000);
+  assertEqual(landed.items['4:15'].name, 'Blåbær');
+});
+
+test('a code survives being wrapped across lines by a chat app', () => {
+  const code = encodeCode(exportPayload(playedState(), 2000));
+  const mangled = `${code.slice(0, 40)}\n  ${code.slice(40, 90)}\n${code.slice(90)}  `;
+  assertEqual(parseTransfer(mangled).reviewClock, 12);
+});
+
+test('importing keeps the receiving device’s own settings', () => {
+  const payload = parseTransfer(payloadToJson(exportPayload(playedState(), 2000)));
+  const landed = applyImport(receivingState(), payload, 5000);
+  assertEqual(landed.settings.language, 'en');
+  assertEqual(landed.settings.playMinutes, 12);
+  assertEqual(landed.settings.showDigital, true);
+});
+
+test('importing leaves no session and no nap running', () => {
+  const from = playedState();
+  from.session = beginNap(startSession(1000), 1000);
+  const payload = parseTransfer(payloadToJson(exportPayload(from, 2000)));
+  const landed = applyImport(receivingState(), payload, 5000);
+  assert(!isRunning(landed.session), 'a session came across');
+  assert(!isNapping(landed.session, 5000), 'a nap came across');
+});
+
+test('a file from another game, a truncated code and a future format are all refused', () => {
+  const bad = [
+    ['{"app":"something-else","format":1,"items":{}}', 'transfer.badApp'],
+    [`{"app":"pet-zoo","format":${TRANSFER_FORMAT + 1},"items":{}}`, 'transfer.badVersion'],
+    ['{not json at all', 'transfer.badFile'],
+    [`${CODE_PREFIX}!!!not base64!!!`, 'transfer.badFile'],
+    ['', 'transfer.badFile'],
+    ['{"app":"pet-zoo","format":1}', 'transfer.badFile'],
+  ];
+  for (const [text, key] of bad) {
+    let caught = null;
+    try {
+      parseTransfer(text);
+    } catch (error) {
+      caught = error;
+    }
+    assert(caught instanceof TransferError, `${text.slice(0, 20)} was accepted`);
+    assertEqual(caught.key, key, `wrong reason for ${text.slice(0, 20)}`);
+  }
+});
+
+test('a refused import is reported as a key a grown-up can be shown, not a parser message', () => {
+  const keys = languageKeys('nb');
+  for (const key of ['transfer.badFile', 'transfer.badApp', 'transfer.badVersion']) {
+    assert(keys.includes(key), `${key} has no translation`);
+  }
+});
+
+test('a bogus record is dropped and its neighbours survive', () => {
+  const cleaned = cleanItems({
+    '4:15': { h: 4, m: 15, feeds: 1 },
+    '4:07': { h: 4, m: 7, feeds: 1 }, // not on a five-minute tick
+    '13:00': { h: 13, m: 0, feeds: 1 }, // no such hour on the face
+    '9:30': { h: 4, m: 15, feeds: 1 }, // the id disagrees with the record
+    '2:00': 'not an object',
+  });
+  assertEqual(Object.keys(cleaned).join(','), '4:15');
+});
+
+test('a save written before forms existed arrives with its pets the size they earned', () => {
+  const cleaned = cleanItems({ '4:15': { h: 4, m: 15, reps: 5, hatchedAt: 1 } });
+  assertEqual(cleaned['4:15'].feeds, 5);
+});
+
+test('the pet count reports hatched pets, not eggs', () => {
+  assertEqual(petCount(playedState().items), 1);
+});
+
+test('the export filename names the day it was written', () => {
+  assertEqual(exportFilename(Date.UTC(2026, 7, 22)), 'pet-zoo-2026-08-22.json');
+});
+
+describe('settings — the digital time can be turned off');
+
+test('a fresh zoo shows no digits', () => {
+  assertEqual(freshState(0).settings.showDigital, false);
+});
+
+test('a save written before the setting existed loads with the digits off', () => {
+  const storage = fakeStorage();
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ version: VERSION, items: {}, settings: { language: 'en', playMinutes: 7 } })
+  );
+  const back = load(0, storage);
+  assertEqual(back.settings.showDigital, false);
+  assertEqual(back.settings.playMinutes, 7, 'the settings it did have were lost');
+});
+
+test('the teach lines have somewhere to put a spoken time', () => {
+  // main.js substitutes the phrase into {time} when the digits are off, so a translation
+  // that dropped the placeholder would silently lose the answer from the correction.
+  for (const lang of ['en', 'nb']) {
+    const t = translator(lang);
+    for (const key of ['teach.both', 'teach.hourJustLeft']) {
+      assert(t(key, {}).length > 0, `${lang} ${key} is empty`);
+      assert(t(key).includes('{time}'), `${lang} ${key} lost its {time}`);
+    }
+  }
+});
+
+test('no spoken phrase contains a digit, in either language', () => {
+  // The property that makes "digits off" mean anything: a phrase like "kvart over 4"
+  // would put the numeral straight back on screen.
+  for (const lang of ['en', 'nb']) {
+    for (const h of HOURS) {
+      for (let m = 0; m < 60; m += 5) {
+        const said = spokenTime(lang, h, m);
+        assert(!/[0-9]/.test(said), `${lang} ${timeId(h, m)}: ${said}`);
+      }
+    }
+  }
 });
 
 /* -------------------------------------------------------- run and report */
