@@ -5,6 +5,9 @@
 // Everything derivable — a pet's mood, how many are hungry, tier progress — is computed
 // at render time from `items`, never stored, so there is exactly one source of truth.
 
+import { DEFAULT_LANGUAGE } from './i18n.js';
+import { PLAY_MINUTES_DEFAULT } from './session.js';
+
 export const STORAGE_KEY = 'pet-zoo/v1';
 export const VERSION = 1;
 const SAVE_DEBOUNCE_MS = 400;
@@ -16,7 +19,12 @@ export function freshState(now) {
     lastPlayedAt: now,
     reviewClock: 0,
     tier: 0,
-    settings: { sound: true, haptics: true },
+    settings: {
+      sound: true,
+      haptics: true,
+      language: DEFAULT_LANGUAGE,
+      playMinutes: PLAY_MINUTES_DEFAULT,
+    },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
     stats: { totalAnswered: 0, totalCorrect: 0, streak: 0, bestStreak: 0, daysPlayed: [] },
     items: {},

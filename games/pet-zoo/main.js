@@ -13,10 +13,10 @@ import {
   pickHand,
   pointOnFace,
   snapMinute,
-  spokenTime,
   timeId,
 } from './clock.js';
 import { TIERS, tierItems, tierMastery } from './curriculum.js';
+import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
 import { createItem, nextItem, refreshTier, review } from './srs.js';
 import * as session from './session.js';
 import { collarClock, eggSvg, moodOf, petName, petSvg, speciesFor, SPECIES } from './pets.js';
@@ -43,6 +43,7 @@ const el = {
   tabZoo: $('tab-zoo'),
   zooBadge: $('zoo-badge'),
   sound: $('sound'),
+  openSettings: $('open-settings'),
   playScene: $('play-scene'),
   napScene: $('nap-scene'),
   zooScene: $('zoo-scene'),
@@ -64,6 +65,11 @@ const el = {
   unlockTitle: $('unlock-title'),
   unlockCopy: $('unlock-copy'),
   unlockClose: $('unlock-close'),
+  settings: $('settings-overlay'),
+  language: $('language'),
+  playMinutes: $('play-minutes'),
+  playMinutesValue: $('play-minutes-value'),
+  settingsClose: $('settings-close'),
   grownups: $('grownups-overlay'),
   grownupsStats: $('grownups-stats'),
   grownupsTiers: $('grownups-tiers'),
@@ -79,6 +85,11 @@ const now = () => Date.now();
 let state = load(now());
 const saver = createSaver();
 const save = () => saver.save(state);
+
+// `t` and `limits` are derived from settings and swapped wholesale when a setting
+// changes, so nothing downstream has to know that a setting can move.
+let t = translator(state.settings.language);
+let limits = session.limitsFor(state.settings.playMinutes);
 
 // The question in flight. `dial` is what the child has set the hands to; `reversals`
 // counts how often they changed direction mid-drag, which feeds the SM-2 quality score.
@@ -264,8 +275,8 @@ function animateHandsTo(from, to, duration) {
     const dh = shortest(h0, hourAngle(to.h, to.m));
     const dm = shortest(m0, minuteAngle(to.m));
     const t0 = performance.now();
-    const step = (t) => {
-      const p = Math.min(1, (t - t0) / duration);
+    const step = (frameTime) => {
+      const p = Math.min(1, (frameTime - t0) / duration);
       const e = 1 - (1 - p) ** 3; // ease-out: decisive at first, settles gently
       rotate(hands.hourHand, h0 + dh * e);
       rotate(hands.minuteHand, m0 + dm * e);
@@ -290,27 +301,24 @@ function ensureItem(id) {
 }
 
 function promptFor(item) {
-  const name = petName(item);
   if (item.hatchedAt === null) {
-    return {
-      line: 'A chilly egg! It hatches at…',
-      button: 'Warm the egg!',
-    };
+    return { line: t('prompt.egg'), button: t('button.warm') };
   }
-  if (item.phase === 'learning') {
-    return { line: `${name} forgot their snack time. It is…`, button: `Feed ${name}!` };
-  }
-  return {
-    line: item.dueAt <= now() ? `${name} is hungry! They eat at…` : `${name} fancies a snack at…`,
-    button: `Feed ${name}!`,
-  };
+  const name = petName(item, t.lang);
+  const key =
+    item.phase === 'learning'
+      ? 'prompt.forgot'
+      : item.dueAt <= now()
+        ? 'prompt.hungry'
+        : 'prompt.snack';
+  return { line: t(key, { name }), button: t('button.feed', { name }) };
 }
 
 function renderPetStage(item, mood) {
   const markup =
     item.hatchedAt === null
-      ? eggSvg(item.species, { title: 'A chilly egg' })
-      : petSvg(item.species, { mood, title: escape(petName(item)) });
+      ? eggSvg(item.species, { title: t('zoo.eggTitle') })
+      : petSvg(item.species, { mood, title: escape(petName(item, t.lang)) });
   el.petStage.innerHTML = markup;
   const pet = el.petStage.querySelector('.pet');
   pet.classList.add('breathe');
@@ -329,17 +337,21 @@ function scatterHands(target) {
   setDial(h, m);
 }
 
+function renderPrompt(item) {
+  const prompt = promptFor(item);
+  el.promptLine.textContent = prompt.line;
+  el.promptDigital.textContent = timeId(item.h, item.m);
+  el.promptSpoken.textContent = t.spoken(item.h, item.m);
+  el.submit.textContent = prompt.button;
+}
+
 function askNext() {
   const id = nextItem(state, { now: now(), exclude: lastAskedId });
   const item = ensureItem(id);
   lastAskedId = id;
   current = { id, target: { h: item.h, m: item.m }, startedAt: now(), reversals: 0 };
 
-  const prompt = promptFor(item);
-  el.promptLine.textContent = prompt.line;
-  el.promptDigital.textContent = timeId(item.h, item.m);
-  el.promptSpoken.textContent = spokenTime(item.h, item.m);
-  el.submit.textContent = prompt.button;
+  renderPrompt(item);
   el.submit.disabled = false;
   el.feedback.textContent = '';
   el.feedback.className = 'feedback';
@@ -352,27 +364,37 @@ function askNext() {
 
 /* ------------------------------------------------------------------ answers */
 
-const CORRECT_CHEERS = ['Yes!', 'Perfect!', 'Spot on!', 'Nailed it!', 'That is it!'];
+const cheer = () => t(`cheer.${1 + Math.floor(Math.random() * 5)}`);
 
 function teachLine(target, result) {
-  const jumps = target.m / 5;
-  const prefix = result.nearMiss ? 'So close! ' : '';
+  const prefix = result.nearMiss ? t('teach.nearMiss') : '';
+  const params = {
+    time: timeId(target.h, target.m),
+    hour: t.hourWord(target.h),
+    hourNum: target.h,
+    next: (target.h % 12) + 1,
+    jumps: target.m / 5,
+    minutes: target.m,
+  };
   if (result.verdict === 'hourOff') {
-    const next = (target.h % 12) + 1;
-    if (target.m === 0) {
-      return `${prefix}At ${target.h} o'clock the short fat hand points straight at the ${target.h}.`;
-    }
-    if (target.m >= 30) {
-      return `${prefix}The short fat hand is past halfway from the ${target.h} to the ${next} — but it is still the ${target.h}.`;
-    }
-    return `${prefix}Look at the short fat hand: at ${timeId(target.h, target.m)} it has just left the ${target.h}.`;
+    const key =
+      target.m === 0
+        ? 'teach.hourExact'
+        : target.m >= 30
+          ? 'teach.hourPastHalf'
+          : 'teach.hourJustLeft';
+    return prefix + t(key, params);
   }
   if (result.verdict === 'minuteOff') {
-    return target.m === 0
-      ? `${prefix}At ${target.h} o'clock the long hand points straight up.`
-      : `${prefix}Count round in fives: ${jumps} jump${jumps === 1 ? '' : 's'} past the top is ${target.m} minutes.`;
+    const key =
+      target.m === 0
+        ? 'teach.minuteOClock'
+        : params.jumps === 1
+          ? 'teach.minuteCountOne'
+          : 'teach.minuteCountMany';
+    return prefix + t(key, params);
   }
-  return `${prefix}Here is where both hands go for ${timeId(target.h, target.m)}.`;
+  return prefix + t('teach.both', params);
 }
 
 async function submit() {
@@ -419,7 +441,11 @@ async function submit() {
 
   if (unlocked) await showUnlock(tier);
 
-  const reason = session.shouldEnd(state.session, { now: now(), correct: result.correct });
+  const reason = session.shouldEnd(state.session, {
+    now: now(),
+    correct: result.correct,
+    limits,
+  });
   if (reason) startNap();
   else askNext();
 }
@@ -431,7 +457,7 @@ async function celebrate(outcome) {
   if (outcome.events.hatched) {
     // The egg was the last thing standing between the child and a pet of their own —
     // this is the biggest moment the game has, so it gets its own beat.
-    el.feedback.textContent = 'It hatched!';
+    el.feedback.textContent = t('hatch.now');
     el.feedback.className = 'feedback good';
     el.petStage.querySelector('.pet').classList.add('hatching');
     audio.play('hatch');
@@ -440,15 +466,13 @@ async function celebrate(outcome) {
     renderPetStage(item, 'happy');
     el.petStage.querySelector('.pet').classList.add('arriving');
     confetti(el.petStage, el.fx, { power: 1.8 });
-    el.feedback.textContent = `${petName(item)} says hello!`;
+    el.feedback.textContent = t('hatch.hello', { name: petName(item, t.lang) });
     await wait(1500);
     return;
   }
 
   el.feedback.textContent =
-    streak >= 3
-      ? `${CORRECT_CHEERS[streak % CORRECT_CHEERS.length]} ${streak} in a row!`
-      : CORRECT_CHEERS[Math.floor(Math.random() * CORRECT_CHEERS.length)];
+    streak >= 3 ? t('cheer.streak', { cheer: cheer(), n: streak }) : cheer();
   el.feedback.className = 'feedback good';
   audio.play(streak >= 3 ? 'streak' : 'correct');
   audio.play('feed');
@@ -506,7 +530,7 @@ function renderNapPets() {
     .slice(-3);
   const shown = sleepers.length ? sleepers : [{ species: 'mochi' }, { species: 'bloop' }, { species: 'pip' }];
   el.napPets.innerHTML = shown
-    .map((item) => petSvg(item.species, { mood: 'sleep', title: 'sleeping' }))
+    .map((item) => petSvg(item.species, { mood: 'sleep', title: t('nap.sleeping') }))
     .join('');
 }
 
@@ -520,16 +544,18 @@ function wakeUp() {
 
 // One heartbeat drives the sky, the nap countdown and the idle hard cap.
 setInterval(() => {
-  const t = now();
-  const napping = session.isNapping(state.session, t);
+  const tick = now();
+  const napping = session.isNapping(state.session, tick);
 
   el.sky.style.setProperty(
     '--dusk',
-    napping ? '1' : String(session.isRunning(state.session) ? session.dayProgress(state.session, t) : 0)
+    napping
+      ? '1'
+      : String(session.isRunning(state.session) ? session.dayProgress(state.session, tick, limits) : 0)
   );
 
   if (napping) {
-    el.napTimer.textContent = session.formatCountdown(session.napRemaining(state.session, t));
+    el.napTimer.textContent = session.formatCountdown(session.napRemaining(state.session, tick));
     el.wake.disabled = true;
   } else if (state.session.napUntil) {
     el.napTimer.textContent = '0:00';
@@ -537,7 +563,12 @@ setInterval(() => {
   }
 
   // A child who wanders off mid-session still gets the break rather than an open game.
-  if (!napping && session.isRunning(state.session) && session.capReached(state.session, t) && scene !== 'nap') {
+  if (
+    !napping &&
+    session.isRunning(state.session) &&
+    session.capReached(state.session, tick, limits) &&
+    scene !== 'nap'
+  ) {
     startNap();
   }
 }, 500);
@@ -545,17 +576,17 @@ setInterval(() => {
 /* --------------------------------------------------------------------- zoo */
 
 function renderZooBadge() {
-  const t = now();
+  const at = now();
   const hungry = Object.values(state.items).filter(
-    (item) => item.hatchedAt !== null && item.phase === 'graduated' && item.dueAt <= t
+    (item) => item.hatchedAt !== null && item.phase === 'graduated' && item.dueAt <= at
   ).length;
   el.zooBadge.hidden = hungry === 0;
   el.zooBadge.textContent = String(hungry);
 }
 
 function renderZoo() {
-  const t = now();
-  const napping = session.isNapping(state.session, t);
+  const at = now();
+  const napping = session.isNapping(state.session, at);
   const items = Object.entries(state.items).sort(([, a], [, b]) => {
     if ((a.hatchedAt === null) !== (b.hatchedAt === null)) return a.hatchedAt === null ? 1 : -1;
     return a.h - b.h || a.m - b.m;
@@ -565,16 +596,20 @@ function renderZoo() {
   el.zooGrid.innerHTML = items
     .map(([id, item]) => {
       const isEgg = item.hatchedAt === null;
-      const mood = moodOf(item, t, { napping });
+      const mood = moodOf(item, at, { napping });
       const art = isEgg
-        ? eggSvg(item.species, { title: 'egg' })
-        : petSvg(item.species, { mood, title: escape(petName(item)) });
+        ? eggSvg(item.species, { title: t('zoo.eggTitle') })
+        : petSvg(item.species, { mood, title: escape(petName(item, t.lang)) });
       const flag = isEgg
         ? `${'●'.repeat(item.correctStreak)}${'○'.repeat(Math.max(0, 3 - item.correctStreak))}`
         : mood === 'hungry'
           ? '🍎'
           : '';
-      const label = escape(isEgg ? `${SPECIES[item.species]?.name ?? 'Egg'} egg` : petName(item));
+      const label = escape(
+        isEgg
+          ? t('zoo.egg', { species: SPECIES[item.species]?.name ?? '?' })
+          : petName(item, t.lang)
+      );
       return `
         <button class="pen${isEgg ? ' is-egg' : ''}" type="button" data-id="${id}">
           <span class="pen-flag">${flag}</span>
@@ -623,7 +658,7 @@ el.zooGrid.addEventListener('click', (event) => {
 function renamePet(id) {
   const item = state.items[id];
   if (!item || item.hatchedAt === null) return;
-  const chosen = prompt('What is this pet called?', petName(item));
+  const chosen = prompt(t('zoo.rename'), petName(item, t.lang));
   if (chosen === null) return;
   const trimmed = chosen.trim().slice(0, 24);
   item.name = trimmed || null;
@@ -673,12 +708,15 @@ el.submit.addEventListener('click', submit);
 async function showUnlock(tier) {
   const spec = TIERS[tier];
   const species = tierItems(tier)
-    .map((t) => speciesFor(t.h, t.m))
+    .map((time) => speciesFor(time.h, time.m))
     .filter((s, i, all) => all.indexOf(s) === i)
     .slice(0, 4);
   el.unlockPets.innerHTML = species.map((s) => petSvg(s, { mood: 'happy' })).join('');
-  el.unlockTitle.textContent = 'New pets have arrived!';
-  el.unlockCopy.textContent = `${spec.name} — ${spec.blurb}`;
+  el.unlockTitle.textContent = t('unlock.title');
+  el.unlockCopy.textContent = t('unlock.copy', {
+    tier: t(`tier.${spec.id}.name`),
+    blurb: t(`tier.${spec.id}.blurb`),
+  });
   el.unlock.hidden = false;
   audio.play('unlock');
   confetti(el.unlockPets, el.fx, { power: 2 });
@@ -700,11 +738,11 @@ function renderGrownups() {
     : 0;
   const hatched = Object.values(state.items).filter((i) => i.hatchedAt !== null).length;
   const rows = [
-    ['Times answered', state.stats.totalAnswered],
-    ['Correct first try', `${accuracy}%`],
-    ['Best streak', state.stats.bestStreak],
-    ['Pets hatched', `${hatched} / 144`],
-    ['Days played', state.stats.daysPlayed.length],
+    [t('grownups.answered'), state.stats.totalAnswered],
+    [t('grownups.accuracy'), `${accuracy}%`],
+    [t('grownups.streak'), state.stats.bestStreak],
+    [t('grownups.hatched'), `${hatched} / 144`],
+    [t('grownups.days'), state.stats.daysPlayed.length],
   ];
   el.grownupsStats.innerHTML = rows
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
@@ -715,7 +753,7 @@ function renderGrownups() {
     const locked = tier.id > state.tier;
     return `
       <div class="tier-row${locked ? ' locked' : ''}">
-        <div class="tier-head"><span>${tier.name}${locked ? ' 🔒' : ''}</span><span>${pct}%</span></div>
+        <div class="tier-head"><span>${escape(t(`tier.${tier.id}.name`))}${locked ? ' 🔒' : ''}</span><span>${pct}%</span></div>
         <div class="track"><div class="fill" style="width:${pct}%"></div></div>
       </div>`;
   }).join('');
@@ -739,15 +777,98 @@ el.grownupsClose.addEventListener('click', () => {
 });
 
 el.grownupsReset.addEventListener('click', () => {
-  const ok = confirm('Start over? Every pet and all progress will be lost.');
+  const ok = confirm(t('grownups.resetConfirm'));
   if (!ok) return;
   clear();
+  const keep = { ...state.settings };
   state = freshState(now());
+  // Language and play time are the grown-up's choices about *this device*, not progress:
+  // starting the child over should not also undo them.
+  state.settings = keep;
   saver.flush();
   el.grownups.hidden = true;
   lastAskedId = null;
   showScene('play');
   askNext();
+});
+
+/* ----------------------------------------------------------------- settings */
+
+/**
+ * Repaint every string on the page in the current language. Static text carries a
+ * `data-i18n` key; `data-i18n-html` marks the few strings with inline markup in them, and
+ * `data-i18n-aria-label` the ones that live in an attribute. Anything drawn from state —
+ * the question in flight, the zoo, an open panel — is re-rendered from the same state
+ * rather than translated in place, so switching language mid-question changes the words
+ * and nothing else.
+ */
+function applyLanguage() {
+  t = translator(state.settings.language);
+  document.documentElement.lang = t.lang;
+
+  for (const node of document.querySelectorAll('[data-i18n]')) {
+    node.textContent = t(node.dataset.i18n);
+  }
+  for (const node of document.querySelectorAll('[data-i18n-html]')) {
+    // Only ever fed from the string tables in i18n.js, never from anything typed.
+    node.innerHTML = t(node.dataset.i18nHtml);
+  }
+  for (const node of document.querySelectorAll('[data-i18n-aria-label]')) {
+    node.setAttribute('aria-label', t(node.dataset.i18nAriaLabel));
+  }
+
+  applySound(); // its label is a string too
+  el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
+
+  if (current) renderPrompt(state.items[current.id]);
+  if (scene === 'zoo') renderZoo();
+  if (scene === 'nap') renderNapPets();
+  if (!el.grownups.hidden) renderGrownups();
+}
+
+function buildLanguageOptions() {
+  el.language.innerHTML = '';
+  for (const lang of LANGUAGES) {
+    // Each language names itself in its own words, so it stays findable to someone who
+    // cannot read the language the app happens to be in.
+    el.language.append(new Option(lang.label, lang.id));
+  }
+}
+
+function openSettings() {
+  el.language.value = t.lang;
+  el.playMinutes.value = String(limits.minutes);
+  el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
+  el.settings.hidden = false;
+}
+
+el.openSettings.addEventListener('click', openSettings);
+el.settingsClose.addEventListener('click', () => {
+  el.settings.hidden = true;
+});
+
+el.language.addEventListener('change', () => {
+  const chosen = el.language.value;
+  state.settings.language = isLanguage(chosen) ? chosen : DEFAULT_LANGUAGE;
+  save();
+  applyLanguage();
+});
+
+// Live label while dragging; the setting itself lands on `change`, so a slider being
+// swept does not restart the session limits on every pixel.
+el.playMinutes.addEventListener('input', () => {
+  el.playMinutesValue.textContent = t('settings.playTimeValue', {
+    n: session.limitsFor(el.playMinutes.value).minutes,
+  });
+});
+
+el.playMinutes.addEventListener('change', () => {
+  limits = session.limitsFor(el.playMinutes.value);
+  state.settings.playMinutes = limits.minutes;
+  save();
+  el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
+  // A session already past the new limit is ended by the heartbeat on its next tick,
+  // which is the honest outcome of shortening the cap mid-session.
 });
 
 /* -------------------------------------------------------------------- sound */
@@ -758,7 +879,7 @@ function applySound() {
   setHaptics(state.settings.haptics && on);
   el.sound.textContent = on ? '🔊' : '🔈';
   el.sound.setAttribute('aria-pressed', String(on));
-  el.sound.setAttribute('aria-label', on ? 'Sound on' : 'Sound off');
+  el.sound.setAttribute('aria-label', t(on ? 'sound.on' : 'sound.off'));
 }
 
 el.sound.addEventListener('click', () => {
@@ -776,7 +897,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 buildClock();
-applySound();
+buildLanguageOptions();
+el.playMinutes.min = String(session.PLAY_MINUTES_MIN);
+el.playMinutes.max = String(session.PLAY_MINUTES_MAX);
+applyLanguage();
 renderZooBadge();
 
 // A reload is not a way to buy more play: both the nap and a session already in progress

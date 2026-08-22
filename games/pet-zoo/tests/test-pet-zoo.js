@@ -12,7 +12,6 @@ import {
   pickHand,
   pointOnFace,
   snapMinute,
-  spokenTime,
   timeId,
 } from '../clock.js';
 import {
@@ -46,21 +45,35 @@ import {
   beginNap,
   capReached,
   dayProgress,
+  DEFAULT_LIMITS,
   formatCountdown,
-  HARD_CAP_MS,
   isNapping,
   isRunning,
   isStale,
-  MAX_QUESTIONS,
+  limitsFor,
   napRemaining,
   NAP_MS,
+  PLAY_MINUTES_DEFAULT,
+  PLAY_MINUTES_MAX,
+  PLAY_MINUTES_MIN,
+  QUESTIONS_PER_MINUTE,
   shouldEnd,
-  SOFT_STOP_MS,
+  SOFT_STOP_RATIO,
   startSession,
   STALE_SESSION_MS,
 } from '../session.js';
 import { clear, createSaver, freshState, load, STORAGE_KEY, touchDay, VERSION, write } from '../store.js';
 import { defaultName, moodOf, petName, speciesFor, SPECIES } from '../pets.js';
+import {
+  DEFAULT_LANGUAGE,
+  hourWord,
+  isLanguage,
+  LANGUAGES,
+  languageKeys,
+  NAMES,
+  spokenTime,
+  translator,
+} from '../i18n.js';
 
 /* ------------------------------------------------------------- harness */
 
@@ -303,15 +316,7 @@ test('hour distance wraps too, so 12 and 1 are one apart', () => {
   assertEqual(grade({ h: 12, m: 0 }, { h: 12, m: 0 }).hourDelta, 0);
 });
 
-describe('clock — words and ids');
-
-test('times are spoken the way a person says them', () => {
-  assertEqual(spokenTime(4, 0), "four o'clock");
-  assertEqual(spokenTime(4, 15), 'quarter past four');
-  assertEqual(spokenTime(4, 30), 'half past four');
-  assertEqual(spokenTime(4, 45), 'quarter to five', 'past the half hour counts to the next hour');
-  assertEqual(spokenTime(12, 55), 'five to one', 'twelve rolls over to one');
-});
+describe('clock — ids');
 
 test('time ids pad the minutes and parse back', () => {
   assertEqual(timeId(4, 5), '4:05');
@@ -575,38 +580,100 @@ test('refreshTier reports the moment a tier opens and never closes one again', (
 
 describe('session — the caps');
 
-test('a fresh session runs on and ends nothing', () => {
-  const s = startSession(0);
-  assertEqual(shouldEnd({ ...s, answered: 3 }, { now: 30000, correct: true }), null);
+const FIVE = limitsFor(5);
+
+test('the default play time is still the three-and-five the game was tuned at', () => {
+  assertEqual(DEFAULT_LIMITS.minutes, PLAY_MINUTES_DEFAULT);
+  assertEqual(DEFAULT_LIMITS.hardMs, 5 * 60 * 1000);
+  assertEqual(DEFAULT_LIMITS.softMs, 3 * 60 * 1000, 'the soft stop lands on three minutes');
 });
 
-test('past three minutes the session ends on the next correct answer — a win, not a cut-off', () => {
+test('a fresh session runs on and ends nothing', () => {
+  const s = startSession(0);
+  assertEqual(shouldEnd({ ...s, answered: 3 }, { now: 30000, correct: true, limits: FIVE }), null);
+});
+
+test('past the soft stop the session ends on the next correct answer — a win, not a cut-off', () => {
   const s = { ...startSession(0), answered: 8 };
-  assertEqual(shouldEnd(s, { now: SOFT_STOP_MS + 1000, correct: true }), 'soft');
+  assertEqual(shouldEnd(s, { now: FIVE.softMs + 1000, correct: true, limits: FIVE }), 'soft');
   assertEqual(
-    shouldEnd(s, { now: SOFT_STOP_MS + 1000, correct: false }),
+    shouldEnd(s, { now: FIVE.softMs + 1000, correct: false, limits: FIVE }),
     null,
     'a child who is struggling keeps trying'
   );
 });
 
-test('five minutes ends it however it is going', () => {
+test('the hard cap ends it however it is going', () => {
   const s = { ...startSession(0), answered: 8 };
-  assertEqual(shouldEnd(s, { now: HARD_CAP_MS, correct: false }), 'hard');
-  assert(capReached(s, HARD_CAP_MS));
-  assert(!capReached(s, HARD_CAP_MS - 1));
+  assertEqual(shouldEnd(s, { now: FIVE.hardMs, correct: false, limits: FIVE }), 'hard');
+  assert(capReached(s, FIVE.hardMs, FIVE));
+  assert(!capReached(s, FIVE.hardMs - 1, FIVE));
 });
 
 test('the question cap catches a fast session before the clock does', () => {
-  const s = { ...startSession(0), answered: MAX_QUESTIONS };
-  assertEqual(shouldEnd(s, { now: 10000, correct: true }), 'count');
+  const s = { ...startSession(0), answered: FIVE.maxQuestions };
+  assertEqual(shouldEnd(s, { now: 10000, correct: true, limits: FIVE }), 'count');
 });
 
 test('the sky darkens from nothing to full over the hard cap', () => {
   const s = startSession(0);
-  assertEqual(dayProgress(s, 0), 0);
-  assertClose(dayProgress(s, HARD_CAP_MS / 2), 0.5);
-  assertEqual(dayProgress(s, HARD_CAP_MS * 3), 1, 'and never past full');
+  assertEqual(dayProgress(s, 0, FIVE), 0);
+  assertClose(dayProgress(s, FIVE.hardMs / 2, FIVE), 0.5);
+  assertEqual(dayProgress(s, FIVE.hardMs * 3, FIVE), 1, 'and never past full');
+});
+
+test('every session call falls back to the default limits when given none', () => {
+  const s = { ...startSession(0), answered: 0 };
+  assertEqual(shouldEnd(s, { now: DEFAULT_LIMITS.hardMs, correct: false }), 'hard');
+  assert(capReached(s, DEFAULT_LIMITS.hardMs));
+  assertEqual(dayProgress(s, DEFAULT_LIMITS.hardMs), 1);
+});
+
+describe('session — the adjustable play time');
+
+test('the play time sets all three limits together', () => {
+  const ten = limitsFor(10);
+  assertEqual(ten.minutes, 10);
+  assertEqual(ten.hardMs, 10 * 60 * 1000);
+  assertEqual(ten.softMs, Math.round(ten.hardMs * SOFT_STOP_RATIO));
+  assertEqual(ten.maxQuestions, 10 * QUESTIONS_PER_MINUTE);
+});
+
+test('the soft stop keeps its share, so a long session is not ended by its first win', () => {
+  for (const minutes of [2, 3, 5, 10, 15]) {
+    const l = limitsFor(minutes);
+    assertClose(l.softMs / l.hardMs, SOFT_STOP_RATIO, 1e-6, `${minutes} minutes`);
+    assert(l.softMs < l.hardMs, 'and always lands before the hard cap');
+  }
+});
+
+test('a longer play time really does allow a longer session', () => {
+  const s = { ...startSession(0), answered: 5 };
+  const at4min = { now: 4 * 60 * 1000, correct: false };
+  assertEqual(shouldEnd(s, { ...at4min, limits: limitsFor(3) }), 'hard', 'three minutes is up');
+  assertEqual(shouldEnd(s, { ...at4min, limits: limitsFor(10) }), null, 'ten minutes is not');
+});
+
+test('an out-of-range or nonsense play time is pulled back into the allowed span', () => {
+  assertEqual(limitsFor(0).minutes, PLAY_MINUTES_MIN, 'zero would be no session at all');
+  assertEqual(limitsFor(-5).minutes, PLAY_MINUTES_MIN);
+  assertEqual(limitsFor(999).minutes, PLAY_MINUTES_MAX, 'the cap can be loosened, never removed');
+  assertEqual(limitsFor(NaN).minutes, PLAY_MINUTES_DEFAULT);
+  assertEqual(limitsFor(undefined).minutes, PLAY_MINUTES_DEFAULT);
+  assertEqual(limitsFor('7').minutes, 7, 'a slider hands over a string');
+  assertEqual(limitsFor(4.4).minutes, 4, 'and fractions round');
+});
+
+test('there is no play time that produces a session without an end', () => {
+  for (const value of [0, 1, 2, 15, 99, -1, NaN, null, 'nonsense']) {
+    const l = limitsFor(value);
+    assert(l.hardMs > 0 && Number.isFinite(l.hardMs), `hard cap for ${value}`);
+    assert(l.maxQuestions > 0, `question cap for ${value}`);
+    assert(
+      l.minutes >= PLAY_MINUTES_MIN && l.minutes <= PLAY_MINUTES_MAX,
+      `${value} landed outside the allowed span`
+    );
+  }
 });
 
 describe('session — the nap');
@@ -630,7 +697,7 @@ test('a session in progress is resumable; one left overnight is not', () => {
   assert(!isRunning(startSession(0)), 'startedAt 0 means not yet begun');
   assert(isRunning(startSession(5000)));
   const s = startSession(0);
-  assert(!isStale(s, SOFT_STOP_MS), 'a live session is not stale');
+  assert(!isStale(s, DEFAULT_LIMITS.softMs), 'a live session is not stale');
   assert(isStale(s, STALE_SESSION_MS), 'half an hour later it has been abandoned');
 });
 
@@ -761,8 +828,20 @@ describe('pets');
 
 test('a time always maps to the same creature and the same name', () => {
   assertEqual(speciesFor(4, 15), speciesFor(4, 15));
-  assertEqual(defaultName(4, 15), defaultName(4, 15));
+  assertEqual(defaultName(4, 15, 'nb'), defaultName(4, 15, 'nb'));
   assert(SPECIES[speciesFor(4, 15)], 'and it is a species that exists');
+});
+
+test('a pet is named in the language the child is playing in', () => {
+  const nb = defaultName(4, 15, 'nb');
+  const en = defaultName(4, 15, 'en');
+  assert(NAMES.nb.includes(nb), 'the Norwegian name comes from the Norwegian pool');
+  assert(NAMES.en.includes(en), 'and the English one from the English pool');
+  assertEqual(defaultName(4, 15), nb, 'Norwegian is the default');
+});
+
+test('an unknown language still yields a name rather than nothing', () => {
+  assert(NAMES.nb.includes(defaultName(4, 15, 'zz')));
 });
 
 test('every one of the 144 times has a real species', () => {
@@ -771,10 +850,13 @@ test('every one of the 144 times has a real species', () => {
   }
 });
 
-test('a renamed pet keeps its new name', () => {
+test('a renamed pet keeps its own name in every language', () => {
   const item = { ...seed(), name: null };
-  assertEqual(petName(item), defaultName(4, 15));
-  assertEqual(petName({ ...item, name: 'Waffle' }), 'Waffle');
+  assertEqual(petName(item, 'nb'), defaultName(4, 15, 'nb'));
+  assertEqual(petName(item, 'en'), defaultName(4, 15, 'en'), 'an unnamed pet follows the language');
+  const named = { ...item, name: 'Waffle' };
+  assertEqual(petName(named, 'nb'), 'Waffle');
+  assertEqual(petName(named, 'en'), 'Waffle', 'a name the child chose is never overwritten');
 });
 
 test('mood follows the schedule — hungry when due, happy when not', () => {
@@ -784,6 +866,168 @@ test('mood follows the schedule — hungry when due, happy when not', () => {
   assertEqual(moodOf({ ...pet, phase: 'learning', lapses: 1 }, 200), 'droopy');
   assertEqual(moodOf({ ...pet, dueAt: 100 }, 200, { napping: true }), 'sleep', 'everyone sleeps');
   assertEqual(moodOf({ ...seed(), hatchedAt: null }, 0), 'content', 'an egg has no mood');
+});
+
+/* ---------------------------------------------------------------- i18n */
+
+describe('i18n — the string tables');
+
+test('Norwegian is the default language', () => {
+  assertEqual(DEFAULT_LANGUAGE, 'nb');
+  assertEqual(translator(undefined).lang, 'nb');
+});
+
+test('both languages are offered, each naming itself in its own words', () => {
+  assertEqual(LANGUAGES.length, 2);
+  assertEqual(LANGUAGES.find((l) => l.id === 'nb').label, 'Norsk');
+  assertEqual(LANGUAGES.find((l) => l.id === 'en').label, 'English');
+  assert(isLanguage('nb') && isLanguage('en'));
+  assert(!isLanguage('de') && !isLanguage(''), 'and nothing else is accepted');
+});
+
+test('neither language is missing a string the other has', () => {
+  const nb = new Set(languageKeys('nb'));
+  const en = new Set(languageKeys('en'));
+  const missingFromEn = [...nb].filter((k) => !en.has(k));
+  const missingFromNb = [...en].filter((k) => !nb.has(k));
+  assertEqual(missingFromEn.join(', '), '', 'keys absent from English');
+  assertEqual(missingFromNb.join(', '), '', 'keys absent from Norwegian');
+  assert(nb.size > 40, 'and the tables are actually populated');
+});
+
+test('no string is left untranslated — every Norwegian value differs from the English', () => {
+  const t = { nb: translator('nb'), en: translator('en') };
+  // Bar the handful that are the same word in both, or carry only placeholders.
+  const shared = new Set(['unlock.copy']);
+  const identical = languageKeys('nb').filter(
+    (key) => !shared.has(key) && t.nb(key) === t.en(key)
+  );
+  assertEqual(identical.join(', '), '', 'these were never translated');
+});
+
+test('placeholders are filled, and an unknown one is left alone rather than blanked', () => {
+  const t = translator('en');
+  assertEqual(t('button.feed', { name: 'Waffle' }), 'Feed Waffle!');
+  assertEqual(t('button.feed'), 'Feed {name}!', 'nothing to fill leaves the template visible');
+});
+
+test('an unknown key falls back rather than rendering as a raw key', () => {
+  assertEqual(translator('en')('no.such.key'), 'no.such.key', 'and is at worst inert');
+});
+
+test('an unknown language falls back to the default without throwing', () => {
+  const t = translator('de');
+  assertEqual(t.lang, DEFAULT_LANGUAGE);
+  assertEqual(t('nap.title'), translator('nb')('nap.title'));
+});
+
+test('every tier has a name and a blurb in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    const t = translator(lang);
+    for (const tier of TIERS) {
+      assert(t(`tier.${tier.id}.name`) !== `tier.${tier.id}.name`, `${lang} tier ${tier.id} name`);
+      assert(t(`tier.${tier.id}.blurb`) !== `tier.${tier.id}.blurb`, `${lang} tier ${tier.id} blurb`);
+    }
+  }
+});
+
+describe('i18n — telling the time in English');
+
+test('English says the hour, then counts past and to it', () => {
+  assertEqual(spokenTime('en', 4, 0), "four o'clock");
+  assertEqual(spokenTime('en', 4, 15), 'quarter past four');
+  assertEqual(spokenTime('en', 4, 30), 'half past four');
+  assertEqual(spokenTime('en', 4, 45), 'quarter to five', 'past the half hour counts to the next');
+  assertEqual(spokenTime('en', 12, 55), 'five to one', 'twelve rolls over to one');
+});
+
+describe('i18n — telling the time in Norwegian');
+
+// Norwegian counts the half hour forwards: "halv fem" is 4:30, not 5:30. A child taught
+// the English shape here would name the wrong hour for a third of the dial, so these are
+// spelled out one by one rather than generated.
+test('the whole Norwegian hour reads correctly, minute by minute', () => {
+  const expected = {
+    0: 'klokka fire',
+    5: 'fem over fire',
+    10: 'ti over fire',
+    15: 'kvart over fire',
+    20: 'ti på halv fem',
+    25: 'fem på halv fem',
+    30: 'halv fem',
+    35: 'fem over halv fem',
+    40: 'ti over halv fem',
+    45: 'kvart på fem',
+    50: 'ti på fem',
+    55: 'fem på fem',
+  };
+  for (const [m, phrase] of Object.entries(expected)) {
+    assertEqual(spokenTime('nb', 4, Number(m)), phrase, `4:${m}`);
+  }
+});
+
+test('"halv" names the hour it is heading for, not the one it has left', () => {
+  assertEqual(spokenTime('nb', 4, 30), 'halv fem', 'half past four is halv fem');
+  assertEqual(spokenTime('nb', 5, 30), 'halv seks');
+  assertEqual(spokenTime('nb', 12, 30), 'halv ett', 'and twelve heads for one, not thirteen');
+});
+
+test('the hours either side of twelve wrap the Norwegian way too', () => {
+  assertEqual(spokenTime('nb', 11, 45), 'kvart på tolv');
+  assertEqual(spokenTime('nb', 12, 45), 'kvart på ett');
+  assertEqual(spokenTime('nb', 12, 20), 'ti på halv ett');
+  assertEqual(spokenTime('nb', 12, 0), 'klokka tolv');
+});
+
+test('every one of the 144 times can be said aloud in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    for (const { h, m } of ALL_ITEMS) {
+      const said = spokenTime(lang, h, m);
+      assert(said && !said.includes('undefined') && !said.includes('{'), `${lang} ${timeId(h, m)}: ${said}`);
+    }
+  }
+});
+
+test('the hour is spelled out in both languages, and never as a zero', () => {
+  assertEqual(hourWord('en', 4), 'four');
+  assertEqual(hourWord('nb', 4), 'fire');
+  assertEqual(hourWord('nb', 1), 'ett', 'one o\'clock is "ett", not "en"');
+  assertEqual(hourWord('nb', 12), 'tolv');
+  assertEqual(hourWord('nb', 13), 'ett', 'thirteen wraps round the dial');
+  assertEqual(hourWord('nb', 0), 'tolv', 'and zero is twelve, never blank');
+});
+
+describe('i18n — settings storage');
+
+test('a save from before these settings existed gets the defaults', () => {
+  const storage = fakeStorage();
+  const old = freshState(0);
+  delete old.settings.language;
+  delete old.settings.playMinutes;
+  storage.setItem(STORAGE_KEY, JSON.stringify(old));
+  const back = load(0, storage);
+  assertEqual(back.settings.language, DEFAULT_LANGUAGE);
+  assertEqual(back.settings.playMinutes, PLAY_MINUTES_DEFAULT);
+});
+
+test('a chosen language and play time survive a reload', () => {
+  const storage = fakeStorage();
+  const state = freshState(0);
+  state.settings.language = 'en';
+  state.settings.playMinutes = 8;
+  write(state, storage);
+  const back = load(0, storage);
+  assertEqual(back.settings.language, 'en');
+  assertEqual(back.settings.playMinutes, 8);
+  assertEqual(limitsFor(back.settings.playMinutes).hardMs, 8 * 60 * 1000);
+});
+
+test('a hand-edited play time cannot remove the break', () => {
+  const storage = fakeStorage();
+  const state = freshState(0);
+  state.settings.playMinutes = 99999;
+  write(state, storage);
+  assertEqual(limitsFor(load(0, storage).settings.playMinutes).minutes, PLAY_MINUTES_MAX);
 });
 
 /* -------------------------------------------------------- run and report */

@@ -7,31 +7,13 @@ import { HOURS, timeId } from './clock.js';
 
 export const UNLOCK_RATIO = 0.8;
 
+// Structure only — each tier's name and blurb are looked up as `tier.<id>.name` and
+// `tier.<id>.blurb` in i18n.js, so the curriculum stays language-free.
 export const TIERS = [
-  {
-    id: 0,
-    name: "O'clock",
-    blurb: 'The big hand points straight up.',
-    minutes: [0],
-  },
-  {
-    id: 1,
-    name: 'Half past',
-    blurb: 'The big hand points straight down.',
-    minutes: [30],
-  },
-  {
-    id: 2,
-    name: 'Quarter past and quarter to',
-    blurb: 'The big hand points sideways.',
-    minutes: [15, 45],
-  },
-  {
-    id: 3,
-    name: 'Every five minutes',
-    blurb: 'Count around the face in fives.',
-    minutes: [5, 10, 20, 25, 35, 40, 50, 55],
-  },
+  { id: 0, minutes: [0] },
+  { id: 1, minutes: [30] },
+  { id: 2, minutes: [15, 45] },
+  { id: 3, minutes: [5, 10, 20, 25, 35, 40, 50, 55] },
 ];
 
 export const LAST_TIER = TIERS.length - 1;

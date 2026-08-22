@@ -9,6 +9,7 @@
 
 import { pointOnFace, timeId } from './clock.js';
 import { TIERS } from './curriculum.js';
+import { DEFAULT_LANGUAGE, NAMES } from './i18n.js';
 
 /* --------------------------------------------------------------- species */
 
@@ -47,16 +48,6 @@ const TIER_SPECIES = [
   ['sprout', 'bubs', 'zzz', 'tumble'],
 ];
 
-const NAMES = [
-  'Biscuit', 'Marmalade', 'Waffle', 'Pumpkin', 'Sprinkle', 'Doodle', 'Clover', 'Peanut',
-  'Nugget', 'Custard', 'Pickle', 'Bumble', 'Dandelion', 'Truffle', 'Cinnamon', 'Gumdrop',
-  'Blossom', 'Turnip', 'Jellybean', 'Muffin', 'Toast', 'Pancake', 'Wobble', 'Pudding',
-  'Cricket', 'Pip-squeak', 'Sundae', 'Butterbean', 'Hopscotch', 'Marshmallow', 'Tangerine',
-  'Snickerdoodle', 'Pinecone', 'Bramble', 'Mittens', 'Popcorn', 'Whisker', 'Fern',
-  'Gingersnap', 'Nutmeg', 'Poppy', 'Sesame', 'Twiglet', 'Apricot', 'Cobweb', 'Domino',
-  'Fizzle', 'Hazelnut',
-];
-
 // djb2 — any stable hash will do; what matters is that 4:15 is always the same creature
 // with the same name, so the child ends up remembering "Waffle eats at quarter past four".
 function hash(str) {
@@ -71,9 +62,19 @@ export function speciesFor(h, m) {
   return pool[hash(timeId(h, m)) % pool.length];
 }
 
-export const defaultName = (h, m) => NAMES[hash(`n${timeId(h, m)}`) % NAMES.length];
+/**
+ * The name a pet is born with. Deterministic per time *and* per language: switching the
+ * app's language renames the whole zoo into the child's own words, which is the point —
+ * the association being built is "Vaffel eats at quarter past four", one sentence in one
+ * language. A pet the child has renamed themselves keeps that name in both.
+ */
+export const defaultName = (h, m, lang = DEFAULT_LANGUAGE) => {
+  const pool = NAMES[lang] ?? NAMES[DEFAULT_LANGUAGE];
+  return pool[hash(`n${timeId(h, m)}`) % pool.length];
+};
 
-export const petName = (item) => item.name || defaultName(item.h, item.m);
+export const petName = (item, lang = DEFAULT_LANGUAGE) =>
+  item.name || defaultName(item.h, item.m, lang);
 
 /* ------------------------------------------------------------- body parts */
 

@@ -78,34 +78,6 @@ export function parseTimeId(id) {
 
 export const formatTime = (h, m) => timeId(h, m);
 
-const MINUTE_WORDS = {
-  0: "o'clock",
-  5: 'five past',
-  10: 'ten past',
-  15: 'quarter past',
-  20: 'twenty past',
-  25: 'twenty-five past',
-  30: 'half past',
-  35: 'twenty-five to',
-  40: 'twenty to',
-  45: 'quarter to',
-  50: 'ten to',
-  55: 'five to',
-};
-
-const HOUR_WORDS = [
-  '',
-  'one', 'two', 'three', 'four', 'five', 'six',
-  'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
-];
-
-/** "quarter past four" — the spoken form, so the child learns the words alongside the face. */
-export function spokenTime(h, m) {
-  const phrase = MINUTE_WORDS[m];
-  const toHour = m > 30 ? HOUR_WORDS[mod(h, 12) + 1] : HOUR_WORDS[h];
-  return m === 0 ? `${HOUR_WORDS[h]} ${phrase}` : `${phrase} ${toHour}`;
-}
-
 /**
  * Signed shortest distance in minutes, so a drag across the top of the face reads as a
  * few minutes forward rather than a 55-minute leap backwards. A drag samples often
