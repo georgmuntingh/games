@@ -63,7 +63,36 @@ import {
   STALE_SESSION_MS,
 } from '../session.js';
 import { clear, createSaver, freshState, load, STORAGE_KEY, touchDay, VERSION, write } from '../store.js';
-import { defaultName, moodOf, petName, speciesFor, SPECIES } from '../pets.js';
+import {
+  appearanceFor,
+  defaultName,
+  isCrowned,
+  LOUD_FAMILIES,
+  MARKING_IDS,
+  moodOf,
+  petName,
+  petSvg,
+  speciesAppearance,
+  speciesFor,
+  SPECIES,
+  timesOfSpecies,
+  TRAIT_STRIDE,
+  validLoudFor,
+} from '../pets.js';
+import {
+  ACCESSORIES,
+  BODIES,
+  BROWS,
+  EYES,
+  EYEWEAR,
+  FACIAL,
+  HAIR,
+  HAIR_CROWN,
+  MARKINGS,
+  TEXTURES,
+  TOPPER_CROWN,
+  TOPPERS,
+} from '../pet-parts.js';
 import {
   DEFAULT_LANGUAGE,
   hourWord,
@@ -850,6 +879,28 @@ test('every one of the 144 times has a real species', () => {
   }
 });
 
+test('no two pets of the same species share a name', () => {
+  // Different species may reuse a name — they look nothing alike. Two identically-named
+  // pets of the *same* species, sitting next to each other in the zoo, is the confusing
+  // case, and the name pool is walked from a per-species offset to prevent it.
+  for (const lang of ['nb', 'en']) {
+    for (const id of Object.keys(SPECIES)) {
+      const names = timesOfSpecies(id).map((time) => {
+        const { h, m } = parseTimeId(time);
+        return defaultName(h, m, lang);
+      });
+      assertEqual(new Set(names).size, names.length, `${id} repeats a name in ${lang}`);
+    }
+  }
+});
+
+test('the name pool is large enough for the biggest species', () => {
+  const biggest = Math.max(...Object.keys(SPECIES).map((id) => timesOfSpecies(id).length));
+  for (const lang of ['nb', 'en']) {
+    assert(NAMES[lang].length > biggest, `${lang} has too few names for ${biggest} pets`);
+  }
+});
+
 test('a renamed pet keeps its own name in every language', () => {
   const item = { ...seed(), name: null };
   assertEqual(petName(item, 'nb'), defaultName(4, 15, 'nb'));
@@ -1028,6 +1079,185 @@ test('a hand-edited play time cannot remove the break', () => {
   state.settings.playMinutes = 99999;
   write(state, storage);
   assertEqual(limitsFor(load(0, storage).settings.playMinutes).minutes, PLAY_MINUTES_MAX);
+});
+
+/* --------------------------------------------------------- appearance */
+
+const MOODS = ['content', 'happy', 'hungry', 'droopy', 'sleep'];
+const LOUD_KEYS = LOUD_FAMILIES.map(([key]) => key);
+const appearanceKey = (a) =>
+  [a.species, a.eyewear, a.hair, a.facialHair, a.markings, a.accessory].join('|');
+const loudKey = (a) => LOUD_KEYS.map((k) => a[k]).join('|');
+const loudCount = (a) => LOUD_KEYS.filter((k) => a[k] !== 'none').length;
+
+describe('pets — the species look different from each other');
+
+test('no two species can be told apart by colour alone', () => {
+  // The bug this guards: sixteen palettes sharing one face. Every pair must differ in at
+  // least two of the drawn features, so colour is never the only distinguisher.
+  const ids = Object.keys(SPECIES);
+  const shape = ['body', 'texture', 'topper', 'eyes', 'brows'];
+  for (let i = 0; i < ids.length; i += 1) {
+    for (let j = i + 1; j < ids.length; j += 1) {
+      const differences = shape.filter((k) => SPECIES[ids[i]][k] !== SPECIES[ids[j]][k]);
+      assert(
+        differences.length >= 2,
+        `${ids[i]} and ${ids[j]} differ only in ${differences.join(', ') || 'colour'}`
+      );
+    }
+  }
+});
+
+test('every species names parts that actually exist', () => {
+  for (const [id, spec] of Object.entries(SPECIES)) {
+    assert(BODIES[spec.body], `${id} body ${spec.body}`);
+    assert(TEXTURES[spec.texture], `${id} texture ${spec.texture}`);
+    assert(TOPPERS[spec.topper], `${id} topper ${spec.topper}`);
+    assert(EYES[spec.eyes], `${id} eyes ${spec.eyes}`);
+    assert(BROWS[spec.brows], `${id} brows ${spec.brows}`);
+  }
+});
+
+describe('pets — every one of the 144 is distinct');
+
+test('all 144 times produce 144 different-looking pets', () => {
+  const seen = new Map();
+  for (const { h, m } of ALL_ITEMS) {
+    const key = appearanceKey(appearanceFor(h, m));
+    const clash = seen.get(key);
+    assert(!clash, `${timeId(h, m)} looks identical to ${clash}`);
+    seen.set(key, timeId(h, m));
+  }
+  assertEqual(seen.size, 144);
+});
+
+test('within a species, no two pets share a loud pattern', () => {
+  // The strong form of the guarantee: two pets never differ by a freckle alone — the
+  // difference is always one of the big, legible features.
+  for (const id of Object.keys(SPECIES)) {
+    const patterns = timesOfSpecies(id).map((time) => {
+      const { h, m } = parseTimeId(time);
+      return loudKey(appearanceFor(h, m));
+    });
+    assertEqual(new Set(patterns).size, patterns.length, `${id} repeats a loud pattern`);
+  }
+});
+
+test('the stride is coprime with both valid-list lengths, or the bijection collapses', () => {
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  assertEqual(gcd(TRAIT_STRIDE, validLoudFor('mochi').length), 1, 'free species');
+  assertEqual(gcd(TRAIT_STRIDE, validLoudFor('glim').length), 1, 'crowned species');
+});
+
+test('every species has far more valid combinations than it has pets', () => {
+  for (const id of Object.keys(SPECIES)) {
+    const pets = timesOfSpecies(id).length;
+    assert(
+      validLoudFor(id).length > pets,
+      `${id} has ${pets} pets but only ${validLoudFor(id).length} combinations`
+    );
+  }
+});
+
+test('the species map covers all 144 times and loses none', () => {
+  const total = Object.keys(SPECIES).reduce((n, id) => n + timesOfSpecies(id).length, 0);
+  assertEqual(total, 144);
+});
+
+describe('pets — the combinations stay wearable');
+
+test('no pet carries more than two loud traits', () => {
+  for (const { h, m } of ALL_ITEMS) {
+    const a = appearanceFor(h, m);
+    assert(loudCount(a) <= 2, `${timeId(h, m)} wears ${loudCount(a)} loud traits`);
+  }
+});
+
+test('no pet grows a topknot on a crown that is already occupied', () => {
+  for (const { h, m } of ALL_ITEMS) {
+    const a = appearanceFor(h, m);
+    assert(
+      !(TOPPER_CROWN.has(a.topper) && HAIR_CROWN.has(a.hair)),
+      `${timeId(h, m)}: ${a.topper} and ${a.hair} both want the crown`
+    );
+  }
+});
+
+test('a crowned species is offered only the hair that clears its crown', () => {
+  assert(isCrowned('glim'), 'glim has a horn');
+  assert(!isCrowned('mochi'), 'mochi has ears');
+  for (const combo of validLoudFor('glim')) {
+    assert(!HAIR_CROWN.has(combo.hair), `crowned list offers ${combo.hair}`);
+  }
+});
+
+test('every trait the generator emits exists in the parts library', () => {
+  // Catches a typo silently rendering a blank pet, which no visual check would flag
+  // reliably across 144 of them.
+  for (const { h, m } of ALL_ITEMS) {
+    const a = appearanceFor(h, m);
+    assert(EYEWEAR[a.eyewear], `${timeId(h, m)} eyewear ${a.eyewear}`);
+    assert(HAIR[a.hair], `${timeId(h, m)} hair ${a.hair}`);
+    assert(FACIAL[a.facialHair], `${timeId(h, m)} facialHair ${a.facialHair}`);
+    assert(MARKINGS[a.markings], `${timeId(h, m)} markings ${a.markings}`);
+    assert(ACCESSORIES[a.accessory], `${timeId(h, m)} accessory ${a.accessory}`);
+  }
+});
+
+test('all six markings get used across the zoo', () => {
+  const used = new Set(ALL_ITEMS.map(({ h, m }) => appearanceFor(h, m).markings));
+  assertEqual(used.size, MARKING_IDS.length, 'some marking is never drawn');
+});
+
+describe('pets — appearance is stable and renders');
+
+test('appearanceFor is deterministic and does not mutate anything', () => {
+  const first = appearanceFor(4, 15);
+  const second = appearanceFor(4, 15);
+  assertEqual(appearanceKey(first), appearanceKey(second));
+  first.eyewear = 'tampered';
+  assertEqual(appearanceFor(4, 15).eyewear, second.eyewear, 'the returned object is a copy');
+});
+
+test('a species drawn plain wears none of the individual traits', () => {
+  const plain = speciesAppearance('mochi');
+  assertEqual(loudCount(plain), 0);
+  assertEqual(plain.markings, 'none');
+});
+
+test('every species renders in every mood, with nothing left unfilled', () => {
+  for (const id of Object.keys(SPECIES)) {
+    for (const mood of MOODS) {
+      const svg = petSvg(id, { mood });
+      assert(svg.length > 400, `${id}/${mood} rendered almost nothing`);
+      assert(!svg.includes('undefined'), `${id}/${mood} contains undefined`);
+      assert(!svg.includes('NaN'), `${id}/${mood} contains NaN`);
+      assert(!/\$\{/.test(svg), `${id}/${mood} has an unfilled template hole`);
+    }
+  }
+});
+
+test('every one of the 144 pets renders in every mood', () => {
+  for (const { h, m } of ALL_ITEMS) {
+    const appearance = appearanceFor(h, m);
+    for (const mood of MOODS) {
+      const svg = petSvg(appearance, { mood });
+      assert(!svg.includes('undefined') && !svg.includes('NaN'), `${timeId(h, m)}/${mood}`);
+    }
+  }
+});
+
+test('an unknown species or trait falls back rather than rendering blank', () => {
+  const svg = petSvg({ ...speciesAppearance('mochi'), eyes: 'nope', eyewear: 'nope', hair: 'nope' });
+  assert(svg.length > 400 && !svg.includes('undefined'));
+  assertEqual(speciesAppearance('nope').species, 'mochi');
+});
+
+test('the blink hook survives on every eye style', () => {
+  // style.css animates `.pet-eye`; an eye style that dropped the class would stop blinking.
+  for (const id of Object.keys(SPECIES)) {
+    assert(petSvg(id, { mood: 'content' }).includes('class="pet-eye"'), `${id} lost its blink hook`);
+  }
 });
 
 /* -------------------------------------------------------- run and report */

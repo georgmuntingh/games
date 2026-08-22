@@ -19,7 +19,17 @@ import { TIERS, tierItems, tierMastery } from './curriculum.js';
 import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
 import { createItem, nextItem, refreshTier, review } from './srs.js';
 import * as session from './session.js';
-import { collarClock, eggSvg, moodOf, petName, petSvg, speciesFor, SPECIES } from './pets.js';
+import {
+  appearanceFor,
+  collarClock,
+  eggSvg,
+  moodOf,
+  petName,
+  petSvg,
+  speciesAppearance,
+  speciesFor,
+  SPECIES,
+} from './pets.js';
 import { createSaver, freshState, load, clear, touchDay } from './store.js';
 import { audio } from './audio.js';
 import { buzz, confetti, flyHeart, pop, reduceMotion, setHaptics, wiggle } from './juice.js';
@@ -317,8 +327,8 @@ function promptFor(item) {
 function renderPetStage(item, mood) {
   const markup =
     item.hatchedAt === null
-      ? eggSvg(item.species, { title: t('zoo.eggTitle') })
-      : petSvg(item.species, { mood, title: escape(petName(item, t.lang)) });
+      ? eggSvg(appearanceFor(item.h, item.m).species, { title: t('zoo.eggTitle') })
+      : petSvg(appearanceFor(item.h, item.m), { mood, title: escape(petName(item, t.lang)) });
   el.petStage.innerHTML = markup;
   const pet = el.petStage.querySelector('.pet');
   pet.classList.add('breathe');
@@ -528,9 +538,12 @@ function renderNapPets() {
   const sleepers = Object.values(state.items)
     .filter((item) => item.hatchedAt !== null)
     .slice(-3);
-  const shown = sleepers.length ? sleepers : [{ species: 'mochi' }, { species: 'bloop' }, { species: 'pip' }];
+  // Before anything has hatched the nap card still needs someone asleep on it.
+  const shown = sleepers.length ? sleepers : [{ h: 1, m: 0 }, { h: 2, m: 0 }, { h: 3, m: 0 }];
   el.napPets.innerHTML = shown
-    .map((item) => petSvg(item.species, { mood: 'sleep', title: t('nap.sleeping') }))
+    .map((item) =>
+      petSvg(appearanceFor(item.h, item.m), { mood: 'sleep', title: t('nap.sleeping') })
+    )
     .join('');
 }
 
@@ -598,8 +611,8 @@ function renderZoo() {
       const isEgg = item.hatchedAt === null;
       const mood = moodOf(item, at, { napping });
       const art = isEgg
-        ? eggSvg(item.species, { title: t('zoo.eggTitle') })
-        : petSvg(item.species, { mood, title: escape(petName(item, t.lang)) });
+        ? eggSvg(appearanceFor(item.h, item.m).species, { title: t('zoo.eggTitle') })
+        : petSvg(appearanceFor(item.h, item.m), { mood, title: escape(petName(item, t.lang)) });
       const flag = isEgg
         ? `${'●'.repeat(item.correctStreak)}${'○'.repeat(Math.max(0, 3 - item.correctStreak))}`
         : mood === 'hungry'
@@ -711,7 +724,9 @@ async function showUnlock(tier) {
     .map((time) => speciesFor(time.h, time.m))
     .filter((s, i, all) => all.indexOf(s) === i)
     .slice(0, 4);
-  el.unlockPets.innerHTML = species.map((s) => petSvg(s, { mood: 'happy' })).join('');
+  el.unlockPets.innerHTML = species
+    .map((s) => petSvg(speciesAppearance(s), { mood: 'happy' }))
+    .join('');
   el.unlockTitle.textContent = t('unlock.title');
   el.unlockCopy.textContent = t('unlock.copy', {
     tier: t(`tier.${spec.id}.name`),
