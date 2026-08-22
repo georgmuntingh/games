@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Pet Zoo</title>
+    <script type="module" crossorigin src="/games/pr-previews/pr-25/assets/games/pet-zoo-W-aDOxQh.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-25/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-25/assets/store-D-KNIzc8.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-25/assets/pet-zoo-CdyUTMVw.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-25/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <div id="sky" class="sky" aria-hidden="true"></div>
+    <a class="back-link" href="../../">← Back to games</a>
+
+    <main>
+      <header class="zoo-bar">
+        <h1 id="title">Pet Zoo</h1>
+        <nav class="tabs" aria-label="Scenes">
+          <button id="tab-play" type="button" class="tab is-on" aria-pressed="true">Feed</button>
+          <button id="tab-zoo" type="button" class="tab" aria-pressed="false">
+            Zoo <span id="zoo-badge" class="badge" hidden>0</span>
+          </button>
+          <button id="sound" type="button" class="icon-btn" aria-pressed="true" aria-label="Sound on">
+            🔊
+          </button>
+        </nav>
+      </header>
+
+      <!-- ---------------------------------------------------------- feeding -->
+      <section id="play-scene" class="scene">
+        <div class="prompt-card">
+          <div id="pet-stage" class="pet-stage"></div>
+          <div class="prompt-text">
+            <p id="prompt-line" class="prompt-line">Waking the zoo…</p>
+            <p class="prompt-time">
+              <span id="prompt-digital" class="digital">--:--</span>
+              <span id="prompt-spoken" class="spoken"></span>
+            </p>
+          </div>
+        </div>
+
+        <div class="clock-wrap">
+          <svg
+            id="clock"
+            viewBox="0 0 400 400"
+            role="application"
+            aria-label="Drag the clock hands to set the time"
+          ></svg>
+        </div>
+
+        <p id="feedback" class="feedback" aria-live="polite"></p>
+        <button id="submit" type="button" class="big-btn">Feed!</button>
+      </section>
+
+      <!-- ------------------------------------------------------------- nap -->
+      <section id="nap-scene" class="scene" hidden>
+        <div class="nap-card">
+          <div id="nap-pets" class="nap-pets"></div>
+          <h2>Pets are sleeping!</h2>
+          <p class="nap-copy">
+            That was a good session. Everyone is having a nap — you can still visit them
+            in the zoo.
+          </p>
+          <p class="nap-count">Waking up in <span id="nap-timer">2:00</span></p>
+          <button id="wake" type="button" class="big-btn" disabled>Wake the pets</button>
+          <button id="nap-to-zoo" type="button" class="ghost-btn">Visit the zoo</button>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------- zoo -->
+      <section id="zoo-scene" class="scene" hidden>
+        <p id="zoo-empty" class="zoo-empty" hidden>
+          No pets yet! Feed the clock a few times and your first egg will hatch.
+        </p>
+        <div id="zoo-grid" class="zoo-grid"></div>
+      </section>
+
+      <details class="how-to">
+        <summary>How to play</summary>
+        <ul>
+          <li>A pet tells you when it eats. Drag the clock hands to that time.</li>
+          <li>
+            The <b>long thin hand</b> is the minutes — it jumps five minutes at a time.
+            The <b>short fat hand</b> is the hour.
+          </li>
+          <li>
+            Watch the short hand creep along as you move the long one. At quarter past
+            four it has already left the 4 — that is how a real clock works.
+          </li>
+          <li>Get one right three times and its egg hatches into a pet of your own.</li>
+          <li>
+            After a few minutes the pets get sleepy and the game stops. You can still
+            wander the zoo while they nap.
+          </li>
+          <li class="grown-up-hint">Grown-ups: press and hold the title for progress.</li>
+        </ul>
+      </details>
+    </main>
+
+    <!-- ------------------------------------------------------- overlays -->
+    <div id="unlock-overlay" class="overlay" hidden>
+      <div class="overlay-card">
+        <div id="unlock-pets" class="unlock-pets"></div>
+        <h2 id="unlock-title">New pets!</h2>
+        <p id="unlock-copy"></p>
+        <button id="unlock-close" type="button" class="big-btn">Let's go</button>
+      </div>
+    </div>
+
+    <div id="grownups-overlay" class="overlay" hidden>
+      <div class="overlay-card grownups">
+        <h2>Progress</h2>
+        <dl id="grownups-stats" class="stats"></dl>
+        <div id="grownups-tiers" class="tier-bars"></div>
+        <p class="fine-print">
+          Times are scheduled with a spaced-repetition algorithm: each one comes back just
+          as it is about to be forgotten. Everything is stored in this browser only.
+        </p>
+        <div class="btn-row">
+          <button id="grownups-close" type="button" class="big-btn">Close</button>
+          <button id="grownups-reset" type="button" class="ghost-btn danger">
+            Start over
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="fx" class="fx-layer" aria-hidden="true"></div>
+
+  </body>
+</html>
