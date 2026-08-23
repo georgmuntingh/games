@@ -37,9 +37,11 @@ export function svgEl(tag, attrs = {}, text) {
  * A burst of paper from the middle of `origin`, drawn as absolutely-positioned divs in
  * `layer` and driven by one rAF loop that cleans up after itself. `power` scales both the
  * count and the spread, so a streak can visibly escalate; `colors` lets a burst borrow the
- * colours of whatever it came out of — crumbs off a berry should be berry-coloured.
+ * colours of whatever it came out of — crumbs off a berry should be berry-coloured. `round` is
+ * the share of bits that come out as discs: paper is a mix, but shell shards are all edges, so a
+ * burst of broken egg passes 0.
  */
-export function confetti(origin, layer, { power = 1, colors = CONFETTI } = {}) {
+export function confetti(origin, layer, { power = 1, colors = CONFETTI, round = 0.4 } = {}) {
   if (!origin || !layer || reduceMotion()) return;
   const box = origin.getBoundingClientRect();
   const host = layer.getBoundingClientRect();
@@ -52,7 +54,7 @@ export function confetti(origin, layer, { power = 1, colors = CONFETTI } = {}) {
     el.className = 'confetti-bit';
     const palette = colors.length ? colors : CONFETTI;
     el.style.background = palette[Math.floor(Math.random() * palette.length)];
-    if (Math.random() < 0.4) el.style.borderRadius = '50%';
+    if (Math.random() < round) el.style.borderRadius = '50%';
     layer.appendChild(el);
     const angle = Math.random() * Math.PI * 2;
     const speed = (2.6 + Math.random() * 4.2) * power;
@@ -143,6 +145,61 @@ export function heartBurst(node, layer, { count = 1, spread = 26 } = {}) {
         { transform: `translate(${cx + dx}px, ${cy - rise}px) scale(0.7)`, opacity: 0 },
       ],
       { duration: 780 + Math.random() * 320, easing: 'cubic-bezier(.3,.7,.4,1)' }
+    );
+    anim.onfinish = () => el.remove();
+    anim.oncancel = () => el.remove();
+  }
+}
+
+/**
+ * The magician's poof: a cloud that blooms out of `node`, hangs, and thins away. It exists to be
+ * looked *through* — the pet is swapped in underneath while the cloud is at its thickest, so the
+ * child never sees the egg become the pet, only the pet already standing there as it clears.
+ *
+ * Same DOM-particle idiom as the hearts, and just as optional: with motion off there is no cloud,
+ * and the swap simply happens.
+ */
+export function smokePuff(node, layer, { power = 1, count = 9 } = {}) {
+  if (!node || !layer || reduceMotion()) return;
+  const host = layer.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+  const cx = box.left + box.width / 2 - host.left;
+  const cy = box.top + box.height * 0.55 - host.top;
+  // Everything scales off whatever it is covering, so the same cloud works over the little egg on
+  // the prompt card and over anything larger it is ever asked to hide.
+  const unit = box.width * 0.52;
+  const reach = box.width * 0.3 * power;
+
+  for (let i = 0; i < count; i += 1) {
+    const el = document.createElement('i');
+    el.className = 'smoke-puff';
+    el.style.width = `${unit.toFixed(1)}px`;
+    el.style.height = `${unit.toFixed(1)}px`;
+    el.style.margin = `${(-unit / 2).toFixed(1)}px 0 0 ${(-unit / 2).toFixed(1)}px`;
+    layer.appendChild(el);
+    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.6;
+    const dx = Math.cos(angle) * reach * (0.55 + Math.random() * 0.7);
+    const dy = Math.sin(angle) * reach * (0.4 + Math.random() * 0.5) - reach * 0.35;
+    const size = (0.8 + Math.random() * 0.5) * power;
+    const anim = el.animate(
+      [
+        { transform: `translate(${cx}px, ${cy}px) scale(${0.25 * size})`, opacity: 0 },
+        {
+          transform: `translate(${cx + dx * 0.45}px, ${cy + dy * 0.45}px) scale(${1.15 * size})`,
+          opacity: 0.9,
+          offset: 0.28,
+        },
+        {
+          transform: `translate(${cx + dx}px, ${cy + dy - reach * 0.5}px) scale(${1.8 * size})`,
+          opacity: 0,
+        },
+      ],
+      {
+        duration: 760 + Math.random() * 340,
+        delay: Math.random() * 90,
+        easing: 'cubic-bezier(.2,.7,.4,1)',
+        fill: 'both',
+      }
     );
     anim.onfinish = () => el.remove();
     anim.oncancel = () => el.remove();

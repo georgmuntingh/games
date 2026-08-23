@@ -31,7 +31,10 @@ import {
   DAY_MS,
   EASE_MAX,
   EASE_MIN,
+  crackFor,
+  CRACK_STAGES,
   GRADUATION_STREAK,
+  HATCH_STREAK,
   LEARNING_STEPS,
   MAX_INTERVAL_DAYS,
   MAX_LEARNING,
@@ -96,6 +99,8 @@ import {
   appearanceFor,
   appearanceOf,
   defaultName,
+  EGG_CRACK_MAX,
+  eggSvg,
   isCrowned,
   LOUD_FAMILIES,
   MARKING_IDS,
@@ -526,12 +531,20 @@ test('each correct answer pushes the time further down the queue', () => {
   assertEqual(item.dueStep, 4 + LEARNING_STEPS[2], 'then in eight');
 });
 
-test('three in a row graduates the time and hatches its egg', () => {
+test('four in a row graduates the time and hatches its egg', () => {
   let item = seed();
   let events;
-  for (let i = 1; i <= GRADUATION_STREAK; i += 1) {
+  for (let i = 1; i < HATCH_STREAK; i += 1) {
     ({ item, events } = review(item, { correct: true, ms: 3000, reviewClock: i, now: 5000 }));
+    assert(!events.hatched, `hatched early, on answer ${i}`);
+    assertEqual(item.phase, 'learning', 'an egg stays in learning until it hatches');
   }
+  ({ item, events } = review(item, {
+    correct: true,
+    ms: 3000,
+    reviewClock: HATCH_STREAK,
+    now: 5000,
+  }));
   assertEqual(item.phase, 'graduated');
   assert(events.graduated && events.hatched, 'graduating is what hatching means');
   assertEqual(item.hatchedAt, 5000);
@@ -545,7 +558,7 @@ test('a time only hatches once, however often it is reviewed', () => {
   for (let i = 1; i <= 6; i += 1) {
     const r = review(item, { correct: true, ms: 3000, reviewClock: i, now: 5000 });
     item = r.item;
-    if (i > GRADUATION_STREAK) assert(!r.events.hatched, `hatched twice at review ${i}`);
+    if (i > HATCH_STREAK) assert(!r.events.hatched, `hatched twice at review ${i}`);
   }
 });
 
@@ -559,11 +572,84 @@ test('a wrong answer resets the streak and brings the time straight back', () =>
   assertEqual(item.lapses, 0, 'missing a time you never knew is not a lapse');
 });
 
+describe('srs — the egg cracking open');
+
+test('a crack is earned on every answer but the first, and the last lands before hatching', () => {
+  assertEqual(crackFor(0), 0, 'a fresh egg is smooth');
+  assertEqual(crackFor(1), 0, 'one answer in, still smooth — a crack has to mean something');
+  assertEqual(crackFor(2), 1);
+  assertEqual(crackFor(3), CRACK_STAGES, 'the last crack is the answer before hatching');
+  assertEqual(crackFor(HATCH_STREAK), CRACK_STAGES, 'and it never goes past the last one');
+  assertEqual(crackFor(99), CRACK_STAGES);
+});
+
+test('an egg breaks one stage at a time on its way to hatching', () => {
+  let item = seed();
+  const seen = [];
+  for (let i = 1; i <= HATCH_STREAK; i += 1) {
+    const r = review(item, { correct: true, ms: 3000, reviewClock: i, now: 5000 });
+    item = r.item;
+    seen.push(r.events.cracked);
+  }
+  assertEqual(seen.join(','), '0,1,2,0', 'smooth, one crack, two cracks, then the hatch');
+  assertEqual(item.cracks, CRACK_STAGES);
+});
+
+test('a wrong answer restarts the run to hatching but never un-breaks the shell', () => {
+  let item = seed();
+  item = review(item, { correct: true, ms: 3000, reviewClock: 1, now: 0 }).item;
+  item = review(item, { correct: true, ms: 3000, reviewClock: 2, now: 0 }).item;
+  item = review(item, { correct: true, ms: 3000, reviewClock: 3, now: 0 }).item;
+  assertEqual(item.cracks, 2, 'three right in a row is two cracks');
+
+  item = review(item, { correct: false, ms: 9000, reviewClock: 4, now: 0 }).item;
+  assertEqual(item.correctStreak, 0, 'the run to hatching starts again');
+  assertEqual(item.cracks, 2, 'but a shell that has broken stays broken');
+  assertEqual(item.hatchedAt, null, 'and it is still an egg');
+
+  const r = review(item, { correct: true, ms: 3000, reviewClock: 5, now: 0 });
+  assertEqual(r.events.cracked, 0, 'a crack already earned is not re-announced');
+  assertEqual(r.item.cracks, 2);
+});
+
+test('the crack event fires only on the way up, and never after hatching', () => {
+  let item = seed();
+  for (let i = 1; i <= HATCH_STREAK; i += 1) {
+    item = review(item, { correct: true, ms: 3000, reviewClock: i, now: 5000 }).item;
+  }
+  assert(item.hatchedAt !== null, 'it hatched');
+  for (let i = 1; i <= 4; i += 1) {
+    const r = review(item, { correct: true, ms: 3000, reviewClock: 10 + i, now: DAY_MS * i });
+    item = r.item;
+    assertEqual(r.events.cracked, 0, `a hatched pet cracked again at review ${i}`);
+  }
+});
+
+test('a lapsed pet re-graduates at the usual bar, not the hatching one', () => {
+  let item = graduated();
+  item = review(item, { correct: false, ms: 9000, reviewClock: 20, now: DAY_MS }).item;
+  assertEqual(item.phase, 'learning', 'a miss sends a graduated pet back to learning');
+  assertEqual(item.lapses, 1);
+
+  let events;
+  for (let i = 1; i <= GRADUATION_STREAK; i += 1) {
+    ({ item, events } = review(item, {
+      correct: true,
+      ms: 3000,
+      reviewClock: 20 + i,
+      now: DAY_MS,
+    }));
+  }
+  assertEqual(item.phase, 'graduated', 'three is enough for a pet that already exists');
+  assert(events.graduated, 'it graduated again');
+  assert(!events.hatched, 'and it did not hatch a second time');
+});
+
 describe('srs — graduated reviews');
 
 const graduated = () => {
   let item = seed();
-  for (let i = 1; i <= GRADUATION_STREAK; i += 1) {
+  for (let i = 1; i <= HATCH_STREAK; i += 1) {
     item = review(item, { correct: true, ms: 3000, reviewClock: i, now: 0 }).item;
   }
   return item;
@@ -1348,7 +1434,7 @@ test('form never decreases as feeds accumulate', () => {
 
 test('hatching is not reported as an evolution', () => {
   let item = seed();
-  for (let i = 1; i <= GRADUATION_STREAK; i += 1) {
+  for (let i = 1; i <= HATCH_STREAK; i += 1) {
     const r = review(item, { correct: true, ms: 3000, reviewClock: i, now: 0 });
     item = r.item;
     if (r.events.hatched) assertEqual(r.events.evolved, 0, 'the hatch is its own beat');
@@ -1524,6 +1610,36 @@ test('appearanceOf reads the form straight off the item', () => {
   assertEqual(at(FORM_THRESHOLDS[2]).form, 3);
 });
 
+describe('the egg art');
+
+test('the shell shows exactly as many cracks as it has earned', () => {
+  const count = (markup) => (markup.match(/class="egg-crack /g) ?? []).length;
+  assertEqual(count(eggSvg('mochi')), 0, 'a fresh egg is smooth');
+  assertEqual(count(eggSvg('mochi', { cracks: 0 })), 0);
+  assertEqual(count(eggSvg('mochi', { cracks: 1 })), 1);
+  assertEqual(count(eggSvg('mochi', { cracks: 2 })), 2);
+  assertEqual(count(eggSvg('mochi', { cracks: EGG_CRACK_MAX })), EGG_CRACK_MAX);
+  assertEqual(count(eggSvg('mochi', { cracks: 99 })), EGG_CRACK_MAX, 'and never more than that');
+  assertEqual(count(eggSvg('mochi', { cracks: -3 })), 0, 'nor fewer than none');
+});
+
+test('every crack level is reachable from a stored egg', () => {
+  assert(CRACK_STAGES < EGG_CRACK_MAX, 'the last crack belongs to the hatch, not to the save');
+  for (let cracks = 0; cracks <= CRACK_STAGES; cracks += 1) {
+    assert(
+      eggSvg('mochi', { cracks }).includes(`egg-cracks-${cracks}`),
+      `level ${cracks} does not label itself`
+    );
+  }
+});
+
+test('cracks are drawn in a fixed order, so a second egg breaks the way the first did', () => {
+  const two = eggSvg('mochi', { cracks: 2 });
+  assert(two.includes('egg-crack-1') && two.includes('egg-crack-2'));
+  assert(!two.includes('egg-crack-3'), 'the hatch-only fracture is not shown early');
+  assert(eggSvg('fizz', { cracks: 1 }).includes('egg-crack-1'), 'the first crack is always first');
+});
+
 describe('evolution — saves written before forms existed');
 
 test('an old pet loads at the form it had already earned', () => {
@@ -1538,8 +1654,26 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { h: 4, m: 15, reps: 0, feeds: 5, hatchedAt: 1 };
+  const item = { h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
+});
+
+test('an egg from a save written before the shell could break comes back part-broken', () => {
+  const migrated = migrateItems({
+    '4:15': { h: 4, m: 15, reps: 0, correctStreak: 3, hatchedAt: null },
+    '1:00': { h: 1, m: 0, reps: 0, correctStreak: 1, hatchedAt: null },
+    '2:00': { h: 2, m: 0, reps: 0, hatchedAt: null },
+  });
+  assertEqual(migrated['4:15'].cracks, CRACK_STAGES, 'an egg one answer away looks it');
+  assertEqual(migrated['1:00'].cracks, 0, 'one answer in is still a smooth shell');
+  assertEqual(migrated['2:00'].cracks, 0, 'and a streak that was never written is none');
+});
+
+test('migration backfills a missing crack count without touching one that is already there', () => {
+  const migrated = migrateItems({
+    '4:15': { h: 4, m: 15, feeds: 2, cracks: 1, correctStreak: 3, hatchedAt: null },
+  });
+  assertEqual(migrated['4:15'].cracks, 1, 'the stored count wins over the derived one');
 });
 
 test('migration survives a missing or empty item map', () => {
@@ -1560,7 +1694,11 @@ function playedState(now = 1000) {
     hatchedAt: now,
     name: 'Blåbær',
   };
-  state.items['9:30'] = createItem({ h: 9, m: 30, species: 'fizz', reviewClock: 0 });
+  state.items['9:30'] = {
+    ...createItem({ h: 9, m: 30, species: 'fizz', reviewClock: 0 }),
+    correctStreak: 3,
+    cracks: 2,
+  };
   state.reviewClock = 12;
   state.tier = 2;
   state.stats = { totalAnswered: 40, totalCorrect: 31, streak: 2, bestStreak: 9, daysPlayed: ['2026-08-20'] };
@@ -1600,6 +1738,7 @@ test('progress survives the round trip through a file', () => {
   assertEqual(Object.keys(landed.items).length, 2);
   assertEqual(landed.items['4:15'].feeds, 4);
   assertEqual(landed.items['4:15'].phase, 'graduated');
+  assertEqual(landed.items['9:30'].cracks, 2, 'a half-broken egg arrives half-broken');
 });
 
 test('a code round trip keeps a Norwegian pet name intact', () => {

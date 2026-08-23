@@ -101,7 +101,10 @@ export function createHabitatScene({ host, fx }) {
   function petMarkup(mood) {
     if (!item) return '';
     return item.hatchedAt === null
-      ? eggSvg(appearanceOf(item).species, { title: pet?.title ?? '' })
+      ? eggSvg(appearanceOf(item).species, {
+          cracks: item.cracks ?? 0,
+          title: pet?.title ?? '',
+        })
       : petSvg(appearanceOf(item), { mood, title: pet?.title ?? '' });
   }
 

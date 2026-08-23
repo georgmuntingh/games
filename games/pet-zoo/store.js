@@ -7,6 +7,7 @@
 
 import { DEFAULT_LANGUAGE } from './i18n.js';
 import { PLAY_MINUTES_DEFAULT } from './session.js';
+import { crackFor } from './srs.js';
 
 export const STORAGE_KEY = 'pet-zoo/v1';
 export const VERSION = 1;
@@ -61,17 +62,23 @@ export function load(now, storage = safeStorage()) {
 }
 
 /**
- * Bring saved pets up to the current item shape. Saves written before forms existed have
- * no `feeds`, so it is reconstructed from `reps` — a pet that was already well known
- * simply appears at the form it had earned, rather than starting again from a baby.
+ * Bring saved pets up to the current item shape. Each field is backfilled independently, because
+ * a save can be old in one way and current in another.
+ *
+ * `feeds` predates forms and is reconstructed from `reps` — a pet that was already well known
+ * simply appears at the form it had earned, rather than starting again from a baby. `cracks`
+ * predates the cracking egg and is reconstructed from the streak the egg had already built, so an
+ * egg mid-way through a save from an older build comes back visibly part-broken.
  */
 export function migrateItems(items) {
   const out = {};
   for (const [id, item] of Object.entries(items ?? {})) {
-    out[id] =
-      typeof item?.feeds === 'number'
-        ? item
-        : { ...item, feeds: item?.reps || (item?.hatchedAt ? 1 : 0) };
+    const feeds =
+      typeof item?.feeds === 'number' ? item.feeds : item?.reps || (item?.hatchedAt ? 1 : 0);
+    const cracks =
+      typeof item?.cracks === 'number' ? item.cracks : crackFor(item?.correctStreak ?? 0);
+    const current = typeof item?.feeds === 'number' && typeof item?.cracks === 'number';
+    out[id] = current ? item : { ...item, feeds, cracks };
   }
   return out;
 }
