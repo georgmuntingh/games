@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pet Zoo</title>
-    <script type="module" crossorigin src="/games/assets/games/pet-zoo-BbMCiiLM.js"></script>
+    <script type="module" crossorigin src="/games/assets/games/pet-zoo-BzqyhCUi.js"></script>
     <link rel="modulepreload" crossorigin href="/games/assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="/games/assets/transfer-DVkRMXVO.js">
-    <link rel="stylesheet" crossorigin href="/games/assets/pet-zoo-Cm1AUqO9.css">
+    <link rel="modulepreload" crossorigin href="/games/assets/habitat-3x_PzLBJ.js">
+    <link rel="stylesheet" crossorigin href="/games/assets/pet-zoo-aasOP_5k.css">
     <link rel="stylesheet" crossorigin href="/games/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -78,6 +78,37 @@
           <button id="wake" type="button" class="big-btn" data-i18n="nap.wake" disabled>Vekk dyrene</button>
           <button id="nap-to-zoo" type="button" class="ghost-btn" data-i18n="nap.visit">Besøk dyrehagen</button>
         </div>
+      </section>
+
+      <!-- --------------------------------------------------------- habitat -->
+      <section id="habitat-scene" class="scene scene-full" hidden>
+        <div class="hab-bar">
+          <button
+            id="habitat-back"
+            type="button"
+            class="icon-btn hab-back-btn"
+            data-i18n-aria-label="habitat.back"
+            aria-label="Tilbake til dyrehagen"
+          >
+            ←
+          </button>
+          <div class="hab-who">
+            <span id="habitat-name" class="hab-name"></span>
+            <span id="habitat-rank" class="hab-rank"></span>
+          </div>
+          <span id="habitat-time" class="hab-time"></span>
+          <button
+            id="habitat-rename"
+            type="button"
+            class="icon-btn"
+            data-i18n-aria-label="habitat.rename"
+            aria-label="Gi dyret et nytt navn"
+          >
+            ✏️
+          </button>
+        </div>
+        <div id="habitat-host" class="hab-host"></div>
+        <p id="habitat-note" class="hab-note" aria-live="polite"></p>
       </section>
 
       <!-- ------------------------------------------------------------- zoo -->
