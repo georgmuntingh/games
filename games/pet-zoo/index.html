@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pet Zoo</title>
-    <script type="module" crossorigin src="/games/assets/games/pet-zoo-DYOdNaG3.js"></script>
+    <script type="module" crossorigin src="/games/assets/games/pet-zoo-BbMCiiLM.js"></script>
     <link rel="modulepreload" crossorigin href="/games/assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="/games/assets/store-DvlsuJpj.js">
-    <link rel="stylesheet" crossorigin href="/games/assets/pet-zoo-p0YDtPk7.css">
+    <link rel="modulepreload" crossorigin href="/games/assets/transfer-DVkRMXVO.js">
+    <link rel="stylesheet" crossorigin href="/games/assets/pet-zoo-Cm1AUqO9.css">
     <link rel="stylesheet" crossorigin href="/games/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -135,6 +135,19 @@
         </div>
 
         <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="show-digital" data-i18n="settings.digital">
+              Vis digital tid
+            </label>
+            <input id="show-digital" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.digitalHelp">
+            Av til vanlig. Når den er av, sier dyrene måltidet sitt bare med ord, så urskiva
+            er eneste stedet å lese det.
+          </p>
+        </div>
+
+        <div class="setting">
           <div class="setting-head">
             <label class="setting-label" for="play-minutes" data-i18n="settings.playTime">
               Spilletid
@@ -153,6 +166,31 @@
           <p class="setting-help" data-i18n="settings.playTimeHelp">
             Hvor lenge en økt varer før dyrene må sove. Korte økter funker best — tre til
             fem minutter.
+          </p>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label" data-i18n="settings.transfer">Flytt til en annen enhet</span>
+          <div class="setting-actions">
+            <button id="export-file" type="button" class="ghost-btn" data-i18n="transfer.exportFile">
+              Lagre fil
+            </button>
+            <button id="export-code" type="button" class="ghost-btn" data-i18n="transfer.copyCode">
+              Kopier kode
+            </button>
+            <button id="import-file" type="button" class="ghost-btn" data-i18n="transfer.importFile">
+              Åpne fil …
+            </button>
+            <button id="import-code" type="button" class="ghost-btn" data-i18n="transfer.pasteCode">
+              Lim inn kode
+            </button>
+          </div>
+          <input id="import-input" type="file" accept="application/json,.json,text/plain,.txt" hidden />
+          <p id="transfer-status" class="setting-status" aria-live="polite"></p>
+          <p class="setting-help" data-i18n="settings.transferHelp">
+            Lagre dyrehagen som en fil, eller kopier den som en kode du kan sende i en
+            melding. Åpner du en av delene på en annen enhet, blir alle dyrene med.
+            Dyrehagen som allerede er der, blir erstattet.
           </p>
         </div>
 
