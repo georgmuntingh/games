@@ -23,11 +23,23 @@ export function buzz(pattern) {
 const CONFETTI = ['#ff9ec0', '#ffd166', '#7bd88f', '#6bb8ff', '#c48cff', '#ff8a75'];
 
 /**
+ * An SVG element with attributes. Lives here rather than in clock.js because clock.js is
+ * pure and tested as pure; this module is already the one that is allowed to touch the DOM.
+ */
+export function svgEl(tag, attrs = {}, text) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/**
  * A burst of paper from the middle of `origin`, drawn as absolutely-positioned divs in
  * `layer` and driven by one rAF loop that cleans up after itself. `power` scales both the
- * count and the spread, so a streak can visibly escalate.
+ * count and the spread, so a streak can visibly escalate; `colors` lets a burst borrow the
+ * colours of whatever it came out of — crumbs off a berry should be berry-coloured.
  */
-export function confetti(origin, layer, { power = 1 } = {}) {
+export function confetti(origin, layer, { power = 1, colors = CONFETTI } = {}) {
   if (!origin || !layer || reduceMotion()) return;
   const box = origin.getBoundingClientRect();
   const host = layer.getBoundingClientRect();
@@ -38,7 +50,8 @@ export function confetti(origin, layer, { power = 1 } = {}) {
   const bits = Array.from({ length: count }, () => {
     const el = document.createElement('i');
     el.className = 'confetti-bit';
-    el.style.background = CONFETTI[Math.floor(Math.random() * CONFETTI.length)];
+    const palette = colors.length ? colors : CONFETTI;
+    el.style.background = palette[Math.floor(Math.random() * palette.length)];
     if (Math.random() < 0.4) el.style.borderRadius = '50%';
     layer.appendChild(el);
     const angle = Math.random() * Math.PI * 2;
@@ -102,6 +115,38 @@ export function flyHeart(from, to, layer) {
     { duration: 900, easing: 'cubic-bezier(.4,0,.5,1)' }
   );
   anim.onfinish = () => el.remove();
+}
+
+/**
+ * Hearts rising off whatever is being stroked. Same DOM-particle idiom as `flyHeart`, but
+ * anchored to one element and repeatable, because stroking a pet is a thing you keep doing
+ * rather than a thing that happens once.
+ */
+export function heartBurst(node, layer, { count = 1, spread = 26 } = {}) {
+  if (!node || !layer || reduceMotion()) return;
+  const host = layer.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+  const cx = box.left + box.width / 2 - host.left;
+  const cy = box.top + box.height * 0.35 - host.top;
+
+  for (let i = 0; i < count; i += 1) {
+    const el = document.createElement('i');
+    el.className = 'fly-heart heart-mote';
+    el.textContent = '♥';
+    layer.appendChild(el);
+    const dx = (Math.random() - 0.5) * spread;
+    const rise = 44 + Math.random() * 34;
+    const anim = el.animate(
+      [
+        { transform: `translate(${cx}px, ${cy}px) scale(0.3)`, opacity: 0 },
+        { transform: `translate(${cx + dx * 0.6}px, ${cy - rise * 0.55}px) scale(1)`, opacity: 0.95, offset: 0.4 },
+        { transform: `translate(${cx + dx}px, ${cy - rise}px) scale(0.7)`, opacity: 0 },
+      ],
+      { duration: 780 + Math.random() * 320, easing: 'cubic-bezier(.3,.7,.4,1)' }
+    );
+    anim.onfinish = () => el.remove();
+    anim.oncancel = () => el.remove();
+  }
 }
 
 /** A short squash-and-stretch pop — the pet reacting to being fed. */

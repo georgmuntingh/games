@@ -42,8 +42,9 @@ import {
   petCount,
   TransferError,
 } from './transfer.js';
+import { createHabitatScene } from './habitat-scene.js';
 import { audio } from './audio.js';
-import { buzz, confetti, flyHeart, pop, reduceMotion, setHaptics, wiggle } from './juice.js';
+import { buzz, confetti, flyHeart, pop, reduceMotion, setHaptics, svgEl } from './juice.js';
 
 /* ----------------------------------------------------------------- elements */
 
@@ -58,7 +59,6 @@ const escape = (value) =>
   );
 
 const el = {
-  sky: $('sky'),
   title: $('title'),
   tabPlay: $('tab-play'),
   tabZoo: $('tab-zoo'),
@@ -81,6 +81,14 @@ const el = {
   napToZoo: $('nap-to-zoo'),
   zooGrid: $('zoo-grid'),
   zooEmpty: $('zoo-empty'),
+  habitatScene: $('habitat-scene'),
+  habitatHost: $('habitat-host'),
+  habitatBack: $('habitat-back'),
+  habitatName: $('habitat-name'),
+  habitatRank: $('habitat-rank'),
+  habitatTime: $('habitat-time'),
+  habitatRename: $('habitat-rename'),
+  habitatNote: $('habitat-note'),
   unlock: $('unlock-overlay'),
   unlockPets: $('unlock-pets'),
   unlockTitle: $('unlock-title'),
@@ -130,6 +138,10 @@ let dial = { h: 12, m: 0 };
 let lastAskedId = null;
 let locked = true; // true while animating or between questions
 let scene = 'play';
+// Which pet's habitat is open. Kept out of `state` on purpose: standing in a habitat is
+// not progress, so it is not worth persisting and must never end up in a save.
+let habitatId = null;
+let habitatNapping = false;
 
 /* -------------------------------------------------------------------- clock */
 
@@ -139,13 +151,6 @@ const R = 180;
 const HOUR_LEN = 100;
 const MINUTE_LEN = 150;
 const TAIL = 14;
-
-const svgEl = (tag, attrs = {}, text) => {
-  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
-  if (text !== undefined) node.textContent = text;
-  return node;
-};
 
 let hands = null;
 
@@ -614,12 +619,21 @@ setInterval(() => {
   const tick = now();
   const napping = session.isNapping(state.session, tick);
 
-  el.sky.style.setProperty(
+  document.documentElement.style.setProperty(
     '--dusk',
     napping
       ? '1'
       : String(session.isRunning(state.session) ? session.dayProgress(state.session, tick, limits) : 0)
   );
+
+  // A session that ends while the child is standing in a habitat puts *that* pet to sleep
+  // in front of them, rather than yanking them out to a nap card they did not ask for.
+  // Only on the flip: this runs twice a second, and the bar redraws a collar clock.
+  if (scene === 'habitat' && napping !== habitatNapping) {
+    habitatNapping = napping;
+    habitat.setNapping(napping);
+    if (habitatId && state.items[habitatId]) renderHabitatBar(state.items[habitatId]);
+  }
 
   if (napping) {
     el.napTimer.textContent = session.formatCountdown(session.napRemaining(state.session, tick));
@@ -634,7 +648,8 @@ setInterval(() => {
     !napping &&
     session.isRunning(state.session) &&
     session.capReached(state.session, tick, limits) &&
-    scene !== 'nap'
+    scene !== 'nap' &&
+    scene !== 'habitat'
   ) {
     startNap();
   }
@@ -696,7 +711,7 @@ function renderZoo() {
   }
 }
 
-// Free play: tapping a pet does nothing but make it happy, and a long press renames it.
+// Free play: tapping a pet takes you into its home, and a long press renames it from here.
 // No questions and no scoring, deliberately available during the nap so the reward loop
 // survives the break.
 let penHold = null;
@@ -720,9 +735,9 @@ for (const evt of ['pointerup', 'pointercancel', 'pointerleave']) {
 el.zooGrid.addEventListener('click', (event) => {
   const pen = event.target.closest('.pen');
   if (!pen || renamed) return;
-  wiggle(pen.querySelector('.pet-inner'));
   audio.play('purr');
   buzz(10);
+  openHabitat(pen.dataset.id);
 });
 
 function renamePet(id) {
@@ -736,17 +751,96 @@ function renamePet(id) {
   renderZoo();
 }
 
+/* ----------------------------------------------------------------- habitat */
+
+const habitat = createHabitatScene({ host: el.habitatHost, fx: el.fx });
+habitat.attach(el.habitatHost);
+
+/** The name, rank and collar clock above the scene — everything the habitat says in words. */
+function renderHabitatBar(item) {
+  const isEgg = item.hatchedAt === null;
+  const name = isEgg
+    ? t('zoo.egg', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
+    : petName(item, t.lang);
+  el.habitatName.textContent = name;
+  el.habitatRank.textContent = !isEgg && formFor(item.feeds ?? 0) >= 2 ? formLabel(item) : '';
+  el.habitatTime.innerHTML = `${collarClock(item.h, item.m, { size: 28 })}${
+    digitalOn() ? `<span class="hab-digits">${timeId(item.h, item.m)}</span>` : ''
+  }`;
+  el.habitatRename.hidden = isEgg;
+
+  const napping = session.isNapping(state.session, now());
+  el.habitatNote.textContent = isEgg
+    ? t('habitat.eggHint')
+    : napping
+      ? t('habitat.sleeping', { name })
+      : t('habitat.hint', { name });
+  return { name, isEgg };
+}
+
+/** Open a pet's home. Free play only — nothing in here writes to the save. */
+function openHabitat(id) {
+  const item = state.items[id];
+  if (!item) return;
+  habitatId = id;
+  habitatNapping = session.isNapping(state.session, now());
+  const { name, isEgg } = renderHabitatBar(item);
+  habitat.open(item, {
+    napping: habitatNapping,
+    label: isEgg
+      ? t('habitat.eggAria', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
+      : t('habitat.aria', { name }),
+    title: escape(name),
+  });
+  showScene('habitat');
+}
+
+function closeHabitat() {
+  habitat.close();
+  habitatId = null;
+}
+
+/** Repaint the open habitat from state — after a rename, or a language or format change. */
+function refreshHabitat() {
+  if (scene !== 'habitat' || !habitatId) return;
+  const item = state.items[habitatId];
+  if (!item) {
+    closeHabitat();
+    showScene('zoo');
+    return;
+  }
+  const { name } = renderHabitatBar(item);
+  habitat.setTitle(escape(name));
+}
+
+el.habitatBack.addEventListener('click', () => {
+  closeHabitat();
+  showScene('zoo');
+});
+
+el.habitatRename.addEventListener('click', () => {
+  if (!habitatId) return;
+  renamePet(habitatId);
+  refreshHabitat();
+});
+
 /* ------------------------------------------------------------------- scenes */
 
 function showScene(name) {
   scene = name;
+  // A habitat is somewhere you *are*, not a tab: while one is open the game's own chrome
+  // gets out of the way so the pet has the whole screen.
+  if (name !== 'habitat' && habitatId) closeHabitat();
   el.playScene.hidden = name !== 'play';
   el.napScene.hidden = name !== 'nap';
   el.zooScene.hidden = name !== 'zoo';
-  el.tabPlay.classList.toggle('is-on', name !== 'zoo');
-  el.tabZoo.classList.toggle('is-on', name === 'zoo');
-  el.tabPlay.setAttribute('aria-pressed', String(name !== 'zoo'));
-  el.tabZoo.setAttribute('aria-pressed', String(name === 'zoo'));
+  el.habitatScene.hidden = name !== 'habitat';
+  document.body.classList.toggle('in-habitat', name === 'habitat');
+  const zooish = name === 'zoo' || name === 'habitat';
+  el.tabPlay.classList.toggle('is-on', !zooish);
+  el.tabZoo.classList.toggle('is-on', zooish);
+  el.tabPlay.setAttribute('aria-pressed', String(!zooish));
+  el.tabZoo.setAttribute('aria-pressed', String(zooish));
   if (name === 'zoo') renderZoo();
   renderZooBadge();
 }
@@ -895,6 +989,7 @@ function applyLanguage() {
   if (current) renderPrompt(state.items[current.id]);
   if (scene === 'zoo') renderZoo();
   if (scene === 'nap') renderNapPets();
+  refreshHabitat();
   if (!el.grownups.hidden) renderGrownups();
 }
 
@@ -903,6 +998,7 @@ function applyLanguage() {
 function applyDigital() {
   if (current) renderPrompt(state.items[current.id]);
   if (scene === 'zoo') renderZoo();
+  refreshHabitat();
 }
 
 function buildLanguageOptions() {

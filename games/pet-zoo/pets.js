@@ -74,7 +74,9 @@ const TIER_SPECIES = [
 
 // djb2 — any stable hash will do; what matters is that 4:15 is always the same creature
 // with the same name, so the child ends up remembering "Vaffel eats at quarter past four".
-function hash(str) {
+// Exported because a habitat needs stable per-pet choices of its own, and two hashes of
+// the same string in two files is one refactor away from being two different hashes.
+export function hash(str) {
   let h = 5381;
   for (let i = 0; i < str.length; i += 1) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
   return h;
@@ -99,8 +101,7 @@ export const defaultName = (h, m, lang = DEFAULT_LANGUAGE) => {
   // species can share a name — the case where a repeat is actually confusing, since they
   // are the ones sitting next to each other looking alike.
   const offset = hash(`n${species}`) % pool.length;
-  const index = Math.max(0, timesOfSpecies(species).indexOf(timeId(h, m)));
-  return pool[(offset + index) % pool.length];
+  return pool[(offset + traitIndexFor(h, m)) % pool.length];
 };
 
 export const petName = (item, lang = DEFAULT_LANGUAGE) =>
@@ -191,6 +192,15 @@ for (const item of [...ALL_ITEMS].sort((a, b) => a.h - b.h || a.m - b.m)) {
 
 export const timesOfSpecies = (speciesId) => SPECIES_TIMES.get(speciesId) ?? [];
 
+/**
+ * A pet's position among the others of its own species — its trait index. Unique within
+ * the species by construction and stable between sessions, because it comes from the
+ * curriculum rather than from the order pets were hatched. Appearance, name and habitat
+ * all vary along it, so they vary together.
+ */
+export const traitIndexFor = (h, m) =>
+  Math.max(0, timesOfSpecies(speciesFor(h, m)).indexOf(timeId(h, m)));
+
 /** The look of a pet as its item currently stands, at whichever form it has earned. */
 export const appearanceOf = (item) =>
   appearanceFor(item.h, item.m, formFor(item.feeds ?? 0) || 1);
@@ -205,7 +215,7 @@ export const appearanceOf = (item) =>
  */
 export function appearanceFor(h, m, form = 1) {
   const species = speciesFor(h, m);
-  const index = Math.max(0, timesOfSpecies(species).indexOf(timeId(h, m)));
+  const index = traitIndexFor(h, m);
   const list = validLoudFor(species);
   return {
     ...speciesAppearance(species, form),
