@@ -32,6 +32,16 @@ import {
 } from './pets.js';
 import { formFor } from './srs.js';
 import { createSaver, freshState, load, clear, touchDay } from './store.js';
+import {
+  applyImport,
+  encodeCode,
+  exportFilename,
+  exportPayload,
+  parseTransfer,
+  payloadToJson,
+  petCount,
+  TransferError,
+} from './transfer.js';
 import { audio } from './audio.js';
 import { buzz, confetti, flyHeart, pop, reduceMotion, setHaptics, wiggle } from './juice.js';
 
@@ -78,8 +88,15 @@ const el = {
   unlockClose: $('unlock-close'),
   settings: $('settings-overlay'),
   language: $('language'),
+  showDigital: $('show-digital'),
   playMinutes: $('play-minutes'),
   playMinutesValue: $('play-minutes-value'),
+  exportFile: $('export-file'),
+  exportCode: $('export-code'),
+  importFile: $('import-file'),
+  importCode: $('import-code'),
+  importInput: $('import-input'),
+  transferStatus: $('transfer-status'),
   settingsClose: $('settings-close'),
   grownups: $('grownups-overlay'),
   grownupsStats: $('grownups-stats'),
@@ -101,6 +118,10 @@ const save = () => saver.save(state);
 // changes, so nothing downstream has to know that a setting can move.
 let t = translator(state.settings.language);
 let limits = session.limitsFor(state.settings.playMinutes);
+
+// Whether a time may be written as digits. Read at every render rather than cached, so
+// the setting has exactly one home and turning it over repaints from the same state.
+const digitalOn = () => state.settings.showDigital;
 
 // The question in flight. `dial` is what the child has set the hands to; `reversals`
 // counts how often they changed direction mid-drag, which feeds the SM-2 quality score.
@@ -358,9 +379,13 @@ function scatterHands(target) {
 
 function renderPrompt(item) {
   const prompt = promptFor(item);
+  const digits = digitalOn();
   el.promptLine.textContent = prompt.line;
   el.promptDigital.textContent = timeId(item.h, item.m);
+  el.promptDigital.hidden = !digits;
   el.promptSpoken.textContent = t.spoken(item.h, item.m);
+  // Without the digits the phrase is the whole question, so it takes their weight.
+  el.promptSpoken.classList.toggle('is-lead', !digits);
   el.submit.textContent = prompt.button;
 }
 
@@ -388,7 +413,9 @@ const cheer = () => t(`cheer.${1 + Math.floor(Math.random() * 5)}`);
 function teachLine(target, result) {
   const prefix = result.nearMiss ? t('teach.nearMiss') : '';
   const params = {
-    time: timeId(target.h, target.m),
+    // The one string in a teach line that can be digits; with them off the sentence names
+    // the time the same way the pet just did.
+    time: digitalOn() ? timeId(target.h, target.m) : t.spoken(target.h, target.m),
     hour: t.hourWord(target.h),
     hourNum: target.h,
     next: (target.h % 12) + 1,
@@ -626,6 +653,7 @@ function renderZooBadge() {
 
 function renderZoo() {
   const at = now();
+  const digits = digitalOn();
   const napping = session.isNapping(state.session, at);
   const items = Object.entries(state.items).sort(([, a], [, b]) => {
     if ((a.hatchedAt === null) !== (b.hatchedAt === null)) return a.hatchedAt === null ? 1 : -1;
@@ -657,7 +685,7 @@ function renderZoo() {
           ${art}
           <span class="pen-name">${label}</span>
           ${rank ? `<span class="pen-rank">${rank}</span>` : ''}
-          <span class="pen-time">${collarClock(item.h, item.m)}${timeId(item.h, item.m)}</span>
+          <span class="pen-time">${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}</span>
         </button>`;
     })
     .join('');
@@ -870,6 +898,13 @@ function applyLanguage() {
   if (!el.grownups.hidden) renderGrownups();
 }
 
+/** Repaint the two places a time is written. `applyLanguage` does not need this — both
+ *  renders read the setting themselves — so this is only for the toggle and an import. */
+function applyDigital() {
+  if (current) renderPrompt(state.items[current.id]);
+  if (scene === 'zoo') renderZoo();
+}
+
 function buildLanguageOptions() {
   el.language.innerHTML = '';
   for (const lang of LANGUAGES) {
@@ -881,7 +916,9 @@ function buildLanguageOptions() {
 
 function openSettings() {
   el.language.value = t.lang;
+  el.showDigital.checked = digitalOn();
   el.playMinutes.value = String(limits.minutes);
+  setTransferStatus('');
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
   el.settings.hidden = false;
 }
@@ -896,6 +933,12 @@ el.language.addEventListener('change', () => {
   state.settings.language = isLanguage(chosen) ? chosen : DEFAULT_LANGUAGE;
   save();
   applyLanguage();
+});
+
+el.showDigital.addEventListener('change', () => {
+  state.settings.showDigital = el.showDigital.checked;
+  save();
+  applyDigital();
 });
 
 // Live label while dragging; the setting itself lands on `change`, so a slider being
@@ -914,6 +957,90 @@ el.playMinutes.addEventListener('change', () => {
   // A session already past the new limit is ended by the heartbeat on its next tick,
   // which is the honest outcome of shortening the cap mid-session.
 });
+
+/* ----------------------------------------------------------------- transfer */
+
+/**
+ * Import and export are grown-up business, so they report in a status line rather than
+ * with the game's own noise and confetti. `parseTransfer` decides what a file or a code
+ * is *before* anything is offered, which is what keeps a mistyped code from getting as
+ * far as asking whether to wipe a child's zoo.
+ */
+function setTransferStatus(message, bad = false) {
+  el.transferStatus.textContent = message;
+  el.transferStatus.classList.toggle('is-bad', bad);
+}
+
+function download(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+el.exportFile.addEventListener('click', () => {
+  const file = exportFilename(now());
+  const json = payloadToJson(exportPayload(state, now()));
+  download(file, new Blob([json], { type: 'application/json' }));
+  setTransferStatus(t('transfer.saved', { file }));
+});
+
+el.exportCode.addEventListener('click', async () => {
+  const code = encodeCode(exportPayload(state, now()));
+  try {
+    await navigator.clipboard.writeText(code);
+    setTransferStatus(t('transfer.copied'));
+  } catch {
+    // No clipboard permission, or not a secure context. The code is still the thing they
+    // asked for, so hand it over the other way rather than refusing.
+    download(exportFilename(now()).replace(/\.json$/, '.txt'), new Blob([code], { type: 'text/plain' }));
+    setTransferStatus(t('transfer.copyFailed'), true);
+  }
+});
+
+el.importFile.addEventListener('click', () => {
+  el.importInput.value = ''; // so picking the same file twice still fires `change`
+  el.importInput.click();
+});
+
+el.importInput.addEventListener('change', async () => {
+  const file = el.importInput.files?.[0];
+  if (file) runImport(await file.text());
+});
+
+el.importCode.addEventListener('click', () => {
+  const pasted = prompt(t('transfer.pastePrompt'));
+  if (pasted !== null) runImport(pasted);
+});
+
+function runImport(text) {
+  let payload;
+  try {
+    payload = parseTransfer(text);
+  } catch (error) {
+    setTransferStatus(t(error instanceof TransferError ? error.key : 'transfer.badFile'), true);
+    return;
+  }
+
+  if (!confirm(t('transfer.confirm'))) return;
+
+  state = applyImport(state, payload, now());
+  // Queue the new state *then* force it out: flushing first would push whatever the old
+  // zoo had left pending and lose the import to a tab closed in the next few hundred ms.
+  save();
+  saver.flush();
+  // The zoo that was in flight belongs to the save that has just been replaced.
+  current = null;
+  lastAskedId = null;
+  setTransferStatus(t('transfer.imported', { n: petCount(state.items) }));
+  applyLanguage();
+  showScene('play');
+  askNext();
+}
 
 /* -------------------------------------------------------------------- sound */
 

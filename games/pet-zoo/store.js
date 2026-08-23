@@ -24,6 +24,9 @@ export function freshState(now) {
       haptics: true,
       language: DEFAULT_LANGUAGE,
       playMinutes: PLAY_MINUTES_DEFAULT,
+      // Off by default: a child who can read digits will read the digits and never look
+      // at the face, which is the one thing this game exists to teach.
+      showDigital: false,
     },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
     stats: { totalAnswered: 0, totalCorrect: 0, streak: 0, bestStreak: 0, daysPlayed: [] },

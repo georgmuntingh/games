@@ -186,7 +186,28 @@ const STRINGS = {
     'settings.playTimeValue': '{n} minutes',
     'settings.playTimeHelp':
       'How long a session lasts before the pets need a nap. Short sessions work best — three to five minutes.',
+    'settings.digital': 'Show digital time',
+    'settings.digitalHelp':
+      'Off by default. With it off the pets say their feeding time in words only, so the clock face is the only place to read it.',
+    'settings.transfer': 'Move to another device',
+    'settings.transferHelp':
+      'Save the zoo as a file, or copy it as a code to send in a message. Opening either one on another device brings every pet across. The zoo already on that device is replaced.',
     'settings.done': 'Done',
+
+    'transfer.exportFile': 'Save file',
+    'transfer.copyCode': 'Copy code',
+    'transfer.importFile': 'Open file…',
+    'transfer.pasteCode': 'Paste code',
+    'transfer.pastePrompt': 'Paste the code from the other device:',
+    'transfer.confirm':
+      'Replace this device’s zoo with the one you are bringing in? The pets here now will be lost.',
+    'transfer.saved': 'Saved {file}.',
+    'transfer.copied': 'Code copied — paste it on the other device.',
+    'transfer.copyFailed': 'Could not reach the clipboard, so the code was saved as a file instead.',
+    'transfer.imported': 'Brought in {n} pets.',
+    'transfer.badFile': 'That does not look like a Pet Zoo save.',
+    'transfer.badApp': 'That save is from a different game.',
+    'transfer.badVersion': 'That save comes from a newer Pet Zoo than this one.',
 
     'tier.0.name': 'O’clock',
     'tier.0.blurb': 'The big hand points straight up.',
@@ -286,7 +307,28 @@ const STRINGS = {
     'settings.playTimeValue': '{n} minutter',
     'settings.playTimeHelp':
       'Hvor lenge en økt varer før dyrene må sove. Korte økter funker best — tre til fem minutter.',
+    'settings.digital': 'Vis digital tid',
+    'settings.digitalHelp':
+      'Av til vanlig. Når den er av, sier dyrene måltidet sitt bare med ord, så urskiva er eneste stedet å lese det.',
+    'settings.transfer': 'Flytt til en annen enhet',
+    'settings.transferHelp':
+      'Lagre dyrehagen som en fil, eller kopier den som en kode du kan sende i en melding. Åpner du en av delene på en annen enhet, blir alle dyrene med. Dyrehagen som allerede er der, blir erstattet.',
     'settings.done': 'Ferdig',
+
+    'transfer.exportFile': 'Lagre fil',
+    'transfer.copyCode': 'Kopier kode',
+    'transfer.importFile': 'Åpne fil …',
+    'transfer.pasteCode': 'Lim inn kode',
+    'transfer.pastePrompt': 'Lim inn koden fra den andre enheten:',
+    'transfer.confirm':
+      'Erstatte dyrehagen på denne enheten med den du henter inn? Dyrene som er her nå, forsvinner.',
+    'transfer.saved': 'Lagret {file}.',
+    'transfer.copied': 'Koden er kopiert — lim den inn på den andre enheten.',
+    'transfer.copyFailed': 'Fikk ikke tak i utklippstavla, så koden ble lagret som fil i stedet.',
+    'transfer.imported': 'Hentet inn {n} dyr.',
+    'transfer.badFile': 'Dette ser ikke ut som en lagret dyrehage.',
+    'transfer.badApp': 'Den lagringa er fra et annet spill.',
+    'transfer.badVersion': 'Den lagringa er fra en nyere utgave av Dyrehagen enn denne.',
 
     'tier.0.name': 'Hele timer',
     'tier.0.blurb': 'Den lange viseren peker rett opp.',
