@@ -77,6 +77,37 @@
         </div>
       </section>
 
+      <!-- --------------------------------------------------------- habitat -->
+      <section id="habitat-scene" class="scene scene-full" hidden>
+        <div class="hab-bar">
+          <button
+            id="habitat-back"
+            type="button"
+            class="icon-btn hab-back-btn"
+            data-i18n-aria-label="habitat.back"
+            aria-label="Tilbake til dyrehagen"
+          >
+            ←
+          </button>
+          <div class="hab-who">
+            <span id="habitat-name" class="hab-name"></span>
+            <span id="habitat-rank" class="hab-rank"></span>
+          </div>
+          <span id="habitat-time" class="hab-time"></span>
+          <button
+            id="habitat-rename"
+            type="button"
+            class="icon-btn"
+            data-i18n-aria-label="habitat.rename"
+            aria-label="Gi dyret et nytt navn"
+          >
+            ✏️
+          </button>
+        </div>
+        <div id="habitat-host" class="hab-host"></div>
+        <p id="habitat-note" class="hab-note" aria-live="polite"></p>
+      </section>
+
       <!-- ------------------------------------------------------------- zoo -->
       <section id="zoo-scene" class="scene" hidden>
         <p id="zoo-empty" class="zoo-empty" data-i18n="zoo.empty" hidden>

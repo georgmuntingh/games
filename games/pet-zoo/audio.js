@@ -90,6 +90,22 @@ const SOUNDS = {
   wake(ac) {
     arpeggio(ac, [440, 587, 784], { gain: 0.09, spacing: 0.11, duration: 0.26 });
   },
+  // A ball hitting the ground. `power` is how hard it landed, 0..1, so a fast first
+  // bounce is a thump and the last few are taps — the sound the eye is already expecting.
+  bounce(ac, { power = 1 } = {}) {
+    const p = Math.max(0.15, Math.min(1, power));
+    tone(ac, { type: 'sine', freq: 150 + p * 190, endFreq: 90 + p * 90, duration: 0.07 + p * 0.05, gain: 0.03 + p * 0.05 });
+  },
+  // Eating a treat: two soft chews, low and quick, with nothing crunchy about them.
+  munch(ac) {
+    tone(ac, { type: 'triangle', freq: 240, endFreq: 170, duration: 0.06, gain: 0.06 });
+    tone(ac, { type: 'triangle', freq: 205, endFreq: 145, duration: 0.07, gain: 0.055, delay: 0.09 });
+  },
+  // Disturbing a sleeping pet: it stretches, it does not wake. A slow yawn up and back.
+  stretch(ac) {
+    tone(ac, { type: 'sine', freq: 300, endFreq: 430, duration: 0.3, gain: 0.045 });
+    tone(ac, { type: 'sine', freq: 400, endFreq: 280, duration: 0.36, gain: 0.04, delay: 0.26 });
+  },
 };
 
 export const audio = {
@@ -99,9 +115,10 @@ export const audio = {
   setMuted(value) {
     muted = Boolean(value);
   },
-  play(name) {
+  /** `options` reaches the sound itself, so one sound can cover a range (see `bounce`). */
+  play(name, options) {
     if (muted || !SOUNDS[name]) return;
     const ac = ensureContext();
-    if (ac) SOUNDS[name](ac);
+    if (ac) SOUNDS[name](ac, options);
   },
 };

@@ -153,6 +153,14 @@ const STRINGS = {
     'zoo.eggTitle': 'A chilly egg',
     'zoo.rename': 'What is this pet called?',
 
+    'habitat.back': 'Back to the zoo',
+    'habitat.rename': 'Give this pet a new name',
+    'habitat.aria': "{name}'s home",
+    'habitat.eggAria': 'The home waiting for a {species} egg',
+    'habitat.hint': 'Throw the ball, share a snack, or stroke {name}.',
+    'habitat.eggHint': 'This home is waiting. Feed the clock, and the egg will hatch.',
+    'habitat.sleeping': '{name} is fast asleep. Sshh.',
+
     'unlock.title': 'New pets have arrived!',
     'unlock.copy': '{tier} — {blurb}',
     'unlock.close': 'Let’s go',
@@ -273,6 +281,14 @@ const STRINGS = {
     'zoo.egg': '{species}-egg',
     'zoo.eggTitle': 'Et kaldt egg',
     'zoo.rename': 'Hva heter dette dyret?',
+
+    'habitat.back': 'Tilbake til dyrehagen',
+    'habitat.rename': 'Gi dyret et nytt navn',
+    'habitat.aria': 'Hjemmet til {name}',
+    'habitat.eggAria': 'Hjemmet som venter på et {species}-egg',
+    'habitat.hint': 'Kast ballen, gi en godbit, eller klapp {name}.',
+    'habitat.eggHint': 'Dette hjemmet venter. Still klokka riktig, så klekkes egget.',
+    'habitat.sleeping': '{name} sover godt. Hysj.',
 
     'unlock.title': 'Nye dyr har kommet!',
     'unlock.copy': '{tier} — {blurb}',

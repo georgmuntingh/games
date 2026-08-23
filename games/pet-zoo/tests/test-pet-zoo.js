@@ -107,8 +107,40 @@ import {
   SPECIES,
   timesOfSpecies,
   TRAIT_STRIDE,
+  traitIndexFor,
   validLoudFor,
 } from '../pets.js';
+import {
+  BALL_R,
+  BIOME_IDS,
+  biomeOfSpecies,
+  CENTRE_KEEP,
+  habitatFor,
+  habitatOf,
+  habitatSvg,
+  homeSpotFor,
+  LAYOUTS,
+  lightingFor,
+  mix,
+  NEST_KEEP,
+  nextWanderTarget,
+  paletteFor,
+  sceneryY,
+  stepBall,
+} from '../habitat.js';
+import {
+  HORIZON,
+  orbPoint,
+  PET_SIZE,
+  phaseOfHour,
+  PHASE_IDS,
+  ROAM,
+  rndFrom,
+  SAFE,
+  SCENERY_IDS,
+  TREAT_IDS,
+  WALK_Y,
+} from '../habitat-parts.js';
 import {
   ACCESSORIES,
   ANATOMY,
@@ -1695,6 +1727,383 @@ test('no spoken phrase contains a digit, in either language', () => {
 });
 
 /* -------------------------------------------------------- run and report */
+
+/* ------------------------------------------------------------- habitats */
+
+describe('habitats — every pet gets a home of its own');
+
+const EVERY_HABITAT = ALL_ITEMS.map((item) => habitatFor(item.h, item.m));
+
+test('all 144 times produce a habitat, and no two of them are the same picture', () => {
+  const drawings = new Set(
+    EVERY_HABITAT.map((h) => habitatSvg(h, { uid: `u${h.id.replace(':', '')}` }))
+  );
+  assertEqual(EVERY_HABITAT.length, 144, 'one habitat per curriculum time');
+  assertEqual(drawings.size, 144, 'every habitat draws differently');
+});
+
+test('nothing renders a NaN, an undefined or an empty scene', () => {
+  for (const h of EVERY_HABITAT) {
+    const svg = habitatSvg(h, { uid: 'u', label: 'home' });
+    assert(!svg.includes('NaN'), `${h.id} drew a NaN`);
+    assert(!svg.includes('undefined'), `${h.id} drew an undefined`);
+    assert(svg.length > 1500, `${h.id} drew almost nothing`);
+  }
+});
+
+test('a habitat is generated, never stored — the same time always gives the same home', () => {
+  const once = habitatSvg(habitatFor(4, 15), { uid: 'u' });
+  const twice = habitatSvg(habitatFor(4, 15), { uid: 'u' });
+  assertEqual(once, twice, 'habitats must be deterministic');
+});
+
+test('two pets of the same species share a biome but not a home', () => {
+  const byBiome = new Map();
+  for (const h of EVERY_HABITAT) {
+    assertEqual(h.biome, biomeOfSpecies(h.species), `${h.id} left its species' biome`);
+    if (!byBiome.has(h.species)) byBiome.set(h.species, new Set());
+    byBiome.get(h.species).add(habitatSvg(h, { uid: 'u' }));
+  }
+  for (const [species, drawings] of byBiome) {
+    const times = timesOfSpecies(species).length;
+    if (times > 1) assert(drawings.size > 1, `every ${species} lives in an identical home`);
+  }
+});
+
+test('all eight biomes are somebody’s home, and every phase of day happens', () => {
+  const biomes = new Set(EVERY_HABITAT.map((h) => h.biome));
+  const phases = new Set(EVERY_HABITAT.map((h) => h.light.phase));
+  assertEqual(biomes.size, BIOME_IDS.length, 'some biome is never used');
+  assertEqual(phases.size, PHASE_IDS.length, 'some time of day never happens');
+});
+
+test('night is the exception rather than the rule', () => {
+  const nights = EVERY_HABITAT.filter((h) => h.light.night).length;
+  // A straight coin flip on am/pm would put nine hours in twenty-four under stars; the
+  // weighting in lightingFor exists to keep night special *and* to keep the zoo readable.
+  assert(nights > 0, 'no pet ever lives at night');
+  assert(nights < 144 * 0.3, `${nights} of 144 habitats are dark — too many`);
+});
+
+describe('habitats — everything a child must reach survives the crop');
+
+test('the props, the treats and the pet’s spot all stay inside the safe box', () => {
+  for (const h of EVERY_HABITAT) {
+    for (const [name, prop] of Object.entries(h.props)) {
+      assert(prop.x >= SAFE.x0 && prop.x <= SAFE.x1, `${h.id} put its ${name} outside the safe box`);
+    }
+    for (const spot of h.props.larder.spots) {
+      assert(spot.x >= SAFE.x0 && spot.x <= SAFE.x1, `${h.id} hung a treat outside the safe box`);
+    }
+    assert(h.home.x >= ROAM.x0 && h.home.x <= ROAM.x1, `${h.id} idles outside its own roam band`);
+  }
+});
+
+test('a pet standing at either end of the roam band still fits inside the crop', () => {
+  const half = PET_SIZE / 2;
+  assert(ROAM.x0 - half >= SAFE.x0 - 1, 'a pet at the left end loses an ear to the crop');
+  assert(ROAM.x1 + half <= SAFE.x1 + 1, 'a pet at the right end loses an ear to the crop');
+});
+
+test('the nest leaves room for a whole pet, because a pet sleeps in it', () => {
+  for (const h of EVERY_HABITAT) {
+    assert(
+      h.props.nest.x >= NEST_KEEP.x0 && h.props.nest.x <= NEST_KEEP.x1,
+      `${h.id} would crop a pet asleep in its nest`
+    );
+  }
+});
+
+test('the middle of the field is left clear, so the pet never stands on its own ball', () => {
+  for (const layout of LAYOUTS) {
+    for (const x of [layout.nest, layout.larder, layout.ball]) {
+      assert(x <= CENTRE_KEEP.x0 || x >= CENTRE_KEEP.x1, `a layout put a prop at ${x}, in the centre`);
+    }
+  }
+  for (const h of EVERY_HABITAT) {
+    const clearance = Math.min(
+      ...[h.props.nest.x, h.props.larder.x, h.props.ball.x].map((x) => Math.abs(x - h.home.x))
+    );
+    assert(clearance >= 16, `${h.id} idles ${clearance} units from a prop`);
+  }
+});
+
+test('the ball always rests somewhere the pet can actually walk to', () => {
+  for (const h of EVERY_HABITAT) {
+    assert(
+      h.props.ball.x >= ROAM.x0 + BALL_R && h.props.ball.x <= ROAM.x1 - BALL_R,
+      `${h.id} rests its ball out of reach`
+    );
+  }
+});
+
+test('homeSpotFor keeps its distance from all three props', () => {
+  const roam = { x0: 62, x1: 138 };
+  const layout = { nest: 126, larder: 52, ball: 78 };
+  const home = homeSpotFor(layout, roam);
+  assert(home >= roam.x0 && home <= roam.x1, 'the home spot left the roam band');
+  for (const x of Object.values(layout)) {
+    assert(Math.abs(home - x) >= 16, `the home spot landed ${Math.abs(home - x)} from a prop`);
+  }
+});
+
+test('bigger scenery is nearer, and nearer scenery is drawn in front of the pet', () => {
+  assert(sceneryY(0.55) < sceneryY(1.0), 'a small piece must sit further back');
+  assert(sceneryY(0.6) < WALK_Y, 'a far piece must be behind the pet');
+  assert(sceneryY(1.28) > WALK_Y, 'a near piece must be in front of the pet');
+  for (const h of EVERY_HABITAT) {
+    for (const piece of h.scenery) {
+      assertEqual(piece.y, sceneryY(piece.scale), `${h.id} placed a piece off its own depth rule`);
+      assert(SCENERY_IDS.includes(piece.id), `${h.id} asked for scenery that does not exist`);
+    }
+  }
+});
+
+describe('habitats — the light says when this pet’s day happens');
+
+test('a pet’s am-or-pm is decided once and never wobbles', () => {
+  for (const item of ALL_ITEMS) {
+    const a = lightingFor(item.h, item.m);
+    const b = lightingFor(item.h, item.m);
+    assertEqual(a.hour24, b.hour24, `${item.id} changed its hour between calls`);
+    assertEqual(a.hour24 % 12, item.h % 12, `${item.id} lights an hour that is not its own`);
+  }
+});
+
+test('both halves of the day are used', () => {
+  const morning = ALL_ITEMS.filter((i) => !lightingFor(i.h, i.m).pm).length;
+  assert(morning > 0 && morning < ALL_ITEMS.length, 'every pet ended up in the same half of the day');
+});
+
+test('the six phases split the clock without a gap', () => {
+  for (let hour = 0; hour < 24; hour += 1) {
+    assert(PHASE_IDS.includes(phaseOfHour(hour)), `hour ${hour} has no phase`);
+  }
+  assertEqual(phaseOfHour(12), 'noon');
+  assertEqual(phaseOfHour(0), 'night');
+  assertEqual(phaseOfHour(23), 'night');
+  assertEqual(phaseOfHour(6), 'dawn');
+  assertEqual(phaseOfHour(24), phaseOfHour(0), 'the day must wrap');
+});
+
+test('the sun climbs to noon and comes back down, and never sets behind the crop', () => {
+  assert(orbPoint(12).y < orbPoint(7).y, 'midday should be the highest point of the day');
+  assert(orbPoint(12).y < orbPoint(18).y, 'the afternoon should be lower than midday');
+  assert(orbPoint(7).x < orbPoint(17).x, 'the sun should travel one way across the sky');
+  for (let hour = 0; hour < 24; hour += 1) {
+    const orb = orbPoint(hour);
+    assert(orb.x >= SAFE.x0 && orb.x <= SAFE.x1, `the light at ${hour}:00 sits outside the safe box`);
+    assert(orb.y > 0 && orb.y < HORIZON, `the light at ${hour}:00 is not in the sky`);
+  }
+});
+
+test('the horizon is always visible, whatever the biome and the hour did to the colours', () => {
+  const lum = (hex) => {
+    const v = parseInt(hex.slice(1), 16);
+    return ((v >> 16) & 255) * 0.3 + ((v >> 8) & 255) * 0.6 + (v & 255) * 0.1;
+  };
+  for (const h of EVERY_HABITAT) {
+    const gap = lum(h.palette.ground[0]) - lum(h.palette.groundRim);
+    assert(gap > 20, `${h.id} draws a horizon rim only ${Math.round(gap)} apart from its ground`);
+    assert(habitatSvg(h, { uid: 'u' }).includes(h.palette.groundRim), `${h.id} never draws its rim`);
+  }
+});
+
+test('a night habitat is lit, not blacked out', () => {
+  const night = EVERY_HABITAT.find((h) => h.light.night);
+  const noon = EVERY_HABITAT.find((h) => h.light.phase === 'noon');
+  const brightness = (hex) => {
+    const v = parseInt(hex.slice(1), 16);
+    return ((v >> 16) & 255) * 0.3 + ((v >> 8) & 255) * 0.6 + (v & 255) * 0.1;
+  };
+  assert(brightness(night.palette.ground[0]) > 60, 'a night ground is too dark to see a pet on');
+  assert(
+    brightness(night.palette.ground[0]) < brightness(noon.palette.ground[0]),
+    'night should still read as darker than noon'
+  );
+});
+
+describe('habitats — colour');
+
+test('mixing is a straight blend, and the ends are the colours themselves', () => {
+  assertEqual(mix('#000000', '#ffffff', 0), '#000000');
+  assertEqual(mix('#000000', '#ffffff', 1), '#ffffff');
+  assertEqual(mix('#000000', '#ffffff', 0.5), '#808080');
+  assertEqual(mix('#000000', '#ffffff', 9), '#ffffff', 'a blend past the end clamps');
+  assertEqual(mix('#fff', '#fff', 0.5), '#ffffff', 'short hex is understood');
+});
+
+test('a habitat is tinted toward the pet that lives in it', () => {
+  const mochi = paletteFor('mochi', 'meadow', 'noon');
+  const waddle = paletteFor('waddle', 'meadow', 'noon');
+  assert(mochi.bloom !== waddle.bloom, 'two species share a meadow but not its flowers');
+  assertEqual(mochi.ballA, SPECIES.mochi.palette[2], 'the ball takes the pet’s accent');
+});
+
+test('every palette entry is a real colour', () => {
+  for (const h of EVERY_HABITAT) {
+    for (const [key, value] of Object.entries(h.palette)) {
+      for (const hex of [].concat(value)) {
+        assert(/^#[0-9a-f]{6}$/.test(hex), `${h.id} palette.${key} is ${hex}`);
+      }
+    }
+  }
+});
+
+describe('habitats — the ball obeys the world');
+
+const BOUNDS = { x0: 62, x1: 138, floor: WALK_Y - BALL_R, ceiling: 10 };
+const settle = (ball, steps = 4000) => {
+  let b = ball;
+  for (let i = 0; i < steps && !b.resting; i += 1) b = stepBall(b, 1 / 60, BOUNDS);
+  return b;
+};
+
+test('a ball thrown upward comes back down', () => {
+  let b = { x: 100, y: 60, vx: 0, vy: -200, resting: false };
+  let highest = b.y;
+  for (let i = 0; i < 60; i += 1) {
+    b = stepBall(b, 1 / 60, BOUNDS);
+    highest = Math.min(highest, b.y);
+  }
+  assert(highest < 60, 'it should have gone up');
+  assert(b.y > highest, 'and it should be coming back down');
+});
+
+test('every bounce is smaller than the one before it', () => {
+  let b = { x: 100, y: BOUNDS.floor - 40, vx: 0, vy: 0, resting: false };
+  const impacts = [];
+  for (let i = 0; i < 900 && !b.resting; i += 1) {
+    b = stepBall(b, 1 / 60, BOUNDS);
+    if (b.bounce > 0) impacts.push(b.bounce);
+  }
+  assert(impacts.length >= 2, 'it should bounce more than once');
+  for (let i = 1; i < impacts.length; i += 1) {
+    assert(impacts[i] < impacts[i - 1], 'a bounce came back bigger than it landed');
+  }
+});
+
+test('however hard it is thrown, it settles and it never leaves the field', () => {
+  for (const vx of [-900, -340, -40, 0, 40, 340, 900]) {
+    for (const vy of [-900, -200, 0, 200, 900]) {
+      let b = { x: 100, y: 60, vx, vy, resting: false };
+      for (let i = 0; i < 4000; i += 1) {
+        b = stepBall(b, 1 / 60, BOUNDS);
+        assert(b.x >= BOUNDS.x0 && b.x <= BOUNDS.x1, `a ball at ${vx},${vy} escaped sideways`);
+        assert(b.y <= BOUNDS.floor + 0.001, `a ball at ${vx},${vy} fell through the ground`);
+        assert(b.y >= BOUNDS.ceiling - 0.001, `a ball at ${vx},${vy} flew off the top`);
+        if (b.resting) break;
+      }
+      assert(b.resting, `a ball thrown at ${vx},${vy} never came to rest`);
+      assertClose(b.y, BOUNDS.floor, 0.001, 'a ball at rest should be on the ground');
+    }
+  }
+});
+
+test('a resting ball stays where it was left', () => {
+  const b = { x: 90, y: BOUNDS.floor, vx: 0, vy: 0, resting: true };
+  const after = stepBall(b, 1 / 60, BOUNDS);
+  assertEqual(after.x, 90);
+  assertEqual(after.y, BOUNDS.floor);
+});
+
+test('a tab left in the background does not teleport the ball through the floor', () => {
+  const b = { x: 100, y: 20, vx: 0, vy: 400, resting: false };
+  // Ten seconds of frozen time arriving as one frame: dt is clamped, so this is a step.
+  const after = stepBall(b, 10, BOUNDS);
+  assert(after.y <= BOUNDS.floor, 'a huge dt punched the ball through the ground');
+  assertEqual(settle(after).resting, true, 'and it still settles afterwards');
+});
+
+describe('habitats — pottering about');
+
+test('a wander target is always somewhere the pet can stand', () => {
+  const rnd = rndFrom(7);
+  let at = 100;
+  for (let i = 0; i < 500; i += 1) {
+    at = nextWanderTarget(at, ROAM, rnd);
+    assert(at >= ROAM.x0 && at <= ROAM.x1, `the pet was sent to ${at}`);
+  }
+});
+
+test('a pet at the edge is sent back inward rather than pacing the boundary', () => {
+  const rnd = rndFrom(3);
+  assert(nextWanderTarget(ROAM.x0, ROAM, rnd) > ROAM.x0, 'stuck against the left edge');
+  assert(nextWanderTarget(ROAM.x1, ROAM, rnd) < ROAM.x1, 'stuck against the right edge');
+});
+
+test('the same seed always walks the same route', () => {
+  const walk = (seed) => {
+    const rnd = rndFrom(seed);
+    let at = 100;
+    return Array.from({ length: 8 }, () => (at = nextWanderTarget(at, ROAM, rnd)));
+  };
+  assertEqual(walk(11).join(), walk(11).join(), 'the injected rng is not deterministic');
+  assert(walk(11).join() !== walk(12).join(), 'two seeds should walk differently');
+});
+
+describe('habitats — modifiable later, stored never');
+
+test('a plain pet gets the generated habitat and stores nothing', () => {
+  const item = createItem({ h: 4, m: 15, species: 'fizz', reviewClock: 0 });
+  assertEqual(item.habitat, undefined, 'a fresh pet must not carry a habitat');
+  assertEqual(
+    habitatSvg(habitatOf(item), { uid: 'u' }),
+    habitatSvg(habitatFor(4, 15), { uid: 'u' }),
+    'a pet with no override should look exactly like its generated home'
+  );
+});
+
+test('a stored override wins over the generated habitat, one field at a time', () => {
+  const item = { ...createItem({ h: 4, m: 15, species: 'fizz', reviewClock: 0 }) };
+  const base = habitatFor(4, 15);
+  item.habitat = { biome: 'snowfield', palette: { ballA: '#123456' } };
+  const merged = habitatOf(item);
+  assertEqual(merged.biome, 'snowfield', 'the override should choose the biome');
+  assertEqual(merged.palette.ballA, '#123456', 'the override should choose the colour');
+  assertEqual(merged.palette.leaf, base.palette.leaf, 'and leave the rest of the palette alone');
+  assertEqual(merged.props.nest.x, base.props.nest.x, 'and leave the props alone');
+});
+
+test('rubbish in an override cannot break a habitat', () => {
+  const item = createItem({ h: 4, m: 15, species: 'fizz', reviewClock: 0 });
+  for (const junk of [null, 'meadow', 42, []]) {
+    const drawn = habitatSvg(habitatOf({ ...item, habitat: junk }), { uid: 'u' });
+    assert(drawn.length > 1500 && !drawn.includes('undefined'), `an override of ${junk} broke the scene`);
+  }
+});
+
+test('an override travels between devices, because cleanItems passes item fields through', () => {
+  const state = playedState();
+  state.items['4:15'].habitat = { biome: 'cloudtop' };
+  const payload = parseTransfer(payloadToJson(exportPayload(state, 2000)));
+  assertEqual(payload.items['4:15'].habitat.biome, 'cloudtop', 'the habitat did not survive the trip');
+  const landed = applyImport(receivingState(), payload, 6000);
+  assertEqual(habitatOf(landed.items['4:15']).biome, 'cloudtop', 'the imported pet lost its home');
+});
+
+describe('habitats — the pieces the scene is built from');
+
+test('every biome asks only for scenery and treats that exist', () => {
+  for (const h of EVERY_HABITAT) {
+    assert(TREAT_IDS.includes(h.props.larder.treat), `${h.id} grows a treat that does not exist`);
+    assertEqual(h.props.larder.spots.length, 3, `${h.id} has the wrong number of treats`);
+  }
+});
+
+test('a habitat varies along the same trait index that varies its pet', () => {
+  // Appearance, name and habitat all walk the same index, so the pet and its home change
+  // together rather than drifting apart.
+  const times = timesOfSpecies('bubs');
+  assert(times.length > 1, 'this test needs a species with several pets');
+  const seen = new Set();
+  for (const id of times) {
+    const [h, m] = id.split(':').map(Number);
+    assertEqual(traitIndexFor(h, m), times.indexOf(id), `${id} has the wrong trait index`);
+    seen.add(JSON.stringify(habitatFor(h, m).scenery));
+  }
+  assert(seen.size > 1, 'every Bubs was given the same arrangement');
+});
 
 const out = document.getElementById('out');
 const summary = document.getElementById('summary');
