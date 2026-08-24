@@ -31,7 +31,26 @@ import {
   SPECIES,
 } from './pets.js';
 import { formFor } from './srs.js';
-import { createSaver, freshState, load, clear, touchDay } from './store.js';
+import { createSaver, freshState, load, clear, touchDay, dayStamp } from './store.js';
+import {
+  buy as buyItem,
+  CATALOG,
+  isFull,
+  isOwned,
+  isUnlocked,
+  itemById as shopItemById,
+  sell as sellItem,
+} from './shop.js';
+import {
+  canAfford,
+  dayBonusFor,
+  earn,
+  payoutFor,
+  retroGrant,
+  SESSION_COINS,
+  spend,
+  TIER_COINS,
+} from './wallet.js';
 import {
   applyImport,
   encodeCode,
@@ -42,11 +61,14 @@ import {
   petCount,
   TransferError,
 } from './transfer.js';
+import { FURNITURE } from './habitat-parts.js';
+import { habitatOf, habitatSvg } from './habitat.js';
 import { createHabitatScene } from './habitat-scene.js';
 import { audio } from './audio.js';
 import {
   buzz,
   confetti,
+  flyCoins,
   flyHeart,
   pop,
   reduceMotion,
@@ -98,6 +120,21 @@ const el = {
   habitatTime: $('habitat-time'),
   habitatRename: $('habitat-rename'),
   habitatNote: $('habitat-note'),
+  shopStall: $('shop-stall'),
+  stallBalance: $('stall-balance'),
+  shop: $('shop-overlay'),
+  shopBalance: $('shop-balance'),
+  shopEmpty: $('shop-empty'),
+  shopBody: $('shop-body'),
+  shopPets: $('shop-pets'),
+  shopGrid: $('shop-grid'),
+  shopNote: $('shop-note'),
+  shopClose: $('shop-close'),
+  shopConfirm: $('shop-confirm'),
+  confirmPreview: $('confirm-preview'),
+  confirmCopy: $('confirm-copy'),
+  confirmBuy: $('confirm-buy'),
+  confirmCancel: $('confirm-cancel'),
   unlock: $('unlock-overlay'),
   unlockPets: $('unlock-pets'),
   unlockTitle: $('unlock-title'),
@@ -151,6 +188,10 @@ let scene = 'play';
 // not progress, so it is not worth persisting and must never end up in a save.
 let habitatId = null;
 let habitatNapping = false;
+// Which pet the stall is currently serving, and what is waiting on a confirm. Neither is
+// progress, so neither is persisted — the shop opens on the child's first pet every time.
+let shopPetId = null;
+let pendingPurchase = null;
 
 /* -------------------------------------------------------------------- clock */
 
@@ -520,15 +561,30 @@ async function submit() {
     state.stats.streak = 0;
   }
   state.lastPlayedAt = now();
+  // Asked before `touchDay` records today, and by the last entry rather than by the length:
+  // the list is capped at 60 days, so a child on their sixty-first would never grow it again
+  // and a length check would quietly stop paying them.
+  const days = state.stats.daysPlayed;
+  const firstToday = days[days.length - 1] !== dayStamp(now());
   state = touchDay(state, now());
 
   const { tier, unlocked } = refreshTier(state);
   state.tier = tier;
+
+  // What this answer paid. A correct answer on its own pays nothing: what pays is a pet
+  // arriving, a pet growing, a tier opening, and — below, once — turning up today at all.
+  let paid = payoutFor(outcome.events);
+  if (unlocked) paid += TIER_COINS;
+  if (firstToday) paid += dayBonusFor(state.stats.daysPlayed, dayStamp(now()));
+  if (paid) state.coins = earn(state.coins, paid);
+
   save();
   renderZooBadge();
 
-  if (result.correct) await celebrate(outcome);
+  if (result.correct) await celebrate(outcome, paid);
   else await correct(target, answer, result);
+  // Paid but nothing to celebrate — a day bonus on a wrong first answer still lands.
+  if (paid && !result.correct) showCoins(paid);
 
   if (unlocked) await showUnlock(tier);
 
@@ -541,9 +597,10 @@ async function submit() {
   else askNext();
 }
 
-async function celebrate(outcome) {
+async function celebrate(outcome, paid = 0) {
   const item = outcome.item;
   const streak = state.stats.streak;
+  if (paid) showCoins(paid);
 
   if (outcome.events.evolved) {
     // The same shape as hatching, one size up: the pet whites out, and what comes back is
@@ -729,6 +786,9 @@ function beginSessionIfNeeded() {
 }
 
 function startNap() {
+  // Finishing a session is itself worth paying for: the scheduler wants a child who stops
+  // at the nap and comes back, not one who abandons a sitting halfway and reloads.
+  state.coins = earn(state.coins, SESSION_COINS);
   state.session = session.beginNap({ ...state.session, startedAt: 0 }, now());
   save();
   audio.play('nap');
@@ -812,6 +872,7 @@ function renderZooBadge() {
 }
 
 function renderZoo() {
+  renderStall();
   const at = now();
   const digits = digitalOn();
   const napping = session.isNapping(state.session, at);
@@ -892,6 +953,222 @@ function renamePet(id) {
   item.name = trimmed || null;
   save();
   renderZoo();
+}
+
+/* -------------------------------------------------------------------- shop */
+
+// The stall is the only place a balance is shown, and the zoo is the only screen it appears
+// on. Deliberately not in the header: a number beside the clock is a number a child watches
+// instead of the hands, and the clock scene has one job.
+
+const coinChip = (n) => `<span class="coin-pip" aria-hidden="true"></span>${n}`;
+
+function renderStall() {
+  el.stallBalance.innerHTML = coinChip(state.coins);
+  el.stallBalance.title = t('coins.balance', { n: state.coins });
+  el.shopStall.setAttribute('aria-label', `${t('shop.open')} — ${t('coins.balance', { n: state.coins })}`);
+}
+
+/** What this answer paid, drifting up off whatever earned it. */
+function showCoins(amount) {
+  audio.play('coin');
+  flyCoins(scene === 'play' ? el.petStage : el.zooScene, el.fx, t('coins.earned', { n: amount }));
+}
+
+const hatchedPets = () =>
+  Object.entries(state.items)
+    .filter(([, item]) => item.hatchedAt !== null)
+    .sort(([, a], [, b]) => a.h - b.h || a.m - b.m);
+
+function openShop() {
+  // Whichever pet the stall was serving last, while that pet still exists — a child buying
+  // two things for the same pet should not have to find it again in between.
+  const pets = hatchedPets();
+  if (!pets.some(([id]) => id === shopPetId)) shopPetId = pets[0]?.[0] ?? null;
+  el.shopNote.textContent = '';
+  renderShop();
+  el.shop.hidden = false;
+  audio.play('purr');
+}
+
+function closeShop() {
+  el.shop.hidden = true;
+  el.shopNote.textContent = '';
+}
+
+function renderShop() {
+  const pets = hatchedPets();
+  el.shopBalance.innerHTML = coinChip(state.coins);
+  el.shopBalance.title = t('coins.balance', { n: state.coins });
+  el.shopEmpty.hidden = pets.length > 0;
+  el.shopBody.hidden = pets.length === 0;
+  if (!pets.length) {
+    el.shopPets.innerHTML = '';
+    el.shopGrid.innerHTML = '';
+    return;
+  }
+
+  el.shopPets.innerHTML = pets
+    .map(([id, item]) => {
+      const on = id === shopPetId;
+      const name = escape(petName(item, t.lang));
+      return `
+        <button class="shop-pet${on ? ' is-on' : ''}" type="button"
+                aria-pressed="${on}" data-id="${id}">
+          ${petSvg(appearanceOf(item), { mood: 'content', title: name })}
+          <span class="shop-pet-name">${name}</span>
+        </button>`;
+    })
+    .join('');
+
+  const pet = state.items[shopPetId];
+  const petLabel = escape(petName(pet, t.lang));
+  el.shopGrid.innerHTML = CATALOG.map((entry) => {
+    const locked = !isUnlocked(entry.id, state.tier);
+    const owned = isOwned(pet, entry.id);
+    const poor = !canAfford(state.coins, entry.price);
+    const name = escape(t(`shop.${entry.id}`));
+    // Owned is checked before locked: a piece bought while its tier was open stays sellable
+    // even if a save arrives from a device that had got further.
+    const status = owned
+      ? `<span class="shop-state">${escape(t('shop.owned', { name: petLabel }))}</span>`
+      : locked
+        ? `<span class="shop-state is-locked">${escape(t('shop.locked'))}</span>`
+        : `<span class="shop-price${poor ? ' is-poor' : ''}">${coinChip(entry.price)}</span>`;
+    const cls = ['shop-card', owned && 'is-owned', !owned && locked && 'is-locked']
+      .filter(Boolean)
+      .join(' ');
+    // A locked card is never disabled: tapping it is how a child finds out what it is
+    // waiting for, and a dead button answers nothing.
+    return `
+      <button class="${cls}" type="button" data-id="${entry.id}">
+        <span class="shop-art">${shopArt(entry.id)}</span>
+        <span class="shop-name">${name}</span>
+        ${status}
+      </button>`;
+  }).join('');
+}
+
+/**
+ * The piece on its own, drawn from the same fragment the habitat uses so the thing in the
+ * shop and the thing in the pet's home can never drift apart. Coloured from the habitat the
+ * child is actually shopping for, which is also the honest preview: a lantern is the colour
+ * of the home it is going to.
+ */
+function shopArt(id) {
+  const pet = state.items[shopPetId];
+  const c = habitatOf(pet ?? { h: 12, m: 0 }).palette;
+  return `<svg viewBox="-20 -34 40 38" aria-hidden="true" focusable="false">${
+    (FURNITURE[id] ?? FURNITURE.flowerbed)(c)
+  }</svg>`;
+}
+
+/** Tapping a piece asks first, and shows it standing in the pet's own home while it asks. */
+function askToBuy(id) {
+  const pet = state.items[shopPetId];
+  const entry = shopItemById.get(id);
+  if (!pet || !entry) return;
+  const name = escape(petName(pet, t.lang));
+  const label = t(`shop.${id}`);
+
+  if (isOwned(pet, id)) {
+    pendingPurchase = { id, mode: 'sell' };
+    showConfirm(
+      habitatOf(pet),
+      t('shop.sellConfirm', { item: label, price: entry.price }),
+      t('shop.sell')
+    );
+    return;
+  }
+  if (!isUnlocked(id, state.tier)) return note(t('shop.lockedHelp'));
+  if (isFull(pet)) return note(t('shop.full', { name: petName(pet, t.lang) }));
+  if (!canAfford(state.coins, entry.price)) return note(t('shop.tooDear'));
+
+  pendingPurchase = { id, mode: 'buy' };
+  showConfirm(
+    habitatOf({ ...pet, decor: [...(pet.decor ?? []), id] }),
+    t('shop.confirm', { item: label, name: petName(pet, t.lang), price: entry.price }),
+    t('shop.buy')
+  );
+}
+
+function showConfirm(habitat, copy, action) {
+  el.confirmPreview.innerHTML = habitatSvg(habitat, { label: copy });
+  el.confirmCopy.textContent = copy;
+  el.confirmBuy.textContent = action;
+  el.shopConfirm.hidden = false;
+}
+
+function closeConfirm() {
+  el.shopConfirm.hidden = true;
+  el.confirmPreview.innerHTML = '';
+  pendingPurchase = null;
+}
+
+function commit() {
+  const pet = state.items[shopPetId];
+  const entry = pendingPurchase && shopItemById.get(pendingPurchase.id);
+  if (!pet || !entry) return closeConfirm();
+
+  if (pendingPurchase.mode === 'sell') {
+    state.items[shopPetId] = sellItem(pet, pendingPurchase.id);
+    // Full price back, always. A child who tries something has to be able to undo it without
+    // the undoing costing them anything, or trying things stops being safe.
+    state.coins = earn(state.coins, entry.price);
+    note(t('shop.sold', { price: entry.price }));
+  } else {
+    if (!canAfford(state.coins, entry.price) || isFull(pet)) return closeConfirm();
+    state.items[shopPetId] = buyItem(pet, pendingPurchase.id);
+    state.coins = spend(state.coins, entry.price);
+    note(t('shop.bought', { name: petName(pet, t.lang) }));
+    audio.play('buy');
+    buzz([12, 40, 18]);
+  }
+
+  save();
+  closeConfirm();
+  renderShop();
+  renderStall();
+  renderZoo();
+  if (habitatId === shopPetId) refreshHabitat();
+}
+
+const note = (message) => {
+  el.shopNote.textContent = message;
+};
+
+el.shopStall.addEventListener('click', () => openShop());
+el.shopClose.addEventListener('click', closeShop);
+el.confirmCancel.addEventListener('click', closeConfirm);
+el.confirmBuy.addEventListener('click', commit);
+
+el.shopPets.addEventListener('click', (event) => {
+  const pick = event.target.closest('.shop-pet');
+  if (!pick) return;
+  shopPetId = pick.dataset.id;
+  note('');
+  renderShop();
+});
+
+el.shopGrid.addEventListener('click', (event) => {
+  const card = event.target.closest('.shop-card');
+  if (card) askToBuy(card.dataset.id);
+});
+
+/**
+ * A zoo that predates the shop is paid for the pets it already has, once. Without this a
+ * child with forty pets meets a shop they cannot use and a week of saving; with it, the
+ * feature arrives as a purse rather than as a locked door.
+ *
+ * `coinsGrantedAt` is the latch. It is set whether or not anything was owed, so an empty
+ * zoo is not re-walked on every reload, and a save that has already been paid on another
+ * device arrives with the latch already down.
+ */
+function grantBackPay() {
+  if (state.coinsGrantedAt) return;
+  state.coins = earn(state.coins, retroGrant(state.items, state.tier));
+  state.coinsGrantedAt = now();
+  save();
 }
 
 /* ----------------------------------------------------------------- habitat */
@@ -1133,6 +1410,8 @@ function applyLanguage() {
   if (scene === 'zoo') renderZoo();
   if (scene === 'nap') renderNapPets();
   refreshHabitat();
+  renderStall();
+  if (!el.shop.hidden) renderShop();
   if (!el.grownups.hidden) renderGrownups();
 }
 
@@ -1268,13 +1547,18 @@ function runImport(text) {
   if (!confirm(t('transfer.confirm'))) return;
 
   state = applyImport(state, payload, now());
+  // A zoo arriving from a build that predates the shop collects its back pay here rather
+  // than on the next reload, so the child can spend it in the session they imported it in.
+  grantBackPay();
   // Queue the new state *then* force it out: flushing first would push whatever the old
   // zoo had left pending and lose the import to a tab closed in the next few hundred ms.
   save();
   saver.flush();
-  // The zoo that was in flight belongs to the save that has just been replaced.
+  // The zoo that was in flight belongs to the save that has just been replaced, and so does
+  // whichever pet the stall was serving.
   current = null;
   lastAskedId = null;
+  shopPetId = null;
   setTransferStatus(t('transfer.imported', { n: petCount(state.items) }));
   applyLanguage();
   showScene('play');
@@ -1311,7 +1595,9 @@ buildLanguageOptions();
 el.playMinutes.min = String(session.PLAY_MINUTES_MIN);
 el.playMinutes.max = String(session.PLAY_MINUTES_MAX);
 applyLanguage();
+grantBackPay();
 renderZooBadge();
+renderStall();
 
 // A reload is not a way to buy more play: both the nap and a session already in progress
 // are picked up from storage exactly where they were left. Only a session old enough to

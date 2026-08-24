@@ -120,6 +120,8 @@ import {
   BIOME_IDS,
   biomeOfSpecies,
   CENTRE_KEEP,
+  furnitureFor,
+  furnitureSpotsFor,
   habitatFor,
   habitatOf,
   habitatSvg,
@@ -134,6 +136,9 @@ import {
   stepBall,
 } from '../habitat.js';
 import {
+  FURNITURE,
+  FURNITURE_HALF_WIDTH,
+  FURNITURE_IDS,
   HORIZON,
   orbPoint,
   PET_SIZE,
@@ -146,6 +151,32 @@ import {
   TREAT_IDS,
   WALK_Y,
 } from '../habitat-parts.js';
+import {
+  buy,
+  CATALOG,
+  isFull,
+  isOwned,
+  isUnlocked,
+  itemById as shopItemById,
+  MAX_DECOR,
+  sanitizeDecor,
+  sell,
+} from '../shop.js';
+import {
+  canAfford,
+  DAY_COINS,
+  DAY_STREAK_COINS,
+  dayBonusFor,
+  earn,
+  EVOLVE_COINS,
+  HATCH_COINS,
+  normalize,
+  payoutFor,
+  retroGrant,
+  SESSION_COINS,
+  spend,
+  TIER_COINS,
+} from '../wallet.js';
 import {
   ACCESSORIES,
   ANATOMY,
@@ -1100,7 +1131,7 @@ test('neither language is missing a string the other has', () => {
 test('no string is left untranslated — every Norwegian value differs from the English', () => {
   const t = { nb: translator('nb'), en: translator('en') };
   // Bar the handful that are the same word in both, or carry only placeholders.
-  const shared = new Set(['unlock.copy']);
+  const shared = new Set(['unlock.copy', 'coins.earned']);
   const identical = languageKeys('nb').filter(
     (key) => !shared.has(key) && t.nb(key) === t.en(key)
   );
@@ -1654,7 +1685,7 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, hatchedAt: 1 };
+  const item = { h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
 });
 
@@ -2242,6 +2273,284 @@ test('a habitat varies along the same trait index that varies its pet', () => {
     seen.add(JSON.stringify(habitatFor(h, m).scenery));
   }
   assert(seen.size > 1, 'every Bubs was given the same arrangement');
+});
+
+describe('coins — what looking after the zoo pays');
+
+test('a correct answer on its own pays nothing', () => {
+  assertEqual(payoutFor({ hatched: false, evolved: 0 }), 0, 'answers must not mint coins');
+  assertEqual(payoutFor({}), 0);
+  assertEqual(payoutFor(null), 0, 'and a missing event bag is not a payday');
+});
+
+test('hatching, growing and opening a tier are what pay', () => {
+  assertEqual(payoutFor({ hatched: true }), HATCH_COINS);
+  assertEqual(payoutFor({ evolved: 2 }), EVOLVE_COINS[2]);
+  assertEqual(payoutFor({ evolved: 3 }), EVOLVE_COINS[3]);
+  assert(EVOLVE_COINS[3] > EVOLVE_COINS[2], 'the rarer form is worth more');
+  assert(TIER_COINS > HATCH_COINS, 'and a whole tier is worth more than one pet');
+});
+
+test('a form the game does not have pays nothing rather than NaN', () => {
+  assertEqual(payoutFor({ evolved: 9 }), 0);
+});
+
+test('the day bonus is paid once, and doubled for a day that follows yesterday', () => {
+  assertEqual(dayBonusFor(['2026-08-23', '2026-08-24'], '2026-08-24'), DAY_STREAK_COINS);
+  assertEqual(dayBonusFor(['2026-08-01', '2026-08-24'], '2026-08-24'), DAY_COINS, 'a gap is not a streak');
+  assertEqual(dayBonusFor(['2026-08-24'], '2026-08-24'), DAY_COINS, 'the very first day still pays');
+  assertEqual(dayBonusFor(['2026-08-23'], '2026-08-24'), 0, 'today has not been recorded yet');
+  assertEqual(dayBonusFor([], '2026-08-24'), 0);
+});
+
+test('the day bonus survives the turn of a month and of a year', () => {
+  assertEqual(dayBonusFor(['2026-07-31', '2026-08-01'], '2026-08-01'), DAY_STREAK_COINS);
+  assertEqual(dayBonusFor(['2025-12-31', '2026-01-01'], '2026-01-01'), DAY_STREAK_COINS);
+});
+
+test('a purse is whole, never negative, and never NaN', () => {
+  assertEqual(normalize(-5), 0);
+  assertEqual(normalize(7.8), 7);
+  assertEqual(normalize('nonsense'), 0, 'a hand-edited save cannot make a fortune');
+  assertEqual(normalize(undefined), 0);
+  assertEqual(earn(10, 6), 16);
+  assertEqual(earn(-4, 6), 6);
+});
+
+test('spending refuses rather than overdraws', () => {
+  assertEqual(spend(100, 45), 55);
+  assertEqual(spend(30, 45), 30, 'a caller that forgot to check cannot go below zero');
+  assertEqual(spend(45, 45), 0, 'and exactly enough is enough');
+  assert(canAfford(45, 45) && !canAfford(44, 45));
+});
+
+describe('coins — a zoo that predates the shop opens with something in it');
+
+test('back pay covers every pet already hatched and every form already earned', () => {
+  const items = {
+    '1:00': { hatchedAt: 1, feeds: 5 }, // form 3: both evolutions
+    '2:00': { hatchedAt: 1, feeds: 3 }, // form 2: one evolution
+    '3:00': { hatchedAt: 1, feeds: 1 }, // hatched, no evolutions yet
+    '4:00': { hatchedAt: null, feeds: 0 }, // still an egg, and eggs do not pay
+  };
+  const expected =
+    3 * HATCH_COINS + EVOLVE_COINS[2] + EVOLVE_COINS[3] + EVOLVE_COINS[2] + 2 * TIER_COINS;
+  assertEqual(retroGrant(items, 2), expected);
+});
+
+test('an empty zoo is granted nothing at all', () => {
+  assertEqual(retroGrant({}, 0), 0);
+  assertEqual(retroGrant(undefined, 0), 0);
+});
+
+test('back pay is a pure function of the save, so running it twice cannot pay twice', () => {
+  const items = { '1:00': { hatchedAt: 1, feeds: 5 } };
+  assertEqual(retroGrant(items, 1), retroGrant(items, 1), 'the walk must not mutate the zoo');
+  assertEqual(JSON.stringify(items), '{"1:00":{"hatchedAt":1,"feeds":5}}');
+});
+
+describe('the shop — locking, owning and the two-slot cap');
+
+test('every catalogue entry is priced, tiered and drawable', () => {
+  assert(CATALOG.length > 0);
+  for (const entry of CATALOG) {
+    assert(entry.price > 0, `${entry.id} is free`);
+    assert(entry.tier >= 0 && entry.tier <= LAST_TIER, `${entry.id} sits outside the curriculum`);
+    assert(FURNITURE_IDS.includes(entry.id), `${entry.id} has nothing to draw`);
+    assert(['wide', 'narrow'].includes(entry.band), `${entry.id} has no width`);
+  }
+});
+
+test('something is buyable from the very first tier', () => {
+  assert(CATALOG.some((entry) => entry.tier === 0), 'the shop must not open empty');
+});
+
+test('a piece unlocks at its own tier and stays unlocked above it', () => {
+  const house = shopItemById.get('house');
+  assert(!isUnlocked('house', house.tier - 1), 'it was open too early');
+  assert(isUnlocked('house', house.tier));
+  assert(isUnlocked('house', LAST_TIER), 'and it must not close again');
+  assert(!isUnlocked('no-such-thing', LAST_TIER), 'and nothing unknown is ever unlocked');
+});
+
+test('buying adds one piece, and the same piece cannot be bought twice', () => {
+  const pet = { decor: [] };
+  const one = buy(pet, 'house');
+  assertEqual(one.decor.join(), 'house');
+  assertEqual(buy(one, 'house').decor.join(), 'house', 'it was bought twice');
+  assertEqual(pet.decor.length, 0, 'and the pet handed in was mutated');
+});
+
+test('a full home refuses a further purchase rather than dropping what is there', () => {
+  let pet = { decor: [] };
+  for (const entry of CATALOG.slice(0, MAX_DECOR)) pet = buy(pet, entry.id);
+  assert(isFull(pet));
+  const refused = buy(pet, CATALOG[MAX_DECOR].id);
+  assertEqual(refused.decor.length, MAX_DECOR, 'the cap was exceeded');
+  assertEqual(refused.decor.join(), pet.decor.join(), 'and something already owned was lost');
+});
+
+test('selling gives the piece back and leaves the others where they were', () => {
+  const pet = buy(buy({ decor: [] }, 'flowerbed'), 'lantern');
+  const after = sell(pet, 'flowerbed');
+  assertEqual(after.decor.join(), 'lantern');
+  assert(!isOwned(after, 'flowerbed') && isOwned(after, 'lantern'));
+  assertEqual(sell(after, 'flowerbed').decor.join(), 'lantern', 'selling it twice invented a coin');
+});
+
+test('a piece sold back returns exactly what it cost — experimenting is free', () => {
+  for (const entry of CATALOG) {
+    const bought = spend(500, entry.price);
+    assertEqual(earn(bought, entry.price), 500, `${entry.id} costs something to try`);
+  }
+});
+
+test('only ids this build can draw ever reach a habitat', () => {
+  assertEqual(sanitizeDecor(['house', 'bogus', 'house', 'lantern']).join(), 'house,lantern');
+  assertEqual(sanitizeDecor('house').length, 0, 'a string is not a list of pieces');
+  assertEqual(sanitizeDecor(null).length, 0);
+  assertEqual(sanitizeDecor(CATALOG.map((e) => e.id)).length, MAX_DECOR, 'the cap holds on load too');
+});
+
+describe('the shop — what a purchase puts in a habitat');
+
+test('every habitat has room for a full set, clear of everything the pet uses', () => {
+  for (const layout of LAYOUTS) {
+    const spots = furnitureSpotsFor(layout);
+    assertEqual(spots.length, MAX_DECOR, 'a layout cannot hold a full home');
+    const busy = [layout.nest, layout.larder, layout.ball, homeSpotFor(layout, ROAM)];
+    for (const x of spots) {
+      for (const b of busy) {
+        assert(Math.abs(x - b) >= 12, `a piece at ${x} crowds something the pet needs at ${b}`);
+      }
+      assert(x < CENTRE_KEEP.x0 || x > CENTRE_KEEP.x1, 'the middle belongs to the pet');
+    }
+    assert(Math.abs(spots[0] - spots[1]) >= 24, 'two pieces would read as one');
+  }
+});
+
+test('a bought piece is wholly inside the crop, however wide it is', () => {
+  for (const item of ALL_ITEMS) {
+    for (const f of habitatOf({ ...item, decor: ['house', 'windmill'] }).furniture) {
+      assert(f.x - FURNITURE_HALF_WIDTH >= SAFE.x0, `${item.id} loses the left of a piece`);
+      assert(f.x + FURNITURE_HALF_WIDTH <= SAFE.x1, `${item.id} loses the right of a piece`);
+      assertEqual(f.y, WALK_Y, 'furniture must stand on the same ground as the pet');
+    }
+  }
+});
+
+test('a pet with nothing bought has an empty home, and 144 of them still cost no bytes', () => {
+  for (const item of ALL_ITEMS) {
+    assertEqual(habitatOf(item).furniture.length, 0, `${item.id} was given something free`);
+  }
+});
+
+test('the same pet lays its home out the same way every time', () => {
+  const item = { h: 4, m: 15, decor: ['flowerbed'] };
+  assertEqual(JSON.stringify(habitatOf(item).furniture), JSON.stringify(habitatOf(item).furniture));
+  // Buying a second piece must not move the first one.
+  const one = habitatOf(item).furniture[0];
+  const two = habitatOf({ ...item, decor: ['flowerbed', 'lantern'] }).furniture[0];
+  assertEqual(two.x, one.x, 'the first piece moved when a second arrived');
+});
+
+test('a junk id in a save is dropped rather than drawn', () => {
+  const furniture = habitatOf({ h: 4, m: 15, decor: ['bogus', 'pond'] }).furniture;
+  assertEqual(furniture.length, 1);
+  assertEqual(furniture[0].id, 'pond');
+});
+
+test('every piece draws, in every palette, without a hole in it', () => {
+  for (const habitat of [habitatFor(12, 0), habitatFor(11, 30), habitatFor(3, 45)]) {
+    for (const id of FURNITURE_IDS) {
+      const markup = FURNITURE[id](habitat.palette);
+      assert(markup.length > 0, `${id} draws nothing`);
+      assert(!markup.includes('undefined'), `${id} asks for a colour the palette has not got`);
+    }
+  }
+});
+
+test('a habitat with furniture in it actually renders it', () => {
+  const svg = habitatSvg(habitatOf({ h: 4, m: 15, decor: ['house', 'lantern'] }), { label: 'x' });
+  assertEqual((svg.match(/hab-furniture/g) ?? []).length, 2);
+  assert(!svg.includes('undefined'));
+});
+
+describe('the shop — what a save has to remember');
+
+test('a fresh zoo starts with an empty purse and no back pay yet paid', () => {
+  const state = freshState(1000);
+  assertEqual(state.coins, 0);
+  assertEqual(state.coinsGrantedAt, 0, 'the latch must start open');
+});
+
+test('a save from before the shop backfills an empty home rather than being rejected', () => {
+  const migrated = migrateItems({ '4:15': { h: 4, m: 15, reps: 2, feeds: 3, cracks: 2 } });
+  assertEqual(JSON.stringify(migrated['4:15'].decor), '[]');
+});
+
+test('a hand-edited balance is pulled back to something sane on load', () => {
+  withStorage((storage) => {
+    const state = { ...freshState(1000), coins: -999 };
+    write(state, storage);
+    assertEqual(load(2000, storage).coins, 0, 'a negative balance came back');
+    write({ ...freshState(1000), coins: 'lots' }, storage);
+    assertEqual(load(2000, storage).coins, 0, 'a nonsense balance came back');
+    write({ ...freshState(1000), coins: 61.7 }, storage);
+    assertEqual(load(2000, storage).coins, 61, 'a fractional coin came back');
+  });
+});
+
+test('a purse and what each pet owns both survive a save and a reload', () => {
+  withStorage((storage) => {
+    const state = {
+      ...freshState(1000),
+      coins: 137,
+      items: { '4:15': { h: 4, m: 15, feeds: 1, cracks: 2, decor: ['house'], hatchedAt: 1 } },
+    };
+    write(state, storage);
+    const back = load(2000, storage);
+    assertEqual(back.coins, 137);
+    assertEqual(back.items['4:15'].decor.join(), 'house');
+  });
+});
+
+describe('the shop — coins cross between devices');
+
+test('a balance and the furniture travel with the zoo', () => {
+  const state = {
+    ...freshState(1000),
+    coins: 88,
+    items: { '4:15': { h: 4, m: 15, feeds: 1, cracks: 2, decor: ['house'], hatchedAt: 1 } },
+  };
+  const payload = exportPayload(state, 2000);
+  assertEqual(payload.coins, 88, 'a balance left behind is a balance lost');
+  const arrived = applyImport(freshState(3000), JSON.parse(payloadToJson(payload)), 3000);
+  assertEqual(arrived.coins, 88);
+  assertEqual(arrived.items['4:15'].decor.join(), 'house');
+});
+
+test('a save that already carries a balance is not paid its back pay twice', () => {
+  const payload = { ...exportPayload({ ...freshState(1000), coins: 40 }, 2000) };
+  assertEqual(applyImport(freshState(3000), payload, 3000).coinsGrantedAt, 3000, 'the latch must be down');
+});
+
+test('a save from before the shop arrives with its back pay still owing', () => {
+  const payload = exportPayload(freshState(1000), 2000);
+  delete payload.coins;
+  const arrived = applyImport(freshState(3000), payload, 3000);
+  assertEqual(arrived.coins, 0);
+  assertEqual(arrived.coinsGrantedAt, 0, 'an old zoo would have lost every coin it had earned');
+});
+
+test('a hand-edited file cannot import a fortune or a piece this build cannot draw', () => {
+  const payload = exportPayload(freshState(1000), 2000);
+  payload.coins = -1;
+  assertEqual(applyImport(freshState(3000), payload, 3000).coins, 0);
+  const smuggled = cleanItems({
+    '4:15': { h: 4, m: 15, feeds: 1, cracks: 2, decor: ['house', 'trebuchet'], hatchedAt: 1 },
+  });
+  assertEqual(smuggled['4:15'].decor.join(), 'house');
 });
 
 const out = document.getElementById('out');

@@ -120,6 +120,33 @@ export function flyHeart(from, to, layer) {
 }
 
 /**
+ * The coins an answer just paid, drifting up off whatever earned them. The sibling of
+ * `flyHeart`, except that it flies nowhere in particular: the purse lives on the zoo screen,
+ * and a number that sails off toward a tab the child cannot currently see reads as a number
+ * being taken away rather than given.
+ */
+export function flyCoins(node, layer, label) {
+  if (!node || !layer || reduceMotion()) return;
+  const host = layer.getBoundingClientRect();
+  const a = node.getBoundingClientRect();
+  const tag = document.createElement('i');
+  tag.className = 'fly-coins';
+  tag.textContent = label;
+  layer.appendChild(tag);
+  const x = a.left + a.width / 2 - host.left;
+  const y = a.top + a.height / 2 - host.top;
+  const anim = tag.animate(
+    [
+      { transform: `translate(${x}px, ${y}px) scale(0.6)`, opacity: 0 },
+      { transform: `translate(${x}px, ${y - 34}px) scale(1)`, opacity: 1, offset: 0.28 },
+      { transform: `translate(${x}px, ${y - 92}px) scale(1)`, opacity: 0 },
+    ],
+    { duration: 1100, easing: 'cubic-bezier(.3,0,.4,1)' }
+  );
+  anim.onfinish = () => tag.remove();
+}
+
+/**
  * Hearts rising off whatever is being stroked. Same DOM-particle idiom as `flyHeart`, but
  * anchored to one element and repeatable, because stroking a pet is a thing you keep doing
  * rather than a thing that happens once.

@@ -486,6 +486,107 @@ export const BALL = (c) => `
 export const BALL_REST = (c) => `
   <ellipse cx="0" cy="0" rx="7.4" ry="2.6" fill="${c.leafDark}" opacity="0.45" />`;
 
+/* ---------------------------------------------------------------- furniture */
+
+/**
+ * The pieces the stall sells. Same contract as SCENERY: base at (0, 0), growing upward into
+ * -y, coloured entirely from the habitat's palette so a bought house belongs to the biome it
+ * lands in rather than looking pasted on.
+ *
+ * The habitat rules apply here more than anywhere, because these are the only parts of a
+ * scene a child chose: nothing that reads as a cage, nothing sharp, and every piece has to
+ * survive nightfall. Anything with a lamp in it draws that lamp with `glow`, which is light
+ * rather than surface and so does not take the night tint — at midnight the lantern is the
+ * brightest thing in the habitat, which is exactly what a lantern is for.
+ *
+ * `WIDE` lists the pieces that need elbow room; shop.js gives those the roomier side band.
+ */
+export const FURNITURE = {
+  flowerbed: (c) => `
+    <path d="M-9 0 L-7.6 -4.4 L7.6 -4.4 L9 0 Z" fill="${c.wood}" />
+    <path d="M-7.6 -4.4 L7.6 -4.4 L6.6 -5.6 L-6.6 -5.6 Z" fill="${c.groundRim}" />
+    <g stroke="${c.leafDark}" stroke-width="1.1" fill="none" stroke-linecap="round">
+      <path d="M-4.6 -5.6 q-0.8 -3.4 -1.2 -5.6" />
+      <path d="M0 -5.6 q0.8 -4 1 -6.8" />
+      <path d="M4.6 -5.6 q0.4 -3 0.2 -5" />
+    </g>
+    <circle cx="-5.8" cy="-11.8" r="2.5" fill="${c.bloom}" />
+    <circle cx="1" cy="-13" r="2.8" fill="${c.accent}" />
+    <circle cx="4.8" cy="-11" r="2.3" fill="${c.bloom}" />
+    <circle cx="1" cy="-13" r="1" fill="#fff8e0" opacity="0.8" />`,
+
+  lantern: (c) => `
+    <ellipse cx="0" cy="-0.6" rx="5" ry="2" fill="${c.stone}" />
+    <path d="M-1.5 -1.6 L-1.1 -17 L1.1 -17 L1.5 -1.6 Z" fill="${c.wood}" />
+    <path d="M-4.4 -17 L4.4 -17 L3 -19 L-3 -19 Z" fill="${c.stoneLight}" />
+    <circle cx="0" cy="-23" r="7" fill="${c.glow}" opacity="0.4" />
+    <path d="M-3.4 -17 L-2.6 -25 L2.6 -25 L3.4 -17 Z" fill="${c.glowDeep}" />
+    <path d="M-3.4 -17 L-2.6 -25 L2.6 -25 L3.4 -17 Z" fill="none" stroke="${c.wood}" stroke-width="1.2" />
+    <path d="M-3 -25.4 L3 -25.4 L1.6 -27.6 L-1.6 -27.6 Z" fill="${c.stoneLight}" />
+    <circle cx="0" cy="-21" r="2" fill="#fff8e0" opacity="0.85" />`,
+
+  house: (c) => `
+    <path d="M-13 0 L-13 -11 L13 -11 L13 0 Z" fill="${c.wood}" />
+    <path d="M-13 -11 L-13 -8.4 L13 -8.4 L13 -11 Z" fill="${c.stone}" opacity="0.3" />
+    <path d="M0 -22 L15.6 -10 L-15.6 -10 Z" fill="${c.nestDark}" />
+    <path d="M0 -19.4 L11.6 -10.6 L-11.6 -10.6 Z" fill="${c.nest}" />
+    <path d="M-6 0 Q-6 -8.6 0 -8.6 Q6 -8.6 6 0 Z" fill="${c.groundRim}" />
+    <path d="M-6 0 Q-6 -8.6 0 -8.6 Q6 -8.6 6 0" fill="none" stroke="${c.nestLight}" stroke-width="1.4" />
+    <circle cx="0" cy="-14.4" r="2" fill="${c.glow}" opacity="0.55" />`,
+
+  swing: (c) => `
+    <path d="M-11 0 L-1.4 -18 M11 0 L1.4 -18" stroke="${c.wood}" stroke-width="2.4" stroke-linecap="round" />
+    <path d="M-4.6 -17.4 L4.6 -17.4" stroke="${c.wood}" stroke-width="2" stroke-linecap="round" />
+    <path d="M-3.4 -17 L-3.4 -7.6 M3.4 -17 L3.4 -7.6" stroke="${c.stoneLight}" stroke-width="1.1" />
+    <path d="M-5 -7.6 L5 -7.6 L5 -6 L-5 -6 Z" fill="${c.nest}" />
+    <path d="M-5 -6 L5 -6 L5 -5.4 L-5 -5.4 Z" fill="${c.nestDark}" />`,
+
+  pond: (c) => `
+    <ellipse cx="0" cy="-2" rx="11.6" ry="5" fill="${c.groundRim}" />
+    <ellipse cx="0" cy="-2.6" rx="10" ry="4" fill="${c.water}" />
+    <ellipse cx="-2.4" cy="-3.4" rx="4" ry="1.4" fill="${c.waterLight}" opacity="0.7" />
+    <ellipse cx="4.4" cy="-1.6" rx="3" ry="1.2" fill="${c.leaf}" />
+    <circle cx="4.4" cy="-2.2" r="1.4" fill="${c.bloom}" />
+    <circle cx="-6" cy="-1.2" r="1.8" fill="${c.stoneLight}" />`,
+
+  hammock: (c) => `
+    <path d="M-12 0 L-11.4 -16" stroke="${c.wood}" stroke-width="2.4" stroke-linecap="round" />
+    <path d="M12 0 L11.4 -16" stroke="${c.wood}" stroke-width="2.4" stroke-linecap="round" />
+    <path d="M-11.4 -15 Q0 -3.4 11.4 -15" fill="${c.nest}" stroke="${c.nestDark}" stroke-width="1.2" />
+    <path d="M-8 -11.4 Q0 -5.6 8 -11.4" fill="none" stroke="${c.nestLight}" stroke-width="1" opacity="0.8" />
+    <circle cx="-11.4" cy="-16" r="1.6" fill="${c.leaf}" />
+    <circle cx="11.4" cy="-16" r="1.6" fill="${c.leaf}" />`,
+
+  arch: (c) => `
+    <path d="M-12 0 L-12 -12 Q-12 -22 0 -22 Q12 -22 12 -12 L12 0"
+          fill="none" stroke="${c.wood}" stroke-width="2.8" stroke-linecap="round" />
+    <g fill="${c.leaf}">
+      <ellipse cx="-11.4" cy="-15" rx="3.4" ry="2.4" transform="rotate(-24 -11.4 -15)" />
+      <ellipse cx="-6.6" cy="-20.6" rx="3.6" ry="2.4" transform="rotate(-12 -6.6 -20.6)" />
+      <ellipse cx="6.6" cy="-20.6" rx="3.6" ry="2.4" transform="rotate(12 6.6 -20.6)" />
+      <ellipse cx="11.4" cy="-15" rx="3.4" ry="2.4" transform="rotate(24 11.4 -15)" />
+    </g>
+    <circle cx="-9.4" cy="-18.6" r="2" fill="${c.bloom}" />
+    <circle cx="0" cy="-22.6" r="2.2" fill="${c.accent}" />
+    <circle cx="9.4" cy="-18.6" r="2" fill="${c.bloom}" />`,
+
+  windmill: (c) => `
+    <path d="M-4.4 0 L-1.2 -20 L1.2 -20 L4.4 0 Z" fill="${c.wood}" />
+    <path d="M-4.4 0 L-1.2 -20 L0 -20 L0 0 Z" fill="${c.stone}" opacity="0.25" />
+    <g class="hab-vane" transform="translate(0 -21)">
+      <path d="M0 0 L1.6 -9 L-1.6 -9 Z" fill="${c.accent}" />
+      <path d="M0 0 L9 -1.6 L9 1.6 Z" fill="${c.bloom}" />
+      <path d="M0 0 L-1.6 9 L1.6 9 Z" fill="${c.accent}" />
+      <path d="M0 0 L-9 1.6 L-9 -1.6 Z" fill="${c.bloom}" />
+    </g>
+    <circle cx="0" cy="-21" r="1.8" fill="${c.stoneLight}" />`,
+};
+
+export const FURNITURE_IDS = Object.keys(FURNITURE);
+
+/** How much room each piece needs either side of its spot, for the spacing check. */
+export const FURNITURE_HALF_WIDTH = 16;
+
 /* -------------------------------------------------------------------- extra */
 
 /** Fireflies and drifting motes — night and glow biomes only, and motion-optional. */

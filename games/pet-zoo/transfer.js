@@ -14,6 +14,7 @@
 
 import { MINUTE_STEP, timeId } from './clock.js';
 import { dayStamp, freshState, migrateItems, VERSION } from './store.js';
+import { normalize as normalizeCoins } from './wallet.js';
 
 export const TRANSFER_APP = 'pet-zoo';
 export const TRANSFER_FORMAT = 1;
@@ -44,6 +45,7 @@ export function exportPayload(state, now) {
     lastPlayedAt: state.lastPlayedAt,
     reviewClock: state.reviewClock,
     tier: state.tier,
+    coins: state.coins,
     stats: state.stats,
     items: state.items,
   };
@@ -157,6 +159,14 @@ export function applyImport(state, payload, now) {
     lastPlayedAt: payload.lastPlayedAt ?? now,
     reviewClock: Number.isFinite(payload.reviewClock) ? payload.reviewClock : 0,
     tier: Number.isFinite(payload.tier) ? payload.tier : 0,
+    // A balance from a build that predates the shop, or from a hand-edited file, arrives as
+    // nothing rather than as a fortune. What each pet owns rides along on the items.
+    coins: normalizeCoins(payload.coins),
+    // A save that carries a balance was already paid its back pay on the device it came
+    // from; one from a build that predates the shop has not been, and is left for the grant
+    // at boot to pick up — otherwise moving an old zoo across would quietly cost the child
+    // every coin their forty pets had earned.
+    coinsGrantedAt: Number.isFinite(payload.coins) ? now : 0,
     stats: { ...base.stats, ...(isPlainObject(payload.stats) ? payload.stats : {}) },
     items: payload.items,
     settings: state.settings,

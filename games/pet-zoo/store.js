@@ -7,6 +7,8 @@
 
 import { DEFAULT_LANGUAGE } from './i18n.js';
 import { PLAY_MINUTES_DEFAULT } from './session.js';
+import { sanitizeDecor } from './shop.js';
+import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
 
 export const STORAGE_KEY = 'pet-zoo/v1';
@@ -20,6 +22,10 @@ export function freshState(now) {
     lastPlayedAt: now,
     reviewClock: 0,
     tier: 0,
+    coins: 0,
+    // When the shop's back pay was handed out. Set once, so a zoo that predates coins is
+    // paid for the pets it already had exactly once however often it is reloaded.
+    coinsGrantedAt: 0,
     settings: {
       sound: true,
       haptics: true,
@@ -53,6 +59,9 @@ export function load(now, storage = safeStorage()) {
     return {
       ...freshState(now),
       ...parsed,
+      // A balance is the one number worth spending on: hand-edited, corrupt or absent, it
+      // comes back as a whole number of coins that is not negative.
+      coins: normalizeCoins(parsed.coins),
       settings: { ...freshState(now).settings, ...parsed.settings },
       items: migrateItems(parsed.items),
     };
@@ -68,7 +77,9 @@ export function load(now, storage = safeStorage()) {
  * `feeds` predates forms and is reconstructed from `reps` — a pet that was already well known
  * simply appears at the form it had earned, rather than starting again from a baby. `cracks`
  * predates the cracking egg and is reconstructed from the streak the egg had already built, so an
- * egg mid-way through a save from an older build comes back visibly part-broken.
+ * egg mid-way through a save from an older build comes back visibly part-broken. `decor` predates
+ * the shop and starts empty, and is filtered on every load rather than trusted: an id this build
+ * cannot draw must never reach a habitat.
  */
 export function migrateItems(items) {
   const out = {};
@@ -77,8 +88,13 @@ export function migrateItems(items) {
       typeof item?.feeds === 'number' ? item.feeds : item?.reps || (item?.hatchedAt ? 1 : 0);
     const cracks =
       typeof item?.cracks === 'number' ? item.cracks : crackFor(item?.correctStreak ?? 0);
-    const current = typeof item?.feeds === 'number' && typeof item?.cracks === 'number';
-    out[id] = current ? item : { ...item, feeds, cracks };
+    const decor = sanitizeDecor(item?.decor);
+    const current =
+      typeof item?.feeds === 'number' &&
+      typeof item?.cracks === 'number' &&
+      Array.isArray(item?.decor) &&
+      decor.length === item.decor.length;
+    out[id] = current ? item : { ...item, feeds, cracks, decor };
   }
   return out;
 }
