@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tasks tests</title>
+    <style>
+      main { max-width: 900px; margin: 1rem auto; padding: 0 1rem; }
+      .pass { color: #16a34a; }
+      .fail { color: #dc2626; }
+      div.pass, div.fail { padding: 0.15rem 0; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+      h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ui-muted); margin: 1.2rem 0 0.3rem; }
+      code { background: rgba(128,128,128,0.14); padding: 0 0.25rem; border-radius: 3px; }
+      #summary { font-weight: 600; margin-bottom: 0.5rem; }
+    </style>
+    <script type="module" crossorigin src="/games/pr-previews/pr-29/assets/games/tasks/tests-B2aAZEsX.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-29/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-29/assets/llm-D24sG0Cn.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-29/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <a class="back-link" href="../">← Back to Tasks</a>
+    <main>
+      <h1>Tasks tests</h1>
+      <p class="muted">
+        Markdown round-tripping, ids, dates, timeline buckets, derived status, filters, the
+        LLM response parsers and the zip writer — plus the storage layer, driven against a
+        fake directory handle and a fake Dropbox: the read-only gate, the refusal to overwrite
+        a file that moved elsewhere, and the conflict copies it leaves alone. Rendering is not
+        covered here.
+      </p>
+      <div id="summary">Running…</div>
+      <div id="out"></div>
+    </main>
+  </body>
+</html>
