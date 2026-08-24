@@ -58,6 +58,18 @@ const SOUNDS = {
     tone(ac, { type: 'sine', freq: 400, duration: 0.16, gain: 0.07 });
     tone(ac, { type: 'sine', freq: 330, duration: 0.22, gain: 0.07, delay: 0.14 });
   },
+  // A coin landing in the purse: two bright taps, the second higher, and nothing more. It
+  // has to sit inside the hatch fanfare without competing with it, so it is short and quiet.
+  coin(ac) {
+    tone(ac, { type: 'triangle', freq: 1180, duration: 0.07, gain: 0.06 });
+    tone(ac, { type: 'triangle', freq: 1760, duration: 0.1, gain: 0.05, delay: 0.06 });
+  },
+  // And the shop's own sound: the same two taps, resolved downward into something settled,
+  // because a purchase is a thing finished rather than a thing won.
+  buy(ac) {
+    arpeggio(ac, [880, 1175, 1568], { type: 'triangle', gain: 0.09, spacing: 0.07, duration: 0.24 });
+    tone(ac, { type: 'sine', freq: 587, duration: 0.3, gain: 0.06, delay: 0.2 });
+  },
   // Evolution: a rising sweep into a bigger, higher version of the hatch fanfare.
   evolve(ac) {
     tone(ac, { type: 'sawtooth', freq: 160, endFreq: 1200, duration: 0.75, gain: 0.05 });

@@ -19,6 +19,8 @@
   --pz-day-b: #fff3e2;
   --pz-dusk-a: #3a3566;
   --pz-dusk-b: #f2a07a;
+  --pz-coin: #e8a52c;
+  --pz-coin-deep: #b6740f;
   --dusk: 0;
 }
 
@@ -39,6 +41,9 @@
     --pz-day-b: #3a2f4a;
     --pz-dusk-a: #14122b;
     --pz-dusk-b: #5c3350;
+    /* Lifted rather than darkened: a coin has to stay the brightest thing on a dark card. */
+    --pz-coin: #ffc85c;
+    --pz-coin-deep: #d69626;
   }
 }
 
@@ -1097,6 +1102,253 @@ body.in-habitat .zoo-bar {
   margin: -5px 0 0 -5px;
   border-radius: 2px;
   will-change: transform, opacity;
+}
+
+/* ------------------------------------------------------------------- shop */
+
+/* The coin, drawn once and reused everywhere a price or a balance is written. */
+.coin-pip {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.3em;
+  vertical-align: -0.06em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #fff3cf 0 18%, var(--pz-coin) 45%, var(--pz-coin-deep) 100%);
+}
+
+.coin-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: var(--pz-accent-soft);
+  color: var(--pz-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The stall itself: a place in the zoo, so it is a wide card rather than another tab. */
+.stall {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 48px;
+  margin-bottom: 0.8rem;
+  padding: 0.55rem 0.9rem;
+  border: none;
+  border-radius: 20px;
+  background: var(--pz-card);
+  color: var(--pz-ink);
+  box-shadow: var(--pz-shadow);
+  text-align: left;
+}
+
+.stall:active {
+  transform: translateY(1px);
+}
+
+.stall-art {
+  flex: none;
+  width: 62px;
+  height: 38px;
+}
+
+.stall-roof {
+  fill: var(--pz-accent);
+}
+
+.stall-awning {
+  fill: var(--pz-warm);
+}
+
+.stall-post,
+.stall-counter {
+  stroke: none;
+  fill: var(--pz-accent);
+  opacity: 0.75;
+}
+
+.stall-post {
+  fill: none;
+  stroke: var(--pz-accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.stall-coin {
+  fill: var(--pz-coin);
+  stroke: var(--pz-coin-deep);
+  stroke-width: 0.8;
+}
+
+.stall-label {
+  flex: 1;
+  font-weight: 700;
+}
+
+.shop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.2rem;
+}
+
+.shop-head h2 {
+  margin: 0;
+}
+
+.shop-empty,
+.shop-note {
+  color: var(--pz-ink-soft);
+  min-height: 1.2em;
+  margin: 0.5rem 0;
+}
+
+.shop-pick {
+  margin: 0.6rem 0 0.4rem;
+  color: var(--pz-ink-soft);
+  font-size: 0.95rem;
+}
+
+/* The pets scroll sideways rather than wrapping: the row stays one line however many
+   pets a child has, so the catalog below never gets pushed off the card. */
+.shop-pets {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.3rem;
+  scrollbar-width: thin;
+}
+
+.shop-pet {
+  flex: none;
+  width: 74px;
+  min-height: 48px;
+  padding: 0.3rem 0.2rem;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: var(--pz-card-2);
+  color: var(--pz-ink);
+}
+
+.shop-pet.is-on {
+  border-color: var(--pz-accent);
+  background: var(--pz-accent-soft);
+}
+
+.shop-pet .pet {
+  width: 52px;
+  height: 52px;
+}
+
+.shop-pet-name {
+  display: block;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.shop-card {
+  padding: 0.5rem 0.35rem;
+  border: 2px solid transparent;
+  border-radius: 18px;
+  background: var(--pz-card-2);
+  color: var(--pz-ink);
+  text-align: center;
+}
+
+.shop-card svg {
+  width: 60px;
+  height: 56px;
+}
+
+.shop-name {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.shop-price,
+.shop-state {
+  display: inline-block;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not enough coins is shown, never hidden: a price a child cannot meet yet is the thing
+   they are saving for, so it stays legible rather than being greyed into the background. */
+.shop-price.is-poor {
+  color: var(--pz-ink-soft);
+}
+
+.shop-card.is-owned {
+  border-color: var(--pz-good);
+}
+
+.shop-card.is-owned .shop-state {
+  color: var(--pz-good);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.shop-card.is-locked {
+  opacity: 0.55;
+}
+
+.shop-card.is-locked .shop-state::before {
+  content: '🔒 ';
+}
+
+.shop-confirm-card .confirm-preview {
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 0.8rem;
+}
+
+.confirm-preview .habitat {
+  display: block;
+  width: 100%;
+  height: 148px;
+}
+
+.confirm-copy {
+  margin: 0 0 1rem;
+  font-weight: 700;
+}
+
+.confirm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The coins an answer paid, rising off whatever earned them. */
+.fly-coins {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: -14px 0 0 -14px;
+  font-size: 26px;
+  font-style: normal;
+  font-weight: 800;
+  color: var(--pz-coin);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
 }
 
 .fly-heart {

@@ -110,6 +110,19 @@
 
       <!-- ------------------------------------------------------------- zoo -->
       <section id="zoo-scene" class="scene" hidden>
+        <button id="shop-stall" type="button" class="stall" aria-label="Gå til butikken">
+          <svg class="stall-art" viewBox="0 0 72 44" aria-hidden="true" focusable="false">
+            <path class="stall-post" d="M9 44 L9 20 M63 44 L63 20" />
+            <path class="stall-roof" d="M4 21 L36 5 L68 21 Z" />
+            <path class="stall-awning" d="M6 21 h60 v6 q-7.5 5 -15 0 q-7.5 5 -15 0 q-7.5 5 -15 0 q-7.5 5 -15 0 Z" />
+            <rect class="stall-counter" x="14" y="30" width="44" height="14" rx="2.5" />
+            <circle class="stall-coin" cx="27" cy="36" r="4" />
+            <circle class="stall-coin" cx="36" cy="34" r="4" />
+            <circle class="stall-coin" cx="45" cy="36" r="4" />
+          </svg>
+          <span class="stall-label" data-i18n="shop.open">Gå til butikken</span>
+          <span id="stall-balance" class="coin-chip"></span>
+        </button>
         <p id="zoo-empty" class="zoo-empty" data-i18n="zoo.empty" hidden>
           Ingen dyr ennå! Still klokka riktig noen ganger, så klekkes det første egget
           ditt.
@@ -150,6 +163,41 @@
         <h2 id="unlock-title">Nye dyr har kommet!</h2>
         <p id="unlock-copy"></p>
         <button id="unlock-close" type="button" class="big-btn" data-i18n="unlock.close">Kom igjen!</button>
+      </div>
+    </div>
+
+    <div id="shop-overlay" class="overlay" hidden>
+      <div class="overlay-card shop">
+        <div class="shop-head">
+          <h2 data-i18n="shop.title">Dyrehagebutikken</h2>
+          <span id="shop-balance" class="coin-chip"></span>
+        </div>
+
+        <p id="shop-empty" class="shop-empty" data-i18n="shop.empty" hidden>
+          Ingen dyr ennå! Klekk det første egget, så åpner butikken.
+        </p>
+
+        <div id="shop-body">
+          <p id="shop-pick" class="shop-pick" data-i18n="shop.pickPet">Hvem skal det være til?</p>
+          <div id="shop-pets" class="shop-pets" role="group" aria-labelledby="shop-pick"></div>
+          <div id="shop-grid" class="shop-grid"></div>
+        </div>
+
+        <p id="shop-note" class="shop-note" aria-live="polite"></p>
+        <button id="shop-close" type="button" class="big-btn" data-i18n="shop.close">Ferdig</button>
+      </div>
+    </div>
+
+    <div id="shop-confirm" class="overlay" hidden>
+      <div class="overlay-card shop-confirm-card">
+        <div id="confirm-preview" class="confirm-preview"></div>
+        <p id="confirm-copy" class="confirm-copy"></p>
+        <div class="confirm-row">
+          <button id="confirm-buy" type="button" class="big-btn">Kjøp!</button>
+          <button id="confirm-cancel" type="button" class="ghost-btn" data-i18n="shop.cancel">
+            Ikke nå
+          </button>
+        </div>
       </div>
     </div>
 

@@ -17,6 +17,8 @@ import {
   BALL_REST,
   DETAIL,
   FAR,
+  FURNITURE,
+  FURNITURE_HALF_WIDTH,
   groundMarkup,
   HORIZON,
   LARDER,
@@ -39,6 +41,7 @@ import {
   WALK_Y,
 } from './habitat-parts.js';
 import { hash, SPECIES, speciesFor, traitIndexFor } from './pets.js';
+import { itemById as shopItemById, MAX_DECOR, sanitizeDecor } from './shop.js';
 
 export { HORIZON, PET_FOOT, PET_SIZE, ROAM, SAFE, VIEW, WALK_Y };
 
@@ -297,6 +300,51 @@ export function homeSpotFor(layout, roam) {
   return best;
 }
 
+// How far a bought piece keeps from anything the pet uses — its nest, its ball, its larder
+// and the spot it idles on. A house pressed against the larder would read as one object.
+//
+// 12 is a cliff, not a preference: at 14 all but 40 of the 144 habitats lose their second
+// spot, because the three props and the pet's idle spot already cover most of the safe box.
+// Raising it means dropping to one piece a pet, so raise it only having decided that.
+const FURNITURE_GAP = 12;
+// And from the next bought piece, so two of them read as two things rather than a wall.
+const FURNITURE_SELF_GAP = 30;
+
+/**
+ * Where bought furniture stands, in the order it was bought. Derived, never stored: the same
+ * pet lays its home out the same way on every device, and a save carries three short strings
+ * rather than three coordinates.
+ *
+ * Furniture may share the roam band with the pet — the nest and larder already do, and a pet
+ * ambling past its own hammock is the point of having one. What it may not do is crowd
+ * something the pet has to reach, or the middle of the field, which belongs to the pet.
+ * Spots are taken from the outside in, so the sides fill before the centre ever does.
+ */
+export function furnitureSpotsFor(layout, count = MAX_DECOR) {
+  const busy = [layout.nest, layout.larder, layout.ball, homeSpotFor(layout, ROAM)];
+  const candidates = [];
+  // Inset by a whole piece: the crop guarantees only the safe box, so a spot any nearer the
+  // edge would lose the side of a house on a narrow screen.
+  for (let x = SAFE.x0 + FURNITURE_HALF_WIDTH; x <= SAFE.x1 - FURNITURE_HALF_WIDTH; x += 2) {
+    if (x >= CENTRE_KEEP.x0 && x <= CENTRE_KEEP.x1) continue;
+    candidates.push(x);
+  }
+  // Outermost first: a piece at the edge of the safe box is still wholly visible, and
+  // leaves the readable middle alone.
+  candidates.sort((a, b) => Math.abs(b - 100) - Math.abs(a - 100));
+
+  const spots = [];
+  for (const x of candidates) {
+    if (spots.length >= count) break;
+    if (busy.some((b) => Math.abs(b - x) < FURNITURE_GAP)) continue;
+    if (spots.some((s) => Math.abs(s - x) < FURNITURE_SELF_GAP)) continue;
+    spots.push(x);
+  }
+  // Left to right, so the first piece bought is the leftmost rather than wherever the scan
+  // happened to reach first — buying a second thing must not move the first one.
+  return spots.sort((a, b) => a - b);
+}
+
 /** Bigger reads as nearer, and nearer reads as lower. Depth for free, and never wrong. */
 export const sceneryY = (scale) => n(HORIZON + 10 + (scale - 0.5) * 40);
 
@@ -409,6 +457,10 @@ export function habitatFor(h, m) {
     },
     home: { x: homeSpotFor(layout, ROAM), y: WALK_Y },
     roam: { ...ROAM },
+    // Filled in by habitatOf from what the child has actually bought. A generated habitat
+    // owns nothing, which is why 144 of them still cost no bytes.
+    furniture: [],
+    spots: furnitureSpotsFor(layout),
     seed,
   };
 }
@@ -420,7 +472,8 @@ export function habitatFor(h, m) {
  * whole, so an override travels between devices the moment one exists.
  */
 export function habitatOf(item) {
-  const base = habitatFor(item.h, item.m);
+  const generated = habitatFor(item.h, item.m);
+  const base = { ...generated, furniture: furnitureFor(generated, item?.decor) };
   const over = item?.habitat;
   if (!over || typeof over !== 'object') return base;
   return {
@@ -430,6 +483,20 @@ export function habitatOf(item) {
     props: { ...base.props, ...(over.props ?? {}) },
     light: { ...base.light, ...(over.light ?? {}) },
   };
+}
+
+/**
+ * Bought pieces placed into the habitat's spots, in the order they were bought. The wide ones
+ * take the roomier spot when they can, so a house does not end up shoulder to shoulder with
+ * the larder while a flowerbed sits in the open.
+ */
+export function furnitureFor(habitat, decor) {
+  const ids = sanitizeDecor(decor);
+  const spots = habitat.spots ?? [];
+  const wide = (id) => shopItemById.get(id)?.band === 'wide';
+  // One wide piece and one narrow: the wide one takes whichever spot has more room around it.
+  const order = ids.length === 2 && !wide(ids[0]) && wide(ids[1]) ? [...spots].reverse() : spots;
+  return ids.slice(0, spots.length).map((id, i) => ({ id, x: order[i], y: WALK_Y }));
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -489,6 +556,13 @@ export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } 
 
   <g class="hab-back">
     ${drawAll(back)}
+    ${(habitat.furniture ?? [])
+      .map(
+        (f) => `<g class="hab-furniture" transform="translate(${f.x} ${f.y})">${
+          (FURNITURE[f.id] ?? FURNITURE.flowerbed)(c)
+        }</g>`
+      )
+      .join('')}
     <g transform="translate(${habitat.props.nest.x} ${habitat.props.nest.y})">${NEST(c)}</g>
     <g transform="translate(${habitat.props.ball.x} ${habitat.props.ball.y})">${BALL_REST(c)}</g>
     <g transform="translate(${habitat.props.larder.x} ${habitat.props.larder.y})">
