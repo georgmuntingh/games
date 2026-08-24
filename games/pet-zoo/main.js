@@ -17,7 +17,7 @@ import {
 } from './clock.js';
 import { TIERS, tierItems, tierMastery } from './curriculum.js';
 import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
-import { createItem, nextItem, refreshTier, review } from './srs.js';
+import { CRACK_STAGES, createItem, nextItem, refreshTier, review } from './srs.js';
 import * as session from './session.js';
 import {
   appearanceOf,
@@ -44,7 +44,16 @@ import {
 } from './transfer.js';
 import { createHabitatScene } from './habitat-scene.js';
 import { audio } from './audio.js';
-import { buzz, confetti, flyHeart, pop, reduceMotion, setHaptics, svgEl } from './juice.js';
+import {
+  buzz,
+  confetti,
+  flyHeart,
+  pop,
+  reduceMotion,
+  setHaptics,
+  smokePuff,
+  svgEl,
+} from './juice.js';
 
 /* ----------------------------------------------------------------- elements */
 
@@ -337,9 +346,14 @@ function ensureItem(id) {
   return state.items[id];
 }
 
+// One line per crack, so the anticipation survives the gap between two sittings: an egg the
+// child left half-broken says so the moment it comes back on screen.
+const EGG_PROMPTS = ['prompt.egg', 'prompt.egg1', 'prompt.egg2'];
+
 function promptFor(item) {
   if (item.hatchedAt === null) {
-    return { line: t('prompt.egg'), button: t('button.warm') };
+    const line = EGG_PROMPTS[Math.min(item.cracks ?? 0, EGG_PROMPTS.length - 1)];
+    return { line: t(line), button: t('button.warm') };
   }
   const name = petName(item, t.lang);
   const key =
@@ -359,15 +373,41 @@ function formLabel(item) {
   return form >= 2 ? `${species} ${t(`form.${form}`)}` : species;
 }
 
+/**
+ * What an egg calls itself out loud. The broken shell is the only progress an egg shows now that
+ * the dots are gone, so the label under the picture has to carry the same thing the picture does —
+ * otherwise a screen reader loses it entirely. It lives on the art rather than on the tile name,
+ * which has to stay short enough not to be cut off.
+ */
+function eggTitle(item) {
+  const cracks = item.cracks ?? 0;
+  return cracks > 0
+    ? t('zoo.eggTitleCracks', { n: cracks, of: CRACK_STAGES })
+    : t('zoo.eggTitle');
+}
+
 function renderPetStage(item, mood) {
   const markup =
     item.hatchedAt === null
-      ? eggSvg(appearanceOf(item).species, { title: t('zoo.eggTitle') })
+      ? eggSvg(appearanceOf(item).species, { cracks: item.cracks ?? 0, title: eggTitle(item) })
       : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
   el.petStage.innerHTML = markup;
   const pet = el.petStage.querySelector('.pet');
   pet.classList.add('breathe');
   pet.style.setProperty('--blink-delay', `${(Math.random() * 5).toFixed(2)}s`);
+}
+
+/**
+ * Put an egg on the stage at an explicit crack level, whatever the item now says. The hatch
+ * sequence needs exactly this: by the time it runs the item has already hatched, and the shell
+ * still has to break on screen. No `breathe` — during the break the egg has other plans, and two
+ * animations on `.pet-inner` would fight.
+ */
+function renderEggStage(item, cracks, { fresh = false } = {}) {
+  el.petStage.innerHTML = eggSvg(appearanceOf(item).species, { cracks, title: eggTitle(item) });
+  const pet = el.petStage.querySelector('.pet');
+  if (fresh) pet.querySelector(`.egg-crack-${cracks}`)?.classList.add('is-new');
+  return pet;
 }
 
 /** Start the hands somewhere that is not the answer, so every question needs real work. */
@@ -526,17 +566,22 @@ async function celebrate(outcome) {
   if (outcome.events.hatched) {
     // The egg was the last thing standing between the child and a pet of their own —
     // this is the biggest moment the game has, so it gets its own beat.
-    el.feedback.textContent = t('hatch.now');
+    await hatchShow(item);
+    return;
+  }
+
+  if (outcome.events.cracked) {
+    // Not a pet yet, but visibly closer to one. A knock, a crack drawing itself on, and a few
+    // flakes of shell — enough that the child can see the answer landed somewhere.
+    const level = outcome.events.cracked;
+    const pet = renderEggStage(item, level, { fresh: true });
+    pet.classList.add('egg-jolt');
+    audio.play('crack', { power: 0.8 + level * 0.3 });
+    buzz([18, 40, 18]);
+    confetti(el.petStage, el.fx, { power: 0.35, round: 0, colors: SHELL_DUST });
+    el.feedback.textContent = t(`crack.${level}`);
     el.feedback.className = 'feedback good';
-    el.petStage.querySelector('.pet').classList.add('hatching');
-    audio.play('hatch');
-    buzz([14, 40, 14, 40, 24]);
-    await wait(reduceMotion() ? 200 : 780);
-    renderPetStage(item, 'happy');
-    el.petStage.querySelector('.pet').classList.add('arriving');
-    confetti(el.petStage, el.fx, { power: 1.8 });
-    el.feedback.textContent = t('hatch.hello', { name: petName(item, t.lang) });
-    await wait(1500);
+    await wait(reduceMotion() ? 900 : 1650);
     return;
   }
 
@@ -551,6 +596,106 @@ async function celebrate(outcome) {
   renderPetStage(item, 'happy');
   pop(el.petStage.querySelector('.pet-inner'), { power: streak >= 3 ? 1.3 : 1 });
   await wait(1250);
+}
+
+// Flakes off a breaking shell: bone and chalk, never the pet's colours. The pet's palette is
+// saved for the burst, where it is the first hint of what is inside.
+const SHELL_DUST = ['#fdf6ec', '#efe3d2', '#e2d3bd'];
+
+/**
+ * The hatch. Roughly three and a half seconds, and the only place in the game that spends that
+ * much time on one thing — so a tap anywhere on the stage cuts it short and goes straight to the
+ * pet, for the child on their thirtieth egg.
+ *
+ * The trick is the cloud: the pet is swapped in while the smoke is at its thickest, so nothing is
+ * ever seen to turn into anything. The egg goes in, the smoke happens, and the pet is standing
+ * there when it clears.
+ */
+async function hatchShow(item) {
+  const name = petName(item, t.lang);
+  const palette = SPECIES[appearanceOf(item).species]?.palette ?? [];
+  el.feedback.className = 'feedback good';
+
+  const arrive = () => {
+    el.feedback.textContent = t('hatch.now');
+    renderPetStage(item, 'happy');
+    el.petStage.querySelector('.pet')?.classList.add('arriving');
+    audio.play('hatch');
+  };
+
+  if (reduceMotion()) {
+    el.feedback.textContent = t('hatch.now');
+    buzz([14, 40, 14, 40, 24]);
+    await wait(300);
+    arrive();
+    el.feedback.textContent = t('hatch.hello', { name });
+    await wait(1200);
+    return;
+  }
+
+  let skipped = false;
+  let release = () => {};
+  const skip = new Promise((resolve) => {
+    const onDown = () => {
+      skipped = true;
+      resolve();
+    };
+    el.petStage.addEventListener('pointerdown', onDown);
+    release = () => el.petStage.removeEventListener('pointerdown', onDown);
+  });
+
+  /** A beat a tap can cut short. False once the child has asked to get on with it. */
+  const beat = async (ms) => {
+    if (skipped) return false;
+    await Promise.race([wait(ms), skip]);
+    return !skipped;
+  };
+
+  try {
+    // The build-up: a twitch that grows into something trying to get out.
+    const egg = el.petStage.querySelector('.pet');
+    egg?.classList.remove('breathe');
+    egg?.classList.add('egg-rocking');
+    el.feedback.textContent = t('hatch.stir');
+    buzz([14, 40, 14, 40, 24]);
+
+    if (await beat(1100)) {
+      // Three cracks in quick succession, each knock lower and heavier than the last.
+      for (const level of [1, 2, 3]) {
+        renderEggStage(item, level, { fresh: true }).classList.add('egg-jolt');
+        audio.play('crack', { power: 0.8 + level * 0.35 });
+        if (!(await beat(level === 3 ? 200 : 250))) break;
+      }
+    }
+
+    if (!skipped) {
+      // The shell gives, and the cloud takes over.
+      el.petStage.querySelector('.pet')?.classList.add('egg-burst');
+      audio.play('poof');
+      smokePuff(el.petStage, el.fx, { power: 1.4 });
+      confetti(el.petStage, el.fx, { power: 2, round: 0, colors: palette });
+      buzz([26, 60, 18]);
+      el.feedback.textContent = t('hatch.now');
+      await beat(500);
+    }
+  } finally {
+    release();
+  }
+
+  arrive();
+  // A held breath before the cheer, so the pet is met before it is celebrated. A child who
+  // skipped still gets that moment — just a shorter one.
+  if (skipped) {
+    await wait(500);
+    confetti(el.petStage, el.fx, { power: 1.8 });
+    el.feedback.textContent = t('hatch.hello', { name });
+    await wait(900);
+    return;
+  }
+  await wait(700);
+  confetti(el.petStage, el.fx, { power: 1.8 });
+  el.feedback.textContent = t('hatch.hello', { name });
+  await wait(500);
 }
 
 /**
@@ -681,13 +826,11 @@ function renderZoo() {
       const isEgg = item.hatchedAt === null;
       const mood = moodOf(item, at, { napping });
       const art = isEgg
-        ? eggSvg(appearanceOf(item).species, { title: t('zoo.eggTitle') })
+        ? eggSvg(appearanceOf(item).species, { cracks: item.cracks ?? 0, title: eggTitle(item) })
         : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
-      const flag = isEgg
-        ? `${'●'.repeat(item.correctStreak)}${'○'.repeat(Math.max(0, 3 - item.correctStreak))}`
-        : mood === 'hungry'
-          ? '🍎'
-          : '';
+      // Eggs no longer carry progress dots — the broken shell is the progress, and `eggTitle`
+      // is what says so to anyone not looking at it.
+      const flag = !isEgg && mood === 'hungry' ? '🍎' : '';
       const label = escape(
         isEgg
           ? t('zoo.egg', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
@@ -790,7 +933,7 @@ function openHabitat(id) {
     label: isEgg
       ? t('habitat.eggAria', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
       : t('habitat.aria', { name }),
-    title: escape(name),
+    title: escape(isEgg ? eggTitle(item) : name),
   });
   showScene('habitat');
 }

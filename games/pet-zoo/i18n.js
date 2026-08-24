@@ -111,6 +111,8 @@ const STRINGS = {
 
     'prompt.booting': 'Waking the zoo…',
     'prompt.egg': 'A chilly egg! It hatches at…',
+    'prompt.egg1': 'The egg is stirring! It hatches at…',
+    'prompt.egg2': 'It is cracking open! It hatches at…',
     'prompt.forgot': '{name} forgot their snack time. It is…',
     'prompt.hungry': '{name} is hungry! They eat at…',
     'prompt.snack': '{name} fancies a snack at…',
@@ -123,6 +125,9 @@ const STRINGS = {
     'cheer.4': 'Nailed it!',
     'cheer.5': 'That is it!',
     'cheer.streak': '{cheer} {n} in a row!',
+    'crack.1': 'A crack appeared!',
+    'crack.2': 'Another crack — it is nearly out!',
+    'hatch.stir': 'Something is moving in there…',
     'hatch.now': 'It hatched!',
     'hatch.hello': '{name} says hello!',
     'evolve.now': 'Something is happening…',
@@ -151,6 +156,7 @@ const STRINGS = {
     'zoo.empty': 'No pets yet! Feed the clock a few times and your first egg will hatch.',
     'zoo.egg': '{species} egg',
     'zoo.eggTitle': 'A chilly egg',
+    'zoo.eggTitleCracks': 'A cracking egg, {n} of {of} cracks',
     'zoo.rename': 'What is this pet called?',
 
     'habitat.back': 'Back to the zoo',
@@ -171,7 +177,7 @@ const STRINGS = {
       'The <b>long thin hand</b> is the minutes — it jumps five minutes at a time. The <b>short fat hand</b> is the hour.',
     'howto.3':
       'Watch the short hand creep along as you move the long one. At quarter past four it has already left the 4 — that is how a real clock works.',
-    'howto.4': 'Get one right three times and its egg hatches into a pet of your own.',
+    'howto.4': 'Get one right four times and its egg cracks open into a pet of your own.',
     'howto.5':
       'After a few minutes the pets get sleepy and the game stops. You can still wander the zoo while they nap.',
     'howto.6': 'Grown-ups: press and hold the title for progress.',
@@ -239,6 +245,8 @@ const STRINGS = {
 
     'prompt.booting': 'Vekker dyrehagen…',
     'prompt.egg': 'Et kaldt egg! Det klekkes…',
+    'prompt.egg1': 'Egget rører på seg! Det klekkes…',
+    'prompt.egg2': 'Det slår sprekker! Det klekkes…',
     'prompt.forgot': '{name} har glemt måltidet sitt. Klokka er…',
     'prompt.hungry': '{name} er sulten! Spiser…',
     'prompt.snack': '{name} vil gjerne ha en matbit…',
@@ -251,6 +259,9 @@ const STRINGS = {
     'cheer.4': 'Sånn ja!',
     'cheer.5': 'Der satt den!',
     'cheer.streak': '{cheer} {n} på rad!',
+    'crack.1': 'Det kom en sprekk!',
+    'crack.2': 'Enda en sprekk — det er nesten ute!',
+    'hatch.stir': 'Noe rører seg der inne …',
     'hatch.now': 'Det klekket!',
     'hatch.hello': '{name} sier hei!',
     'evolve.now': 'Noe skjer …',
@@ -280,6 +291,7 @@ const STRINGS = {
     'zoo.empty': 'Ingen dyr ennå! Still klokka riktig noen ganger, så klekkes det første egget ditt.',
     'zoo.egg': '{species}-egg',
     'zoo.eggTitle': 'Et kaldt egg',
+    'zoo.eggTitleCracks': 'Et egg som slår sprekker, {n} av {of}',
     'zoo.rename': 'Hva heter dette dyret?',
 
     'habitat.back': 'Tilbake til dyrehagen',
@@ -300,7 +312,7 @@ const STRINGS = {
       'Den <b>lange tynne viseren</b> er minuttene — den hopper fem minutter om gangen. Den <b>korte tjukke viseren</b> er timen.',
     'howto.3':
       'Se hvordan den korte viseren sniker seg framover når du flytter den lange. Kvart over fire har den allerede forlatt 4-tallet — sånn funker en ekte klokke.',
-    'howto.4': 'Klarer du samme klokkeslett tre ganger, klekkes egget til et dyr som blir ditt.',
+    'howto.4': 'Klarer du samme klokkeslett fire ganger, sprekker egget til et dyr som blir ditt.',
     'howto.5':
       'Etter noen minutter blir dyrene trøtte, og spillet stopper. Du kan fortsatt gå rundt i dyrehagen mens de sover.',
     'howto.6': 'Voksne: hold inne tittelen for å se framgang.',

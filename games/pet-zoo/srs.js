@@ -16,8 +16,21 @@ import { LAST_TIER, tierOfMinute, unlockedTier, unseenItems } from './curriculum
 
 export const LEARNING_STEPS = [1, 3, 8]; // in questions answered, not minutes
 export const RELEARN_DELAY = 2; // a missed time returns as the question after next
-export const GRADUATION_STREAK = 3; // three in a row hatches the egg
+export const GRADUATION_STREAK = 3; // three in a row re-graduates a pet that lapsed
 export const MAX_LEARNING = 7; // never juggle more than a handful at once
+
+// Hatching is deliberately slower than graduating. A pet arriving on the third answer arrives
+// before the child has had time to want it, so the first hatch costs one extra answer — and the
+// wait is spent watching the shell break rather than staring at a smooth egg. Re-learning a time
+// that lapsed still costs GRADUATION_STREAK: the extra answer buys anticipation, not punishment.
+export const HATCH_STREAK = 4;
+export const CRACK_STAGES = 2; // crack levels visible before the shell finally goes
+
+/**
+ * The crack level a streak has earned, 0..CRACK_STAGES. The first answer leaves the shell smooth
+ * — a crack has to mean something — and the last crack lands on the answer before hatching.
+ */
+export const crackFor = (streak) => Math.min(Math.max(streak - 1, 0), CRACK_STAGES);
 
 // Forms. A pet's shape is earned by feeding it successfully over the long haul, so a form
 // is the visible proof that a time is genuinely known — the reward the SRS's long tail has
@@ -64,6 +77,9 @@ export function createItem({ h, m, species, reviewClock = 0 }) {
     feeds: 0,
     lapses: 0,
     correctStreak: 0,
+    // The high-water mark of `crackFor(correctStreak)`, never lowered: a wrong answer restarts the
+    // run to hatching but must not un-break a shell the child has already watched break.
+    cracks: 0,
     hatchedAt: null,
     seen: 0,
     lastMs: 0,
@@ -98,12 +114,26 @@ export const nextInterval = (reps, intervalDays, ease) => {
 export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now }) {
   const quality = qualityOf({ correct, ms, reversals });
   const next = { ...item, seen: item.seen + 1, lastMs: ms };
-  const events = { quality, graduated: false, hatched: false, lapsed: false, evolved: 0 };
+  const events = {
+    quality,
+    graduated: false,
+    hatched: false,
+    lapsed: false,
+    evolved: 0,
+    cracked: 0,
+  };
 
   if (correct) {
     next.correctStreak = item.correctStreak + 1;
+    if (item.hatchedAt === null) {
+      const cracks = Math.max(item.cracks ?? 0, crackFor(next.correctStreak));
+      if (cracks > (item.cracks ?? 0)) events.cracked = cracks;
+      next.cracks = cracks;
+    }
     if (item.phase === 'learning') {
-      if (next.correctStreak >= GRADUATION_STREAK) {
+      // Only the first hatch costs the extra answer; a lapsed pet re-graduates at the usual bar.
+      const needed = item.hatchedAt === null ? HATCH_STREAK : GRADUATION_STREAK;
+      if (next.correctStreak >= needed) {
         next.phase = 'graduated';
         next.reps = 1;
         next.feeds = item.feeds + 1;

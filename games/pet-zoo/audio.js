@@ -67,6 +67,24 @@ const SOUNDS = {
       duration: 0.4,
     });
   },
+  // A dry knock as the shell gives way one more time. `power` darkens it: the last crack before
+  // the shell goes lands lower and heavier than the first.
+  crack(ac, { power = 1 } = {}) {
+    tone(ac, {
+      type: 'square',
+      freq: 340 / power,
+      endFreq: 130 / power,
+      duration: 0.06 + 0.02 * power,
+      gain: 0.05 * power,
+    });
+    tone(ac, { type: 'triangle', freq: 190 / power, duration: 0.09, gain: 0.04, delay: 0.02 });
+  },
+  // The cloud itself: a soft downward whoosh with nothing tuneful in it, so the arpeggio that
+  // follows has the reveal to itself.
+  poof(ac) {
+    tone(ac, { type: 'sine', freq: 640, endFreq: 90, duration: 0.34, gain: 0.07 });
+    tone(ac, { type: 'triangle', freq: 300, endFreq: 70, duration: 0.4, gain: 0.05, delay: 0.03 });
+  },
   hatch(ac) {
     tone(ac, { type: 'triangle', freq: 220, endFreq: 880, duration: 0.18, gain: 0.09 });
     arpeggio(ac, [784, 988, 1175, 1568, 2093], { gain: 0.1, spacing: 0.07, duration: 0.26 });

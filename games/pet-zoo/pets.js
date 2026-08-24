@@ -311,12 +311,33 @@ export function petSvg(appearance, { mood = 'content', className = '', title = '
 </svg>`;
 }
 
-/** The egg a time arrives as. Speckled in its pet's colours, so the reveal is a payoff. */
-export function eggSvg(speciesId, { className = '', title = 'A chilly egg' } = {}) {
+// The shell gives way in a fixed order, so a child watching a second egg break recognises the
+// stages. 1 and 2 are earned by answering; 3 is the fracture that only ever appears during the
+// hatch itself, a heartbeat before the shell goes.
+const EGG_CRACKS = [
+  'M69 27 L62.5 33.5 L68 38.5 L61 44.5 L64.5 50',
+  'M31 43 L38 49 L31.5 56 L38.5 63 L33 70',
+  'M21 59 L32 55 L43 62.5 L55 54.5 L66.5 62 L79 55.5',
+];
+
+export const EGG_CRACK_MAX = EGG_CRACKS.length;
+
+/**
+ * The egg a time arrives as. Speckled in its pet's colours, so the reveal is a payoff, and broken
+ * in as many places as the child has earned — the shell is the progress bar.
+ */
+export function eggSvg(speciesId, { cracks = 0, className = '', title = 'A chilly egg' } = {}) {
   const spec = SPECIES[speciesId] ?? SPECIES.mochi;
   const [body, belly, accent] = spec.palette;
+  const level = Math.max(0, Math.min(EGG_CRACK_MAX, Math.round(cracks)));
+  // `pathLength="1"` normalises every crack to the same nominal length, so a single CSS rule can
+  // draw any of them on with a dash offset regardless of how long the path actually is.
+  const breaks = Array.from(
+    { length: level },
+    (_, i) => `<path class="egg-crack egg-crack-${i + 1}" pathLength="1" d="${EGG_CRACKS[i]}" />`
+  ).join('');
   return `
-<svg class="pet egg ${className}" viewBox="0 0 100 100" role="img" aria-label="${title}" focusable="false">
+<svg class="pet egg egg-cracks-${level} ${className}" viewBox="0 0 100 100" role="img" aria-label="${title}" focusable="false">
   <title>${title}</title>
   <g class="pet-inner">
     <path class="egg-shell" fill="${body}"
@@ -326,6 +347,7 @@ export function eggSvg(speciesId, { className = '', title = 'A chilly egg' } = {
     <circle cx="36" cy="34" r="4.5" fill="${accent}" opacity="0.65" />
     <circle cx="66" cy="68" r="5" fill="${accent}" opacity="0.5" />
     <circle cx="44" cy="78" r="3.5" fill="${accent}" opacity="0.5" />
+    ${breaks}
   </g>
 </svg>`;
 }
