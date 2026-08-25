@@ -228,6 +228,149 @@ main {
   color: var(--pz-accent);
 }
 
+/* --------------------------------------------------------------- adding up */
+
+/* `display` on these beats the `hidden` attribute's UA rule, so each one has to say again
+   that hidden means hidden. Without this the sum panel sits under every clock face. */
+#prompt-sum[hidden],
+#answer-sum[hidden],
+.keypad[hidden] {
+  display: none;
+}
+
+
+/* The equation takes the same slot in the prompt card that a time does, so the two
+   subjects read as one game rather than two bolted together. */
+.sum {
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--pz-accent);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sum .op {
+  color: var(--pz-ink-soft);
+  font-weight: 600;
+  font-style: normal;
+}
+
+/* One slot per digit of the answer. How many there are is decided by the tier, never by
+   the answer, so the boxes cannot give away whether the sum passes ten. */
+.sum .slot {
+  display: inline-block;
+  min-width: 1.05em;
+  padding: 0 0.06em;
+  text-align: center;
+  border-bottom: 3px solid var(--pz-line);
+  color: var(--pz-ink);
+  font-weight: 800;
+}
+
+.sum .slot.is-next {
+  border-bottom-color: var(--pz-accent);
+}
+
+.sum .slot.is-empty::after {
+  content: '\00a0';
+}
+
+.sum-wrap {
+  margin: 0.85rem auto 0.4rem;
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.key {
+  min-height: 56px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--pz-ink);
+  background: var(--pz-card);
+  border: 2px solid var(--pz-line);
+  border-radius: 14px;
+  box-shadow: var(--pz-shadow);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.key:active {
+  background: var(--pz-accent-soft);
+  transform: scale(0.96);
+}
+
+.key[disabled] {
+  opacity: 0.4;
+}
+
+.key.key-clear {
+  font-size: 1rem;
+  color: var(--pz-ink-soft);
+}
+
+/* ---------------------------------------------------------------- ten-frame */
+
+.tenframe-host {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tenframe {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.tf-frame {
+  fill: none;
+  stroke: var(--pz-line);
+  stroke-width: 1.5;
+}
+
+.tf-cell {
+  fill: var(--pz-card-2);
+}
+
+.tf-dot {
+  fill: var(--pz-accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tf-drop 0.32s ease-out backwards;
+  animation-delay: var(--tf-delay, 0s);
+}
+
+/* The second addend arrives in its own colour, so "seven, and then eight more" is visible
+   rather than something the caption has to claim. */
+.tf-from-b {
+  fill: var(--pz-warm);
+}
+
+/* And the ones that finish the first ten are the whole lesson, so they are the ones that
+   look like an answer. */
+.tf-bridge {
+  fill: var(--pz-good);
+}
+
+@keyframes tf-drop {
+  from { opacity: 0; transform: translateY(-8px) scale(0.5); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ------------------------------------------------------------------- clock */
 
 .clock-wrap {
@@ -1647,6 +1790,10 @@ body.in-habitat .zoo-bar {
 /* Decoration off, instruction on: the correction still animates (slowly) because it is
    teaching, but nothing else moves for its own sake. */
 @media (prefers-reduced-motion: reduce) {
+  .tf-dot {
+    animation: none;
+  }
+
   .sky::after,
   .hand,
   .big-btn {

@@ -9,9 +9,12 @@
 // Pure, like everything it registers. Nothing here touches the DOM, storage or the clock.
 
 import { UNLOCK_RATIO } from '../curriculum.js';
+import * as addition from './addition.js';
 import * as clock from './clock.js';
 
-export const SUBJECTS = { [clock.id]: clock };
+// Clock first: the order decides which subject a fresh zoo meets first, and it is also
+// the order pets are handed out in, which existing saves depend on staying put.
+export const SUBJECTS = { [clock.id]: clock, [addition.id]: addition };
 
 export const SUBJECT_IDS = Object.keys(SUBJECTS);
 

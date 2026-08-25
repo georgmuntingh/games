@@ -4,7 +4,6 @@
 import {
   advanceMinuteTo,
   angleOf,
-  grade,
   hourAngle,
   inferHour,
   minuteAngle,
@@ -14,16 +13,19 @@ import {
   snapMinute,
   timeId,
 } from './clock.js';
-import { TIERS, tierItems, tierMastery } from './curriculum.js';
+import { TIERS, tierItems } from './curriculum.js';
 import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
 import { CRACK_STAGES, createItem, nextItem, refreshTiers, review } from './srs.js';
+import * as addition from './subjects/addition.js';
 import {
   DEFAULT_SUBJECT,
   SUBJECTS,
   subjectIdOf,
   subjectOf,
+  tierMastery,
   totalItemCount,
 } from './subjects/index.js';
+import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
 import * as session from './session.js';
 import {
   appearanceOf,
@@ -34,6 +36,7 @@ import {
   petSvg,
   speciesAppearance,
   speciesFor,
+  speciesForFact,
   SPECIES,
 } from './pets.js';
 import { formFor } from './srs.js';
@@ -117,8 +120,14 @@ const el = {
   petStage: $('pet-stage'),
   promptLine: $('prompt-line'),
   promptDigital: $('prompt-digital'),
+  promptSum: $('prompt-sum'),
   promptSpoken: $('prompt-spoken'),
   clock: $('clock'),
+  answerClock: $('answer-clock'),
+  answerSum: $('answer-sum'),
+  keypad: $('keypad'),
+  tenframeHost: $('tenframe-host'),
+  answerMode: $('answer-mode'),
   feedback: $('feedback'),
   submit: $('submit'),
   napPets: $('nap-pets'),
@@ -416,19 +425,23 @@ function ensureItem(id) {
 // One line per crack, so the anticipation survives the gap between two sittings: an egg the
 // child left half-broken says so the moment it comes back on screen.
 const EGG_PROMPTS = ['prompt.egg', 'prompt.egg1', 'prompt.egg2'];
+// The clock's lines all end by leading into a time — "they eat at…" — which is the wrong
+// sentence in front of an equation, so adding gets its own set rather than a shared one
+// with the ending filed off.
+const SUM_EGG_PROMPTS = ['prompt.sumEgg', 'prompt.sumEgg1', 'prompt.sumEgg2'];
+
+const isSum = (item) => (item?.subject ?? DEFAULT_SUBJECT) === addition.id;
 
 function promptFor(item) {
+  const sum = isSum(item);
   if (item.hatchedAt === null) {
-    const line = EGG_PROMPTS[Math.min(item.cracks ?? 0, EGG_PROMPTS.length - 1)];
-    return { line: t(line), button: t('button.warm') };
+    const prompts = sum ? SUM_EGG_PROMPTS : EGG_PROMPTS;
+    return { line: t(prompts[Math.min(item.cracks ?? 0, prompts.length - 1)]), button: t('button.warm') };
   }
   const name = petName(item, t.lang);
-  const key =
-    item.phase === 'learning'
-      ? 'prompt.forgot'
-      : item.dueAt <= now()
-        ? 'prompt.hungry'
-        : 'prompt.snack';
+  const state_ =
+    item.phase === 'learning' ? 'Forgot' : item.dueAt <= now() ? 'Hungry' : 'Snack';
+  const key = sum ? `prompt.sum${state_}` : `prompt.${state_.toLowerCase()}`;
   return { line: t(key, { name }), button: t('button.feed', { name }) };
 }
 
@@ -491,15 +504,125 @@ function scatterHands(target) {
 
 function renderPrompt(item) {
   const prompt = promptFor(item);
-  const digits = digitalOn();
   el.promptLine.textContent = prompt.line;
+  el.submit.textContent = prompt.button;
+  if (isSum(item)) {
+    el.promptDigital.hidden = true;
+    el.promptSum.hidden = false;
+    el.promptSpoken.classList.remove('is-lead');
+    el.promptSpoken.textContent = t.spokenSum(current.shown.a, current.shown.b);
+    renderAnswer();
+    return;
+  }
+  const digits = digitalOn();
+  el.promptSum.hidden = true;
   el.promptDigital.textContent = timeId(item.h, item.m);
   el.promptDigital.hidden = !digits;
   el.promptSpoken.textContent = t.spoken(item.h, item.m);
   // Without the digits the phrase is the whole question, so it takes their weight.
   el.promptSpoken.classList.toggle('is-lead', !digits);
-  el.submit.textContent = prompt.button;
 }
+
+/* ------------------------------------------------------------- writing a number */
+
+const coarsePointer = () =>
+  typeof matchMedia === 'function' && matchMedia('(any-pointer: coarse)').matches;
+
+/**
+ * Whether the on-screen number pad is offered. `auto` follows the pointer — a finger gets
+ * buttons, a mouse and keyboard get the keyboard — and the setting is there because
+ * detection is a guess, and because a child who is having a bad day with one way of
+ * answering should be able to use the other.
+ */
+function keypadWanted() {
+  const mode = state.settings.answerMode ?? 'auto';
+  if (mode === 'type') return false;
+  if (mode === 'tap') return true;
+  return coarsePointer();
+}
+
+const digitKey = (n) =>
+  `<button type="button" class="key" data-digit="${n}" aria-label="${escape(t('answer.digit', { n }))}">${n}</button>`;
+
+function buildKeypad() {
+  el.keypad.innerHTML = [
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(digitKey),
+    '<span aria-hidden="true"></span>',
+    digitKey(0),
+    `<button type="button" class="key key-clear" data-clear="1">${escape(t('answer.clear'))}</button>`,
+  ].join('');
+}
+
+/**
+ * The answer as it stands, right-aligned in its slots. Right-aligned because that is what a
+ * number does: type 1 then 5 and it reads 1, then 15 — never "1_", which a child would read
+ * as ten-something. It also means a single-digit answer given in a two-slot strip lands
+ * where they would have written it.
+ */
+function renderAnswer() {
+  const value = current?.answer ?? '';
+  const width = current?.width ?? 1;
+  const pad = width - value.length;
+  const slots = [];
+  for (let i = 0; i < width; i += 1) {
+    const filled = i >= pad;
+    const classes = ['slot', filled ? '' : 'is-empty', i === width - 1 && !filled ? 'is-next' : '']
+      .filter(Boolean)
+      .join(' ');
+    slots.push(`<span class="${classes}">${filled ? value[i - pad] : ''}</span>`);
+  }
+  const { a, b } = current.shown;
+  el.promptSum.innerHTML = `${a}<i class="op">+</i>${b}<i class="op">=</i>${slots.join('')}`;
+  el.promptSum.setAttribute(
+    'aria-label',
+    `${t.spokenSum(a, b)} = ${value || t('answer.empty')}`
+  );
+  el.submit.disabled = locked || value.length === 0;
+}
+
+function pushDigit(digit) {
+  if (locked || !current || !isSum(current) || current.answer.length >= current.width) return;
+  current.answer += String(digit);
+  audio.play('tick');
+  renderAnswer();
+}
+
+function clearAnswer() {
+  if (locked || !current || !isSum(current) || !current.answer) return;
+  // Adding's stand-in for waggling the clock hands: starting the answer over is the tell
+  // that the child was not sure, and `qualityOf` reads it the same way.
+  current.clears += 1;
+  current.answer = '';
+  audio.play('grab');
+  renderAnswer();
+}
+
+// pointerdown rather than click, for the same zero-latency reason the touch controls use it.
+el.keypad.addEventListener('pointerdown', (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  event.preventDefault();
+  if (button.dataset.clear) clearAnswer();
+  else pushDigit(button.dataset.digit);
+});
+
+// The keyboard always works, whatever the setting says — it costs nothing and a grown-up
+// sitting next to a child on a laptop will reach for it.
+document.addEventListener('keydown', (event) => {
+  if (scene !== 'play' || !current || !isSum(current) || locked) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (document.querySelector('.overlay:not([hidden])')) return;
+  if (event.key >= '0' && event.key <= '9') {
+    event.preventDefault();
+    pushDigit(event.key);
+  } else if (event.key === 'Backspace' || event.key === 'Delete') {
+    event.preventDefault();
+    clearAnswer();
+  } else if (event.key === 'Enter' && current.answer) {
+    event.preventDefault();
+    submit();
+  }
+});
 
 function askNext() {
   const id = nextItem(state, {
@@ -509,28 +632,71 @@ function askNext() {
   });
   const item = ensureItem(id);
   lastAskedId = id;
+  const sum = isSum(item);
   current = {
     id,
     subject: item.subject ?? DEFAULT_SUBJECT,
-    target: { h: item.h, m: item.m },
+    target: sum ? { a: item.a, b: item.b } : { h: item.h, m: item.m },
+    // Which way round the pair is written is decided fresh each time. The item is the same
+    // fact either way — that is the whole reason there is only one of it — and seeing it
+    // both ways is how commutativity gets taught without a lesson about it.
+    shown: sum && Math.random() < 0.5 ? { a: item.b, b: item.a } : { a: item.a, b: item.b },
+    width: sum ? addition.answerWidth() : 0,
+    answer: '',
+    clears: 0,
     startedAt: now(),
     reversals: 0,
   };
 
+  el.answerClock.hidden = sum;
+  el.answerSum.hidden = !sum;
+  el.keypad.hidden = !keypadWanted();
+  el.tenframeHost.hidden = true;
+  el.tenframeHost.innerHTML = '';
+
+  locked = false;
   renderPrompt(item);
-  el.submit.disabled = false;
+  // A sum has nothing to submit until a digit is put down; the clock always has the hands
+  // wherever they happen to be sitting.
+  el.submit.disabled = sum;
   el.feedback.textContent = '';
   el.feedback.className = 'feedback';
   renderPetStage(item, moodOf(item, now()));
-  setGhostVisible(false);
-  scatterHands(current.target);
-  locked = false;
+  if (!sum) {
+    setGhostVisible(false);
+    scatterHands(current.target);
+  }
   save();
 }
 
 /* ------------------------------------------------------------------ answers */
 
 const cheer = () => t(`cheer.${1 + Math.floor(Math.random() * 5)}`);
+
+const SUM_VERDICTS = {
+  offByOne: 'teach.sumOffByOne',
+  transposed: 'teach.sumTransposed',
+  gaveAddend: 'teach.sumGaveAddend',
+  gaveDifference: 'teach.sumGaveDifference',
+};
+
+/**
+ * What the caption says under a wrong sum: the mistake named, where there is a name for it,
+ * followed by the fact stated the way the picture is about to show it. Telling a child who
+ * subtracted the same sentence as a child who miscounted by one would teach neither.
+ */
+function sumTeachLine(result) {
+  const { a, b } = current.shown;
+  const plan = fillPlan(a, b);
+  const bridged = plan.rest > 0 && plan.a + plan.bridge === 10;
+  const params = { a, b, sum: a + b, bridge: plan.bridge, rest: plan.rest };
+  const named = SUM_VERDICTS[result.verdict];
+  return (
+    (result.nearMiss ? t('teach.nearMiss') : '') +
+    (named ? `${t(named)} ` : '') +
+    t(bridged ? 'teach.sumMakeTen' : 'teach.sumPlain', params)
+  );
+}
 
 function teachLine(target, result) {
   const prefix = result.nearMiss ? t('teach.nearMiss') : '';
@@ -571,16 +737,19 @@ async function submit() {
   el.submit.disabled = true;
   beginSessionIfNeeded();
 
+  const subject = SUBJECTS[current.subject] ?? SUBJECTS[DEFAULT_SUBJECT];
+  const sum = isSum(current);
   const target = current.target;
-  const answer = { ...dial };
-  const result = grade(target, answer);
+  const answer = sum ? current.answer : { ...dial };
+  const result = subject.grade(target, answer);
   const ms = now() - current.startedAt;
 
   state.reviewClock += 1;
   const outcome = review(state.items[current.id], {
     correct: result.correct,
     ms,
-    reversals: current.reversals,
+    reversals: sum ? current.clears : current.reversals,
+    pace: subject.paceScale,
     reviewClock: state.reviewClock,
     now: now(),
   });
@@ -625,7 +794,7 @@ async function submit() {
   // Paid but nothing to celebrate — a day bonus on a wrong first answer still lands.
   if (paid && !result.correct) showCoins(paid);
 
-  for (const subjectId of unlocked) await showUnlock(tiers[subjectId]);
+  for (const subjectId of unlocked) await showUnlock(subjectId, tiers[subjectId]);
 
   const reason = session.shouldEnd(state.session, {
     now: now(),
@@ -799,8 +968,29 @@ async function hatchShow(item) {
  * the child put them to where they belong, with a caption naming the mistake. Getting it
  * right on the retry celebrates exactly as hard as getting it right first time.
  */
+/**
+ * The wrong-answer path for a sum. The ten-frame is the counterpart to the clock's ghost
+ * hands: it does not say the answer, it shows the shape of it — seven, then the three that
+ * finish the ten, then the five that are left. Nothing is red and nothing is crossed out.
+ */
+async function correctSum(target, result) {
+  const { a, b } = current.shown;
+  el.feedback.textContent = sumTeachLine(result);
+  el.feedback.className = 'feedback teach';
+  const still = reduceMotion();
+  el.tenframeHost.hidden = false;
+  el.tenframeHost.innerHTML = tenFrameSvg(a, b, {
+    step: still ? 0 : 0.07,
+    title: t.spokenSum(a, b),
+  });
+  await wait(still ? 700 : fillDuration(a, b));
+  renderPetStage(state.items[current.id], 'content');
+  await wait(1700);
+}
+
 async function correct(target, answer, result) {
   audio.play('oops');
+  if (isSum(current)) return correctSum(target, result);
   el.feedback.textContent = teachLine(target, result);
   el.feedback.className = 'feedback teach';
   setGhostVisible(true, answer.h, answer.m);
@@ -1461,10 +1651,13 @@ el.submit.addEventListener('click', submit);
 
 /* ----------------------------------------------------------------- overlays */
 
-async function showUnlock(tier) {
-  const spec = TIERS[tier];
-  const species = tierItems(tier)
-    .map((time) => speciesFor(time.h, time.m))
+async function showUnlock(subjectId, tier) {
+  const sum = subjectId === addition.id;
+  const key = sum ? `tier.add.${tier}` : `tier.${tier}`;
+  const species = (sum
+    ? addition.tierItems(tier).map((fact) => speciesForFact(fact.a, fact.b))
+    : tierItems(tier).map((time) => speciesFor(time.h, time.m))
+  )
     .filter((s, i, all) => all.indexOf(s) === i)
     .slice(0, 4);
   el.unlockPets.innerHTML = species
@@ -1472,8 +1665,8 @@ async function showUnlock(tier) {
     .join('');
   el.unlockTitle.textContent = t('unlock.title');
   el.unlockCopy.textContent = t('unlock.copy', {
-    tier: t(`tier.${spec.id}.name`),
-    blurb: t(`tier.${spec.id}.blurb`),
+    tier: t(`${key}.name`),
+    blurb: t(`${key}.blurb`),
   });
   el.unlock.hidden = false;
   audio.play('unlock');
@@ -1506,15 +1699,22 @@ function renderGrownups() {
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
     .join('');
 
-  el.grownupsTiers.innerHTML = TIERS.map((tier) => {
-    const pct = Math.round(tierMastery(state.items, tier.id) * 100);
-    const locked = tier.id > state.tiers.clock;
-    return `
+  const ladder = (subjectId, tiers, keyOf) =>
+    tiers
+      .map((tier) => {
+        const pct = Math.round(tierMastery(state.items, subjectId, tier.id) * 100);
+        const locked = tier.id > (state.tiers[subjectId] ?? 0);
+        return `
       <div class="tier-row${locked ? ' locked' : ''}">
-        <div class="tier-head"><span>${escape(t(`tier.${tier.id}.name`))}${locked ? ' 🔒' : ''}</span><span>${pct}%</span></div>
+        <div class="tier-head"><span>${escape(t(keyOf(tier)))}${locked ? ' 🔒' : ''}</span><span>${pct}%</span></div>
         <div class="track"><div class="fill" style="width:${pct}%"></div></div>
       </div>`;
-  }).join('');
+      })
+      .join('');
+
+  el.grownupsTiers.innerHTML =
+    ladder('clock', TIERS, (tier) => `tier.${tier.id}.name`) +
+    ladder(addition.id, addition.TIERS, (tier) => `tier.add.${tier.id}.name`);
   el.grownups.hidden = false;
 }
 
@@ -1577,6 +1777,8 @@ function applyLanguage() {
 
   applySound(); // its label is a string too
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
+  buildAnswerModeOptions();
+  buildKeypad(); // its digits carry spoken labels, which are strings like any other
 
   if (current) renderPrompt(state.items[current.id]);
   if (scene === 'zoo') renderZoo();
@@ -1593,6 +1795,18 @@ function applyDigital() {
   if (current) renderPrompt(state.items[current.id]);
   if (scene === 'zoo') renderZoo();
   refreshHabitat();
+}
+
+const ANSWER_MODES = [
+  { id: 'auto', key: 'settings.answerAuto' },
+  { id: 'type', key: 'settings.answerType' },
+  { id: 'tap', key: 'settings.answerTap' },
+];
+
+function buildAnswerModeOptions() {
+  el.answerMode.innerHTML = '';
+  for (const mode of ANSWER_MODES) el.answerMode.append(new Option(t(mode.key), mode.id));
+  el.answerMode.value = state.settings.answerMode ?? 'auto';
 }
 
 function buildLanguageOptions() {
@@ -1623,6 +1837,12 @@ el.language.addEventListener('change', () => {
   state.settings.language = isLanguage(chosen) ? chosen : DEFAULT_LANGUAGE;
   save();
   applyLanguage();
+});
+
+el.answerMode.addEventListener('change', () => {
+  state.settings.answerMode = el.answerMode.value;
+  el.keypad.hidden = !keypadWanted();
+  save();
 });
 
 el.showDigital.addEventListener('change', () => {

@@ -48,6 +48,10 @@ export function freshState(now) {
       // Off by default: a child who can read digits will read the digits and never look
       // at the face, which is the one thing this game exists to teach.
       showDigital: false,
+      // How a sum is answered: 'auto' follows the pointer, 'type' the keyboard, 'tap' the
+      // on-screen buttons. Old saves pick this up from freshState on load, like any other
+      // setting added after the fact.
+      answerMode: 'auto',
     },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
     stats: { totalAnswered: 0, totalCorrect: 0, streak: 0, bestStreak: 0, daysPlayed: [] },

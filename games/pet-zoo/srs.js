@@ -110,10 +110,11 @@ export function createItem({
  * self-grade. Speed and hand-waggling (direction reversals during the drag) stand in for
  * confidence: a confident answer goes straight to the right spot and stops.
  */
-export function qualityOf({ correct, ms = 0, reversals = 0 }) {
+export function qualityOf({ correct, ms = 0, reversals = 0, pace = 1 }) {
   if (!correct) return 0;
-  if (ms > 20000 || reversals >= 2) return 3;
-  if (ms > 8000 || reversals >= 1) return 4;
+  const slow = Math.max(1, pace);
+  if (ms > 20000 * slow || reversals >= 2) return 3;
+  if (ms > 8000 * slow || reversals >= 1) return 4;
   return 5;
 }
 
@@ -130,8 +131,8 @@ export const nextInterval = (reps, intervalDays, ease) => {
  * Record one answer. Returns the replacement item plus the events the UI should
  * celebrate — hatching in particular is just graduation wearing a costume.
  */
-export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now }) {
-  const quality = qualityOf({ correct, ms, reversals });
+export function review(item, { correct, ms = 0, reversals = 0, pace = 1, reviewClock, now }) {
+  const quality = qualityOf({ correct, ms, reversals, pace });
   const next = { ...item, seen: item.seen + 1, lastMs: ms };
   const events = {
     quality,

@@ -81,7 +81,9 @@ import {
   VERSION,
   write,
 } from '../store.js';
+import * as addSubject from '../subjects/addition.js';
 import * as clockSubject from '../subjects/clock.js';
+import { fillDuration, fillPlan, FRAME, tenFrameSvg } from '../tenframe.js';
 import {
   interleave,
   refreshTiers,
@@ -120,6 +122,11 @@ import {
   petSvg,
   speciesAppearance,
   speciesFor,
+  speciesForFact,
+  factsOfSpecies,
+  itemsOfSpecies,
+  portraitOf,
+  SPECIES_IDS,
   SPECIES,
   timesOfSpecies,
   TRAIT_STRIDE,
@@ -3006,7 +3013,9 @@ describe('subjects — one zoo, more than one thing to learn');
 test('an id is claimed by exactly the subject that owns it', () => {
   assertEqual(subjectIdOf('4:15'), 'clock');
   assertEqual(subjectIdOf('12:55'), 'clock');
-  assertEqual(subjectIdOf('add:3+5'), null, 'a subject this build lacks claims nothing');
+  assertEqual(subjectIdOf('add:3+5'), 'add');
+  assertEqual(subjectIdOf('add:5+3'), null, 'and only in its canonical spelling');
+  assertEqual(subjectIdOf('chem:H2O'), null, 'a subject this build lacks claims nothing');
   assertEqual(subjectIdOf('nonsense'), null);
   assertEqual(subjectIdOf(undefined), null, 'and a missing id does not throw');
 });
@@ -3040,10 +3049,13 @@ test('new material is interleaved between subjects, not concatenated', () => {
 });
 
 test('unseen material stops at the tier a subject has unlocked', () => {
-  const heads = unseenAcrossSubjects({}, { clock: 0 });
+  const heads = unseenAcrossSubjects({}, { clock: 0, add: 0 });
   assert(heads.length > 0, 'a fresh zoo has everything to learn');
   assert(heads.every((entry) => entry.tier === 0), 'and nothing above the unlocked tier');
-  assert(heads.every((entry) => entry.subject === 'clock'), 'each one knows its subject');
+  assert(heads.some((entry) => entry.subject === 'clock'), 'the clock is in there');
+  assert(heads.some((entry) => entry.subject === 'add'), 'and so is adding');
+  assertEqual(heads[0].subject, 'clock', 'a fresh zoo meets the clock first');
+  assertEqual(heads[1].subject, 'add', 'and then a sum, rather than every clock face first');
 });
 
 test('a seen item is never offered as new again', () => {
@@ -3053,18 +3065,20 @@ test('a seen item is never offered as new again', () => {
 });
 
 test('the zoo counts every subject it teaches', () => {
-  const total = SUBJECT_IDS.reduce((sum, id) => sum + (id === 'clock' ? 144 : 0), 0);
-  assertEqual(totalItemCount(), total, 'the hardcoded 144 is gone, not merely moved');
+  assertEqual(totalItemCount(), 144 + 66, 'the hardcoded 144 is gone, not merely moved');
+  assertEqual(SUBJECT_IDS.join(), 'clock,add', 'and both subjects are counted');
 });
 
 test('a tier opens for one subject without opening another', () => {
   const items = {};
-  for (const entry of unseenAcrossSubjects({}, { clock: 0 })) {
-    items[entry.id] = { subject: 'clock', phase: 'graduated' };
+  for (const entry of unseenAcrossSubjects({}, { clock: 0, add: 0 })) {
+    // Only the clock's first tier is finished; the sums are left untouched.
+    if (entry.subject === 'clock') items[entry.id] = { subject: 'clock', phase: 'graduated' };
   }
-  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0 } });
+  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0, add: 0 } });
   assertEqual(tiers.clock, 1, 'finishing tier 0 opens tier 1');
-  assertEqual(unlocked.join(), 'clock', 'and names the subject that moved');
+  assertEqual(tiers.add, 0, 'and adding has not moved an inch');
+  assertEqual(unlocked.join(), 'clock', 'and only the subject that moved is named');
 });
 
 test('a tier already earned is never taken back', () => {
@@ -3151,8 +3165,9 @@ test('a file carrying an unknown subject loses only that item', () => {
   const kept = cleanItems({
     '4:15': { h: 4, m: 15, hatchedAt: 1 },
     'add:3+5': { a: 3, b: 5, hatchedAt: 1 },
+    'chem:H2O': { hatchedAt: 1 },
   });
-  assertEqual(Object.keys(kept).join(), '4:15', 'the rest of the zoo still lands');
+  assertEqual(Object.keys(kept).sort().join(), '4:15,add:3+5', 'the rest of the zoo still lands');
 });
 
 /* --------------------------------------------------- scheduling across subjects */
@@ -3214,6 +3229,217 @@ test('alternating never overrides urgency within one subject', () => {
     '9:30',
     'with nothing to alternate to, the longest overdue still wins'
   );
+});
+
+
+/* ------------------------------------------------------------------- adding */
+
+describe('adding — the deck');
+
+test('every unordered pair up to ten and ten, and nothing twice', () => {
+  assertEqual(addSubject.ALL_ITEMS.length, 66);
+  const ids = addSubject.ALL_ITEMS.map((fact) => fact.id);
+  assertEqual(new Set(ids).size, 66, 'a fact appears in two tiers');
+});
+
+test('the tiers partition the deck, so a tier can actually be finished', () => {
+  const sizes = addSubject.TIERS.map((tier) => addSubject.tierItems(tier.id).length);
+  assertEqual(sizes.reduce((a, b) => a + b, 0), addSubject.ALL_ITEMS.length);
+  assert(sizes.every((n) => n > 0), 'an empty tier can never be mastered');
+});
+
+test('3 + 5 and 5 + 3 are one fact, spelled the smaller way round', () => {
+  assertEqual(addSubject.idOf({ a: 5, b: 3 }), 'add:3+5');
+  assertEqual(addSubject.idOf({ a: 3, b: 5 }), 'add:3+5');
+  assert(addSubject.owns('add:3+5'), 'the canonical spelling is the fact');
+  assert(!addSubject.owns('add:5+3'), 'and the other spelling is not a second pet');
+});
+
+test('ids outside the deck are refused', () => {
+  assert(!addSubject.owns('add:11+1'), 'eleven is not an addend here');
+  assert(!addSubject.owns('add:3+'), 'nor is half an id');
+  assert(!addSubject.owns('4:15'), 'nor a time');
+  assertEqual(addSubject.parse('nonsense'), null);
+});
+
+test('each tier is a strategy, not a size', () => {
+  const shown = (tier) => addSubject.tierItems(tier).map((f) => `${f.a}+${f.b}`).join(' ');
+  assert(addSubject.tierItems(0).every((f) => f.a <= 1), 'tier 0 is adding nothing and adding one');
+  assert(addSubject.tierItems(1).every((f) => f.a + f.b <= 10), 'tier 1 stays inside one ten-frame');
+  assertEqual(shown(2), '6+6 7+7 8+8 9+9 10+10', 'tier 2 is the doubles past ten');
+  assert(addSubject.tierItems(3).every((f) => f.b === 10), 'tier 3 is adding ten');
+  assert(
+    addSubject.tierItems(4).every((f) => f.a + f.b > 10 && f.a !== f.b && f.b !== 10),
+    'and tier 4 is what is left, which is everything that has to bridge ten'
+  );
+});
+
+test('facts are taught easiest first', () => {
+  const sums = addSubject.tierItems(1).map((f) => f.a + f.b);
+  assertEqual(sums.join(), [...sums].sort((a, b) => a - b).join(), 'a tier jumps about');
+});
+
+describe('adding — naming the mistake');
+
+const verdict = (a, b, answer) => addSubject.grade({ a, b }, answer).verdict;
+
+test('the right answer is the right answer', () => {
+  assertEqual(verdict(7, 8, 15), 'correct');
+  assertEqual(verdict(0, 0, 0), 'correct', 'and zero is an answer, not an absence');
+});
+
+test('a miscount by one is told apart from a misunderstanding', () => {
+  assertEqual(verdict(7, 8, 14), 'offByOne');
+  assertEqual(verdict(7, 8, 16), 'offByOne');
+  assert(addSubject.grade({ a: 7, b: 8 }, 14).nearMiss, 'and it earns the softer opening');
+});
+
+test('digits the right way round but in the wrong order', () => {
+  assertEqual(verdict(7, 8, 51), 'transposed');
+  assert(addSubject.grade({ a: 7, b: 8 }, 51).nearMiss);
+  assertEqual(verdict(3, 5, 8), 'correct', 'a single-digit answer cannot be transposed');
+});
+
+test('giving back one of the numbers, or the difference', () => {
+  assertEqual(verdict(3, 5, 5), 'gaveAddend');
+  assertEqual(verdict(3, 5, 3), 'gaveAddend');
+  assertEqual(verdict(9, 4, 5), 'gaveDifference', 'they subtracted');
+  assertEqual(verdict(7, 8, 99), 'wrong');
+});
+
+test('an unanswered question is never scored as a wrong one', () => {
+  // Number(null) and Number('') are both 0, so this is the trap worth a test of its own.
+  for (const empty of [null, undefined, '', 'x', -1]) {
+    assertEqual(verdict(7, 8, empty), 'blank', `${JSON.stringify(empty)} became an answer`);
+    assertEqual(addSubject.grade({ a: 7, b: 8 }, empty).correct, false);
+  }
+});
+
+describe('adding — how wide the answer box is');
+
+test('the strip never changes width, whatever the fact is', () => {
+  // A strip that narrowed for small sums would say "this one is under ten" before the child
+  // had added anything.
+  const widths = new Set(addSubject.ALL_ITEMS.map(() => addSubject.answerWidth()));
+  assertEqual(widths.size, 1, 'the width of the answer is a clue');
+  assertEqual(addSubject.answerWidth(), 2);
+});
+
+test('every answer in the deck fits in the strip', () => {
+  // The first tier contains 0 + 10 — "sums to ten" includes ten — so a one-box strip would
+  // not merely leak, it would make a fact impossible to answer at all.
+  for (const fact of addSubject.ALL_ITEMS) {
+    assert(
+      addSubject.answerDigits(fact) <= addSubject.answerWidth(),
+      `${fact.id} cannot be answered in ${addSubject.answerWidth()} boxes`
+    );
+  }
+  assertEqual(addSubject.answerDigits({ a: 0, b: 10 }), 2, 'the fact that forced this');
+  assertEqual(addSubject.tierOf({ a: 0, b: 10 }), 0, 'and it really is in the first tier');
+});
+
+describe('the ten-frame');
+
+test('seven and eight fills the first ten, then spills', () => {
+  const plan = fillPlan(7, 8);
+  assertEqual(plan.total, 15);
+  assertEqual(plan.bridge, 3, 'three of the eight finish the ten');
+  assertEqual(plan.rest, 5, 'and five are left over');
+  assertEqual(plan.frames, 2);
+  assertEqual(plan.cells.filter((c) => c.frame === 0).length, FRAME);
+  assertEqual(plan.cells.filter((c) => c.bridges).length, 3, 'and those three are marked');
+});
+
+test('the two addends stay tellable apart', () => {
+  const plan = fillPlan(7, 8);
+  assertEqual(plan.cells.filter((c) => c.from === 'a').length, 7);
+  assertEqual(plan.cells.filter((c) => c.from === 'b').length, 8);
+});
+
+test('a sum that stays under ten bridges nothing', () => {
+  const plan = fillPlan(3, 5);
+  assertEqual(plan.frames, 1);
+  assertEqual(plan.cells.filter((c) => c.bridges).length, 0, 'nothing was completed');
+});
+
+test('the corners hold', () => {
+  assertEqual(fillPlan(0, 0).total, 0);
+  assertEqual(fillPlan(0, 0).frames, 1, 'there is always a frame to look at');
+  assertEqual(fillPlan(10, 10).total, 20);
+  assertEqual(fillPlan(10, 10).frames, 2);
+  assertEqual(fillPlan(10, 10).bridge, 0, 'the first ten was already full');
+});
+
+test('every counter lands in a real cell', () => {
+  for (const fact of addSubject.ALL_ITEMS) {
+    for (const cell of fillPlan(fact.a, fact.b).cells) {
+      assert(cell.row >= 0 && cell.row < 2, `row out of range for ${fact.id}`);
+      assert(cell.col >= 0 && cell.col < 5, `column out of range for ${fact.id}`);
+    }
+  }
+});
+
+test('the picture waits exactly as long as it takes to draw', () => {
+  assert(fillDuration(10, 10) > fillDuration(1, 1), 'a bigger sum takes longer');
+  assert(tenFrameSvg(7, 8).includes('tf-bridge'), 'the bridging counters reach the markup');
+});
+
+describe('adding — pets, homes and milestones');
+
+test('a fact hatches a pet of its own', () => {
+  const portrait = portraitOf({ subject: 'add', a: 7, b: 8 });
+  assertEqual(portrait.key, 'add:7+8');
+  assertEqual(portrait.species, speciesForFact(7, 8));
+  assert(portrait.index >= 0);
+});
+
+test('learning to add did not repaint the zoo', () => {
+  // Trait indices decide appearance and name, and the clock's were handed out first.
+  assertEqual(traitIndexFor(4, 15), timesOfSpecies(speciesFor(4, 15)).indexOf('4:15'));
+  assertEqual(petName({ subject: 'clock', h: 4, m: 15 }, 'nb'), defaultName(4, 15, 'nb'));
+});
+
+test('no two pets of one species share a name', () => {
+  for (const species of SPECIES_IDS) {
+    const names = itemsOfSpecies(species).map((id) => {
+      const fact = addSubject.parse(id);
+      return fact
+        ? petName({ subject: 'add', a: fact.a, b: fact.b }, 'nb')
+        : petName({ subject: 'clock', ...parseTimeId(id) }, 'nb');
+    });
+    assertEqual(new Set(names).size, names.length, `${species} has a repeated name`);
+  }
+});
+
+test('the clock species milestone still means only clock pets', () => {
+  assert(
+    timesOfSpecies('mochi').every((id) => !id.startsWith('add:')),
+    'an already-earned milestone quietly grew a new requirement'
+  );
+  assert(factsOfSpecies('mochi').every((id) => id.startsWith('add:')));
+});
+
+test('finishing an addition tier pays, without repricing the clock', () => {
+  const items = {};
+  for (const fact of addSubject.tierItems(0)) {
+    items[fact.id] = { subject: 'add', phase: 'graduated', hatchedAt: 1 };
+  }
+  const reached = milestonesReached(items, { daysPlayed: [] });
+  assert(reached.includes('mastery:add:0'), 'the addition tier went unrewarded');
+  assert(!reached.includes('mastery:0'), 'and it must not claim the clock’s milestone');
+});
+
+describe('adding — the pace it is answered at');
+
+test('writing a number is allowed to be slower than swinging two hands', () => {
+  // 12 seconds is a hesitant clock answer but an ordinary one on a keypad.
+  assertEqual(qualityOf({ correct: true, ms: 12000 }), 4, 'unchanged for the clock');
+  assertEqual(qualityOf({ correct: true, ms: 12000, pace: addSubject.paceScale }), 5);
+  assertEqual(qualityOf({ correct: true, ms: 40000, pace: addSubject.paceScale }), 3, 'but slow is still slow');
+});
+
+test('starting the answer over counts the same as waggling a hand', () => {
+  assertEqual(qualityOf({ correct: true, ms: 500, reversals: 2, pace: 4 }), 3, 'pace never excuses hesitation');
 });
 
 const out = document.getElementById('out');

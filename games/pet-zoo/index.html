@@ -43,12 +43,13 @@
             <p id="prompt-line" class="prompt-line" data-i18n="prompt.booting">Vekker dyrehagen…</p>
             <p class="prompt-time">
               <span id="prompt-digital" class="digital">--:--</span>
+              <span id="prompt-sum" class="sum" hidden></span>
               <span id="prompt-spoken" class="spoken"></span>
             </p>
           </div>
         </div>
 
-        <div class="clock-wrap">
+        <div id="answer-clock" class="clock-wrap">
           <svg
             id="clock"
             viewBox="0 0 400 400"
@@ -56,6 +57,17 @@
             data-i18n-aria-label="clock.aria"
             aria-label="Dra viserne for å stille klokka"
           ></svg>
+        </div>
+
+        <div id="answer-sum" class="sum-wrap" hidden>
+          <div id="tenframe-host" class="tenframe-host" hidden></div>
+          <div
+            id="keypad"
+            class="keypad"
+            role="group"
+            data-i18n-aria-label="answer.keypad"
+            aria-label="Talltaster"
+          ></div>
         </div>
 
         <p id="feedback" class="feedback" aria-live="polite"></p>
@@ -229,6 +241,13 @@
             Av til vanlig. Når den er av, sier dyrene måltidet sitt bare med ord, så urskiva
             er eneste stedet å lese det.
           </p>
+        </div>
+
+        <div class="setting">
+          <label class="setting-label" for="answer-mode" data-i18n="settings.answerMode">
+            Svarer med
+          </label>
+          <select id="answer-mode" class="setting-select"></select>
         </div>
 
         <div class="setting">

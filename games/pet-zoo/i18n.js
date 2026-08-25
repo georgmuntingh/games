@@ -55,6 +55,29 @@ const NB_MINUTES = {
   55: { text: 'fem på {h}', next: true },
 };
 
+// Counting words, which are not the clock's words: Norwegian says "klokka ett" for the hour
+// but "én pluss to" when counting, so HOUR_WORDS could not simply be extended.
+const NUMBER_WORDS = {
+  en: ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen',
+    'nineteen', 'twenty'],
+  nb: ['null', 'én', 'to', 'tre', 'fire', 'fem', 'seks', 'sju', 'åtte', 'ni', 'ti',
+    'elleve', 'tolv', 'tretten', 'fjorten', 'femten', 'seksten', 'sytten', 'atten',
+    'nitten', 'tjue'],
+};
+
+/** A number spelled out: "fifteen" / "femten". Falls back to the digits past twenty. */
+export function numberWord(lang, n) {
+  const list = NUMBER_WORDS[lang] ?? NUMBER_WORDS[DEFAULT_LANGUAGE];
+  return list[n] ?? String(n);
+}
+
+/** A sum as a person would say it: "seven plus eight" / "sju pluss åtte". */
+export const spokenSum = (lang, a, b) =>
+  lang === 'en'
+    ? `${numberWord('en', a)} plus ${numberWord('en', b)}`
+    : `${numberWord('nb', a)} pluss ${numberWord('nb', b)}`;
+
 const wrap = (h) => ((h - 1 + 12) % 12) + 1; // keeps hours in 1..12, never 0 or 13
 
 /** The hour spelled out: "four" / "fire". */
@@ -279,6 +302,37 @@ const STRINGS = {
     'shop.fountain': 'Fountain',
     'shop.statue': 'Statue',
 
+    'prompt.sumEgg': 'A chilly egg! Warm it up:',
+    'prompt.sumEgg1': 'The egg is stirring! Keep going:',
+    'prompt.sumEgg2': 'It is cracking open! One more:',
+    'prompt.sumForgot': '{name} forgot their snack. It is:',
+    'prompt.sumHungry': '{name} is hungry! Their snack is:',
+    'prompt.sumSnack': '{name} fancies a snack:',
+    'teach.sumOffByOne': 'Just one out — count once more.',
+    'teach.sumTransposed': 'The right digits, the other way round.',
+    'teach.sumGaveAddend': 'That is one of the numbers on its own.',
+    'teach.sumGaveDifference': 'That is taking them apart, not putting them together.',
+    'teach.sumPlain': '{a} and {b} makes {sum}.',
+    'teach.sumMakeTen': '{a} and {bridge} makes ten, then {rest} more — {sum}.',
+    'tier.add.0.name': 'Counting on',
+    'tier.add.0.blurb': 'Adding nothing, and adding one.',
+    'tier.add.1.name': 'Sums to ten',
+    'tier.add.1.blurb': 'Everything that fits in one ten-frame.',
+    'tier.add.2.name': 'Doubles',
+    'tier.add.2.blurb': 'Two of the same, past ten.',
+    'tier.add.3.name': 'Adding ten',
+    'tier.add.3.blurb': 'The answer is already in the question.',
+    'tier.add.4.name': 'Over the ten',
+    'tier.add.4.blurb': 'Make ten first, then add the rest.',
+    'answer.aria': 'Your answer',
+    'answer.empty': 'nothing yet',
+    'answer.keypad': 'Number buttons',
+    'answer.digit': 'Put down {n}',
+    'answer.clear': 'Clear',
+    'settings.answerMode': 'Answering',
+    'settings.answerAuto': 'Automatic',
+    'settings.answerType': 'Typing',
+    'settings.answerTap': 'Buttons',
     'tier.0.name': 'O’clock',
     'tier.0.blurb': 'The big hand points straight up.',
     'tier.1.name': 'Half past',
@@ -470,6 +524,37 @@ const STRINGS = {
     'shop.fountain': 'Fontene',
     'shop.statue': 'Statue',
 
+    'prompt.sumEgg': 'Et kaldt egg! Varm det opp:',
+    'prompt.sumEgg1': 'Egget rører på seg! Fortsett:',
+    'prompt.sumEgg2': 'Det slår sprekker! Én til:',
+    'prompt.sumForgot': '{name} har glemt matbiten sin. Den er:',
+    'prompt.sumHungry': '{name} er sulten! Matbiten er:',
+    'prompt.sumSnack': '{name} vil gjerne ha en matbit:',
+    'teach.sumOffByOne': 'Bare én bom — tell en gang til.',
+    'teach.sumTransposed': 'Riktige sifre, men i feil rekkefølge.',
+    'teach.sumGaveAddend': 'Det er bare det ene tallet.',
+    'teach.sumGaveDifference': 'Det er å ta dem fra hverandre, ikke å legge dem sammen.',
+    'teach.sumPlain': '{a} og {b} blir {sum}.',
+    'teach.sumMakeTen': '{a} og {bridge} blir ti, så {rest} til — {sum}.',
+    'tier.add.0.name': 'Telle videre',
+    'tier.add.0.blurb': 'Å legge til ingenting, og å legge til én.',
+    'tier.add.1.name': 'Summer opp til ti',
+    'tier.add.1.blurb': 'Alt som får plass i én tierramme.',
+    'tier.add.2.name': 'Dobler',
+    'tier.add.2.blurb': 'To like, over ti.',
+    'tier.add.3.name': 'Legge til ti',
+    'tier.add.3.blurb': 'Svaret står allerede i oppgaven.',
+    'tier.add.4.name': 'Over tieren',
+    'tier.add.4.blurb': 'Lag ti først, så legger du til resten.',
+    'answer.aria': 'Svaret ditt',
+    'answer.empty': 'ingenting ennå',
+    'answer.keypad': 'Talltaster',
+    'answer.digit': 'Sett inn {n}',
+    'answer.clear': 'Tøm',
+    'settings.answerMode': 'Svarer med',
+    'settings.answerAuto': 'Automatisk',
+    'settings.answerType': 'Tastatur',
+    'settings.answerTap': 'Knapper',
     'tier.0.name': 'Hele timer',
     'tier.0.blurb': 'Den lange viseren peker rett opp.',
     'tier.1.name': 'Halve timer',
@@ -501,6 +586,8 @@ export function translator(lang) {
   const t = (key, params) => fill(table[key] ?? fallback[key] ?? key, params);
   t.lang = STRINGS[lang] ? lang : DEFAULT_LANGUAGE;
   t.spoken = (h, m) => spokenTime(t.lang, h, m);
+  t.spokenSum = (a, b) => spokenSum(t.lang, a, b);
+  t.number = (n) => numberWord(t.lang, n);
   t.hourWord = (h) => hourWord(t.lang, h);
   t.names = NAMES[t.lang] ?? NAMES[DEFAULT_LANGUAGE];
   return t;

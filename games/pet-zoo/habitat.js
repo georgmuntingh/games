@@ -43,7 +43,7 @@ import {
   VIEW,
   WALK_Y,
 } from './habitat-parts.js';
-import { hash, SPECIES, speciesFor, traitIndexFor } from './pets.js';
+import { hash, portraitOf, SPECIES, speciesFor, traitIndexFor } from './pets.js';
 import { itemById as shopItemById, MAX_DECOR, sanitizeDecor, slotOf } from './shop.js';
 
 export { HORIZON, PET_FOOT, PET_SIZE, ROAM, SAFE, VIEW, WALK_Y };
@@ -406,9 +406,14 @@ const LIT_FROM = 6;
 const LIT_TO = 20;
 const DAY_ODDS = 4; // one in this many goes the other way
 
-export function lightingFor(h, m) {
-  const twelve = h % 12;
-  const roll = hash(`t${timeId(h, m)}`) % DAY_ODDS;
+/**
+ * The light a home is seen in. Driven by the hour for a pet that keeps a time; for one that
+ * keeps a sum there is no hour to read, so a stable one is drawn from its id instead — every
+ * pet still gets its own time of day to live in, which is the only thing this is for.
+ */
+export function lightingOf(key, h) {
+  const twelve = (Number.isFinite(h) ? h : 1 + (hash(`hr${key}`) % 12)) % 12;
+  const roll = hash(`t${key}`) % DAY_ODDS;
   const lit = (x) => x >= LIT_FROM && x <= LIT_TO;
   // Exactly one of the two readings is outside the lit range for nine hours in twelve;
   // for the other three (6, 7, 8) both are, and the roll simply decides.
@@ -417,6 +422,8 @@ export function lightingFor(h, m) {
   const phase = phaseOfHour(hour24);
   return { hour24, pm, phase, night: PHASES[phase].night, orb: orbPoint(hour24) };
 }
+
+export const lightingFor = (h, m) => lightingOf(timeId(h, m), h);
 
 /** A biome's colours, warmed toward the pet that lives in it and toward the hour it is. */
 export function paletteFor(speciesId, biomeId, phase) {
@@ -458,17 +465,17 @@ export function paletteFor(speciesId, biomeId, phase) {
 /* ---------------------------------------------------------------- generator */
 
 /**
- * The complete habitat for the pet that keeps a given time: its biome, its light, where
- * everything stands, and where the pet may walk.
+ * The complete habitat for a pet: its biome, its light, where everything stands, and where
+ * it may walk. Built from a portrait — an id, a species and a trait index — rather than from
+ * a time, so a pet that keeps a sum gets a home on exactly the same terms as one that keeps
+ * a quarter past four.
  */
-export function habitatFor(h, m) {
-  const species = speciesFor(h, m);
+export function habitatFrom({ key, species, index, hour }) {
   const biomeId = biomeOfSpecies(species);
   const biome = BIOMES[biomeId];
-  const index = traitIndexFor(h, m);
-  const light = lightingFor(h, m);
+  const light = lightingOf(key, hour);
   const layout = LAYOUTS[(index * LAYOUT_STRIDE) % LAYOUTS.length];
-  const seed = hash(`hab${timeId(h, m)}`) % 100000;
+  const seed = hash(`hab${key}`) % 100000;
 
   const scenery = layout.pieces.map(([x, scale], i) => ({
     id: biome.scenery[(index + i) % biome.scenery.length],
@@ -484,7 +491,7 @@ export function habitatFor(h, m) {
   }));
 
   return {
-    id: timeId(h, m),
+    id: key,
     species,
     biome: biomeId,
     light,
@@ -507,6 +514,15 @@ export function habitatFor(h, m) {
   };
 }
 
+/** The clock's way in, unchanged: the home of the pet that keeps a given time. */
+export const habitatFor = (h, m) =>
+  habitatFrom({
+    key: timeId(h, m),
+    species: speciesFor(h, m),
+    index: traitIndexFor(h, m),
+    hour: h,
+  });
+
 /**
  * The habitat a saved pet actually has. Generated from its time, then any stored override
  * merged over the top — the hook that lets a later build make habitats editable without
@@ -514,7 +530,7 @@ export function habitatFor(h, m) {
  * whole, so an override travels between devices the moment one exists.
  */
 export function habitatOf(item) {
-  const generated = habitatFor(item.h, item.m);
+  const generated = habitatFrom({ ...portraitOf(item), hour: item.h });
   const base = {
     ...generated,
     furniture: furnitureFor(generated, item?.decor),
