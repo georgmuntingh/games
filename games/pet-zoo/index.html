@@ -61,6 +61,24 @@
 
         <div id="answer-sum" class="sum-wrap" hidden>
           <div id="tenframe-host" class="tenframe-host" hidden></div>
+
+          <div id="answer-write" class="write-wrap" hidden>
+            <div id="write-boxes" class="write-boxes"></div>
+            <div id="write-picker" class="write-picker" hidden>
+              <p id="write-picker-title" class="write-picker-title" data-i18n="answer.fixTitle">
+                Hvilket tall var det?
+              </p>
+              <div id="write-picker-keys" class="write-picker-keys"></div>
+            </div>
+            <div class="write-tools">
+              <button id="write-undo" type="button" class="write-tool" data-i18n="answer.undo">
+                Angre
+              </button>
+              <button id="write-clear" type="button" class="write-tool" data-i18n="answer.clear">
+                Tøm
+              </button>
+            </div>
+          </div>
           <div
             id="keypad"
             class="keypad"
@@ -248,6 +266,18 @@
             Svarer med
           </label>
           <select id="answer-mode" class="setting-select"></select>
+        </div>
+
+        <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="mirror-nudge" data-i18n="settings.mirrorNudge">
+              Øv på hvilken vei tallene vender
+            </label>
+            <input id="mirror-nudge" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.mirrorNudgeHelp">
+            Av til å begynne med.
+          </p>
         </div>
 
         <div class="setting">

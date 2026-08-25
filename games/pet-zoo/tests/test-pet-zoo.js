@@ -3704,6 +3704,53 @@ test('the child’s own corrections reach the reading', () => {
   assert(read.detail.memoryStrength > 0, 'the memory was not consulted');
 });
 
+
+describe('handwriting — what the save keeps of it');
+
+test('a fresh zoo has learned nothing about anybody’s handwriting yet', () => {
+  const fresh = freshState(0);
+  assertEqual(fresh.ink.length, 0);
+  assertEqual(fresh.settings.mirrorNudge, false, 'the nudge starts off');
+  assertEqual(fresh.settings.answerMode, 'auto');
+});
+
+test('corrections survive a reload', () => {
+  const storage = fakeStorage();
+  const features = Array.from({ length: FEATURE_COUNT }, (_, i) => i / FEATURE_COUNT);
+  const state = { ...freshState(0), ink: remember([], Float32Array.from(features), 4) };
+  write(state, storage);
+  const back = load(0, storage);
+  assertEqual(back.ink.length, 1);
+  assertEqual(back.ink[0].d, 4, 'it forgot which digit it was told');
+});
+
+test('a corrupt memory is dropped rather than thrown at the child', () => {
+  const storage = fakeStorage();
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ ...freshState(0), ink: [{ d: 99, f: [] }, 'rubbish', null, { d: 2 }] })
+  );
+  assertEqual(load(0, storage).ink.length, 0, 'nonsense reached the recogniser');
+});
+
+test('a save written before handwriting existed simply has none', () => {
+  const storage = fakeStorage();
+  const { ink, ...older } = freshState(0);
+  storage.setItem(STORAGE_KEY, JSON.stringify(older));
+  assertEqual(load(0, storage).ink.length, 0);
+});
+
+test('one child’s handwriting does not travel to another child’s device', () => {
+  // It is learned from *this* hand; carrying it across would make the reading worse, and it
+  // costs nothing to learn again.
+  const features = Float32Array.from({ length: FEATURE_COUNT }, () => 0.5);
+  const state = { ...playedState(), ink: remember([], features, 7) };
+  const payload = exportPayload(state, 1000);
+  assert(!('ink' in payload), 'the handwriting memory travelled');
+  const landed = applyImport(receivingState(), parseTransfer(payloadToJson(payload)), 5000);
+  assertEqual(landed.ink.length, 0, 'and it must not arrive on the far side either');
+});
+
 const out = document.getElementById('out');
 const summary = document.getElementById('summary');
 let passed = 0;

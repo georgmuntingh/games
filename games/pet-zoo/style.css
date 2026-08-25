@@ -323,6 +323,185 @@ main {
   color: var(--pz-ink-soft);
 }
 
+/* ------------------------------------------------------------- writing it */
+
+#answer-write[hidden],
+.write-picker[hidden] {
+  display: none;
+}
+
+.write-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* One box per digit of the answer — never one per digit of *this* answer, which would say
+   how big it is. A single-digit answer can go in either box; both are read left to right
+   and the empty one is simply skipped. */
+.write-boxes {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+}
+
+.write-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.write-pad {
+  width: clamp(104px, 33vw, 140px);
+  aspect-ratio: 1;
+  border: 2px dashed var(--pz-line);
+  border-radius: 14px;
+  background: var(--pz-card);
+  touch-action: none;
+  position: relative;
+}
+
+.write-pad.has-ink {
+  border-style: solid;
+  border-color: var(--pz-accent-soft);
+}
+
+/* The faint guide only shows while the box is empty, so it never sits under the child's
+   own writing. */
+.write-pad::after {
+  content: '';
+  position: absolute;
+  inset: 22% 30%;
+  border-bottom: 2px dotted var(--pz-line);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.write-pad.has-ink::after {
+  display: none;
+}
+
+.ink-pad {
+  display: block;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.write-read {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  min-height: 34px;
+}
+
+/* Tapping what it read is how a misreading gets put right — always available, not only
+   when the game happens to be unsure. */
+.read-chip,
+.read-alt {
+  border: 1px solid var(--pz-line);
+  border-radius: 999px;
+  background: var(--pz-card);
+  color: var(--pz-ink);
+  font: inherit;
+  padding: 0.15rem 0.6rem;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 32px;
+}
+
+.read-chip {
+  font-weight: 800;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.read-chip.is-unsure {
+  border-style: dashed;
+  color: var(--pz-ink-soft);
+}
+
+.read-alt {
+  font-size: 0.85rem;
+  color: var(--pz-ink-soft);
+  background: var(--pz-accent-soft);
+  border-color: transparent;
+}
+
+.read-chip:active,
+.read-alt:active {
+  background: var(--pz-accent-soft);
+  transform: scale(0.96);
+}
+
+.write-picker {
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+}
+
+.write-picker-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--pz-ink-soft);
+}
+
+.write-picker-keys {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+}
+
+.write-picker-keys button {
+  min-height: 46px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 2px solid var(--pz-line);
+  border-radius: 12px;
+  background: var(--pz-card);
+  color: var(--pz-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.write-picker-keys button:active {
+  background: var(--pz-accent-soft);
+}
+
+.write-tools {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.write-tool {
+  border: 1px solid var(--pz-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--pz-ink-soft);
+  font: inherit;
+  padding: 0.35rem 0.9rem;
+  min-height: 40px;
+}
+
+/* The optional "which way round" hint, shown only when a grown-up has asked for it. */
+.mirror-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--pz-ink-soft);
+  text-align: left;
+}
+
+.mirror-hint b {
+  font-size: 1.8rem;
+  color: var(--pz-accent);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------------------------------------------------------------- ten-frame */
 
 .tenframe-host {

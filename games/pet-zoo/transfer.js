@@ -35,7 +35,14 @@ export class TransferError extends Error {
 
 /* ------------------------------------------------------------------ export */
 
-/** The travelling half of a save. Deliberately without `settings` and `session`. */
+/**
+ * The travelling half of a save. Deliberately without `settings`, `session` — or `ink`.
+ *
+ * The first two are facts about the device in somebody's hand. The third is a fact about a
+ * hand: what this child's fours look like, learned from their own corrections. Carrying it
+ * to another child's device would make their reading worse, not better, and it costs
+ * nothing to relearn.
+ */
 export function exportPayload(state, now) {
   return {
     app: TRANSFER_APP,

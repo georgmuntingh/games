@@ -26,6 +26,9 @@ import {
   totalItemCount,
 } from './subjects/index.js';
 import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
+import { remember } from './ink/memory.js';
+import { createInkPad } from './ink/pad.js';
+import { recognize } from './ink/recognize.js';
 import * as session from './session.js';
 import {
   appearanceOf,
@@ -127,7 +130,15 @@ const el = {
   answerSum: $('answer-sum'),
   keypad: $('keypad'),
   tenframeHost: $('tenframe-host'),
+  answerWrite: $('answer-write'),
+  writeBoxes: $('write-boxes'),
+  writePicker: $('write-picker'),
+  writePickerKeys: $('write-picker-keys'),
+  writePickerTitle: $('write-picker-title'),
+  writeUndo: $('write-undo'),
+  writeClear: $('write-clear'),
   answerMode: $('answer-mode'),
+  mirrorNudge: $('mirror-nudge'),
   feedback: $('feedback'),
   submit: $('submit'),
   napPets: $('nap-pets'),
@@ -534,12 +545,17 @@ const coarsePointer = () =>
  * detection is a guess, and because a child who is having a bad day with one way of
  * answering should be able to use the other.
  */
-function keypadWanted() {
+function answerModeNow() {
   const mode = state.settings.answerMode ?? 'auto';
-  if (mode === 'type') return false;
-  if (mode === 'tap') return true;
-  return coarsePointer();
+  // A finger gets to write; a mouse and keyboard get the keyboard. Writing with a mouse is
+  // genuinely harder than writing with a finger, and worse to read, so it is not the
+  // default anywhere a keyboard is to hand.
+  if (mode === 'auto') return coarsePointer() ? 'write' : 'type';
+  return mode;
 }
+
+const keypadWanted = () => answerModeNow() === 'tap';
+const writingWanted = () => answerModeNow() === 'write';
 
 const digitKey = (n) =>
   `<button type="button" class="key" data-digit="${n}" aria-label="${escape(t('answer.digit', { n }))}">${n}</button>`;
@@ -580,6 +596,27 @@ function renderAnswer() {
   el.submit.disabled = locked || value.length === 0;
 }
 
+/**
+ * A typed digit, whichever way the child is answering. In writing mode it fills the first
+ * empty box rather than being ignored — a grown-up sitting beside a child on a touchscreen
+ * laptop will reach for the keyboard, and having it do nothing there would be a small
+ * mystery for no reason.
+ */
+function typeDigit(digit) {
+  if (!writingWanted()) {
+    pushDigit(digit);
+    return;
+  }
+  const slot = writeSlots.find((entry) => entry.digit === null);
+  if (!slot) return;
+  slot.digit = Number(digit);
+  slot.corrected = true;
+  slot.read = null;
+  audio.play('tick');
+  renderSlot(slot);
+  syncWrittenAnswer();
+}
+
 function pushDigit(digit) {
   if (locked || !current || !isSum(current) || current.answer.length >= current.width) return;
   current.answer += String(digit);
@@ -596,6 +633,181 @@ function clearAnswer() {
   audio.play('grab');
   renderAnswer();
 }
+
+
+/* --------------------------------------------------------- writing a number */
+
+// One pad per digit of the answer, built once and reused. Two pads rather than one wide
+// one, because segmenting a scribble into digits is a hard problem nobody needs solved
+// here: give the child a box each and it does not arise.
+//
+// The number of boxes never depends on the answer — see addition.answerWidth — and a
+// single-digit answer may be written in either box. Both are read left to right and an
+// empty one is skipped, so "8" in the left box is eight, not eighty.
+const writeSlots = [];
+let picking = null;
+let lastDrawn = null;
+
+/** Whatever the boxes currently say, as the answer string the rest of the game uses. */
+function syncWrittenAnswer() {
+  if (!current) return;
+  current.answer = writeSlots
+    .map((slot) => (slot.digit === null ? '' : String(slot.digit)))
+    .join('');
+  renderAnswer();
+}
+
+function closePicker() {
+  picking = null;
+  el.writePicker.hidden = true;
+}
+
+function openPicker(slot) {
+  picking = slot;
+  el.writePickerKeys.innerHTML = Array.from(
+    { length: 10 },
+    (_, n) => `<button type="button" data-pick="${n}">${n}</button>`
+  ).join('');
+  el.writePickerTitle.textContent = `${t('answer.fixTitle')} ${t('answer.fixHint')}`;
+  el.writePicker.hidden = false;
+}
+
+/**
+ * The child has told us what they actually wrote. Two things follow: the answer changes,
+ * and the recogniser learns. This is the only place a memory is written — clearing and
+ * rewriting teaches nothing, because nobody said what the mark was meant to be.
+ */
+function correctSlot(slot, digit) {
+  if (slot.read?.features) {
+    state.ink = remember(state.ink, slot.read.features, digit);
+    save();
+  }
+  slot.digit = digit;
+  slot.corrected = true;
+  // A misreading is our mistake, not theirs, so it must not land in the hesitation count
+  // that `qualityOf` reads as "unsure of the maths".
+  renderSlot(slot);
+  syncWrittenAnswer();
+  closePicker();
+}
+
+function renderSlot(slot) {
+  const read = slot.read;
+  slot.host.classList.toggle('has-ink', !slot.pad.isEmpty);
+  if (slot.digit === null) {
+    slot.readEl.innerHTML = '';
+    return;
+  }
+  const unsure = Boolean(read?.unsure) && !slot.corrected;
+  const parts = [
+    `<button type="button" class="read-chip${unsure ? ' is-unsure' : ''}" data-fix="1"` +
+      ` aria-label="${escape(t('answer.reads', { n: slot.digit }))}">${slot.digit}</button>`,
+  ];
+  // The runner-up, offered only when the reading is shaky: one tap instead of a rewrite.
+  if (unsure && read.alternative !== null && read.alternative !== undefined) {
+    parts.push(
+      `<button type="button" class="read-alt" data-alt="${read.alternative}">` +
+        `${escape(t('answer.orThis', { n: read.alternative }))}</button>`
+    );
+  }
+  // And, only if a grown-up asked for it, which way round the digit usually goes.
+  if (state.settings.mirrorNudge && read?.mirrored && !slot.corrected) {
+    parts.push(
+      `<span class="mirror-hint">${escape(t('answer.mirrored'))} <b>${slot.digit}</b></span>`
+    );
+  }
+  slot.readEl.innerHTML = parts.join('');
+}
+
+function settleSlot(slot) {
+  if (!current || !isSum(current) || locked) return;
+  const { strokes, pad } = { strokes: slot.pad.strokes, pad: slot.pad.pad };
+  if (!strokes.length) {
+    slot.read = null;
+    slot.digit = null;
+    slot.corrected = false;
+    renderSlot(slot);
+    syncWrittenAnswer();
+    return;
+  }
+  const read = recognize(strokes, { memory: state.ink, pad });
+  slot.read = read;
+  slot.digit = read.digit;
+  slot.corrected = false;
+  renderSlot(slot);
+  syncWrittenAnswer();
+}
+
+function buildWriteBoxes(count) {
+  for (const slot of writeSlots) slot.pad.destroy();
+  writeSlots.length = 0;
+  el.writeBoxes.innerHTML = '';
+  for (let i = 0; i < count; i += 1) {
+    const box = document.createElement('div');
+    box.className = 'write-box';
+    const host = document.createElement('div');
+    host.className = 'write-pad';
+    host.setAttribute('role', 'application');
+    host.setAttribute('aria-label', t('answer.writeHere'));
+    const readEl = document.createElement('div');
+    readEl.className = 'write-read';
+    box.append(host, readEl);
+    el.writeBoxes.append(box);
+
+    const slot = { index: i, host, readEl, pad: null, read: null, digit: null, corrected: false };
+    slot.pad = createInkPad({
+      host,
+      onStart: () => {
+        lastDrawn = slot;
+        closePicker();
+        host.classList.add('has-ink');
+      },
+      onSettled: () => settleSlot(slot),
+    });
+    slot.pad.attach();
+    writeSlots.push(slot);
+  }
+}
+
+function resetWriting() {
+  closePicker();
+  lastDrawn = null;
+  for (const slot of writeSlots) {
+    slot.pad.clear();
+    slot.read = null;
+    slot.digit = null;
+    slot.corrected = false;
+    renderSlot(slot);
+  }
+}
+
+el.writeBoxes.addEventListener('click', (event) => {
+  const button = event.target.closest('button');
+  if (!button || locked) return;
+  const slot = writeSlots[[...el.writeBoxes.children].indexOf(button.closest('.write-box'))];
+  if (!slot) return;
+  if (button.dataset.alt !== undefined) correctSlot(slot, Number(button.dataset.alt));
+  else if (button.dataset.fix !== undefined) openPicker(slot);
+});
+
+el.writePickerKeys.addEventListener('click', (event) => {
+  const button = event.target.closest('button');
+  if (button && picking) correctSlot(picking, Number(button.dataset.pick));
+});
+
+el.writeUndo.addEventListener('click', () => {
+  if (locked) return;
+  (lastDrawn ?? writeSlots[writeSlots.length - 1])?.pad.undo();
+  closePicker();
+});
+
+el.writeClear.addEventListener('click', () => {
+  if (locked || !current) return;
+  // Starting the whole answer over *is* hesitation, unlike putting a misreading right.
+  if (current.answer) current.clears += 1;
+  resetWriting();
+  syncWrittenAnswer();
+});
 
 // pointerdown rather than click, for the same zero-latency reason the touch controls use it.
 el.keypad.addEventListener('pointerdown', (event) => {
@@ -614,10 +826,16 @@ document.addEventListener('keydown', (event) => {
   if (document.querySelector('.overlay:not([hidden])')) return;
   if (event.key >= '0' && event.key <= '9') {
     event.preventDefault();
-    pushDigit(event.key);
+    typeDigit(event.key);
   } else if (event.key === 'Backspace' || event.key === 'Delete') {
     event.preventDefault();
-    clearAnswer();
+    if (writingWanted()) {
+      if (current.answer) current.clears += 1;
+      resetWriting();
+      syncWrittenAnswer();
+    } else {
+      clearAnswer();
+    }
   } else if (event.key === 'Enter' && current.answer) {
     event.preventDefault();
     submit();
@@ -648,11 +866,19 @@ function askNext() {
     reversals: 0,
   };
 
+  const writing = sum && writingWanted();
   el.answerClock.hidden = sum;
   el.answerSum.hidden = !sum;
-  el.keypad.hidden = !keypadWanted();
+  el.keypad.hidden = !(sum && keypadWanted());
+  el.answerWrite.hidden = !writing;
   el.tenframeHost.hidden = true;
   el.tenframeHost.innerHTML = '';
+  if (writing) {
+    if (writeSlots.length !== current.width) buildWriteBoxes(current.width);
+    resetWriting();
+    // The pads were laid out while hidden, where they had no size to measure.
+    for (const slot of writeSlots) slot.pad.resize();
+  }
 
   locked = false;
   renderPrompt(item);
@@ -1779,6 +2005,10 @@ function applyLanguage() {
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
   buildAnswerModeOptions();
   buildKeypad(); // its digits carry spoken labels, which are strings like any other
+  for (const slot of writeSlots) {
+    slot.host.setAttribute('aria-label', t('answer.writeHere'));
+    renderSlot(slot);
+  }
 
   if (current) renderPrompt(state.items[current.id]);
   if (scene === 'zoo') renderZoo();
@@ -1799,6 +2029,7 @@ function applyDigital() {
 
 const ANSWER_MODES = [
   { id: 'auto', key: 'settings.answerAuto' },
+  { id: 'write', key: 'settings.answerWrite' },
   { id: 'type', key: 'settings.answerType' },
   { id: 'tap', key: 'settings.answerTap' },
 ];
@@ -1821,6 +2052,8 @@ function buildLanguageOptions() {
 function openSettings() {
   el.language.value = t.lang;
   el.showDigital.checked = digitalOn();
+  el.mirrorNudge.checked = Boolean(state.settings.mirrorNudge);
+  el.answerMode.value = state.settings.answerMode ?? 'auto';
   el.playMinutes.value = String(limits.minutes);
   setTransferStatus('');
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
@@ -1841,7 +2074,15 @@ el.language.addEventListener('change', () => {
 
 el.answerMode.addEventListener('change', () => {
   state.settings.answerMode = el.answerMode.value;
-  el.keypad.hidden = !keypadWanted();
+  save();
+  // The answering surface is chosen when a question is put, so the simplest way to apply a
+  // change mid-session is to put the current one again.
+  if (scene === 'play' && current && !locked) askNext();
+});
+
+el.mirrorNudge.addEventListener('change', () => {
+  state.settings.mirrorNudge = el.mirrorNudge.checked;
+  for (const slot of writeSlots) renderSlot(slot);
   save();
 });
 

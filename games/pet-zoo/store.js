@@ -10,6 +10,7 @@ import { PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
+import { sanitize as sanitizeInk } from './ink/memory.js';
 import { SUBJECT_IDS, subjectIdOf, tiersOf } from './subjects/index.js';
 
 export const STORAGE_KEY = 'pet-zoo/v1';
@@ -52,8 +53,15 @@ export function freshState(now) {
       // on-screen buttons. Old saves pick this up from freshState on load, like any other
       // setting added after the fact.
       answerMode: 'auto',
+      // Off by default. A backwards 3 is developmentally ordinary and always counts as a 3;
+      // this only decides whether the game also shows, gently, which way round it usually
+      // goes. Some children find that useful and some find it one more thing to get wrong.
+      mirrorNudge: false,
     },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
+    // What this child's handwriting looks like, learned from the corrections they make.
+    // Device- and child-specific, which is why transfer.js leaves it behind.
+    ink: [],
     stats: { totalAnswered: 0, totalCorrect: 0, streak: 0, bestStreak: 0, daysPlayed: [] },
     items: {},
   };
@@ -109,6 +117,7 @@ export function load(now, storage = safeStorage()) {
       milestones: cleanMilestones(save.milestones),
       settings: { ...freshState(now).settings, ...save.settings },
       items: migrateItems(save.items),
+      ink: sanitizeInk(save.ink),
     };
   } catch {
     return freshState(now);
