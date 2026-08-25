@@ -11,8 +11,15 @@
 //   Phase 2, graduated — SM-2 with day intervals, for the long-term retention that
 //   actually makes the skill stick.
 
-import { timeId } from './clock.js';
-import { LAST_TIER, tierOfMinute, unlockedTier, unseenItems } from './curriculum.js';
+import { tierOfMinute } from './curriculum.js';
+import {
+  ALL_TIERS_MAX,
+  DEFAULT_SUBJECT,
+  SUBJECTS,
+  refreshTiers,
+  tiersOf,
+  unseenItems,
+} from './subjects/index.js';
 
 export const LEARNING_STEPS = [1, 3, 8]; // in questions answered, not minutes
 export const RELEARN_DELAY = 2; // a missed time returns as the question after next
@@ -57,11 +64,23 @@ export const DAY_MS = 86400000;
 
 const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
 
-export function createItem({ h, m, species, reviewClock = 0 }) {
+export function createItem({
+  subject = DEFAULT_SUBJECT,
+  tier,
+  species,
+  reviewClock = 0,
+  // Whatever identifies the item within its subject — {h, m} for a time, {a, b} for a sum.
+  // Spread onto the record rather than nested, so `item.h` still reads the way every call
+  // site and every saved zoo already expects.
+  id: _ignoredId,
+  ...payload
+}) {
   return {
-    h,
-    m,
-    tier: tierOfMinute(m) ?? 0,
+    subject,
+    ...payload,
+    // A subject supplies its own tier; the fallback is for saves and tests written when the
+    // clock was the only thing this game taught.
+    tier: tier ?? tierOfMinute(payload.m) ?? 0,
     species,
     name: null,
     phase: 'learning',
@@ -190,49 +209,70 @@ export const hungryCount = (items, now) =>
 const byKey = (fn) => (a, b) => fn(a[1]) - fn(b[1]);
 
 /**
- * Choose the next time to ask about. First match wins:
- *   1. a learning time that is due — longest overdue first
- *   2. a hungry pet — longest hungry first
- *   3. a brand-new time, but only while fewer than MAX_LEARNING are in flight
- *   4. the pet closest to hungry, so a session never runs dry
- * The time just answered is never returned twice in a row unless it is the only one
- * there is.
+ * Within one priority band, prefer the subject the child was *not* just asked about. Bands
+ * only ever contain items that are already due, so this cannot postpone anything that is
+ * owed — it just stops a session turning into ten clock faces in a row once a second subject
+ * exists. With one subject registered it is inert.
  */
-export function nextItem(state, { now, exclude = null } = {}) {
+const alternating = (lastSubject) => {
+  const same = ([, item]) => ((item.subject ?? DEFAULT_SUBJECT) === lastSubject ? 1 : 0);
+  return (urgency) => (a, b) => same(a) - same(b) || urgency(a[1]) - urgency(b[1]);
+};
+
+/**
+ * Choose the next item to ask about, across every subject at once. First match wins:
+ *   1. a learning item that is due — longest overdue first
+ *   2. a hungry pet — longest hungry first
+ *   3. brand-new material, but only while fewer than MAX_LEARNING are in flight
+ *   4. the pet closest to hungry, so a session never runs dry
+ * The item just answered is never returned twice in a row unless it is the only one there is.
+ */
+export function nextItem(state, { now, exclude = null, lastSubject = null } = {}) {
   const step = state.reviewClock + 1;
+  const tiers = tiersOf(state);
   const entries = Object.entries(state.items).filter(([id]) => id !== exclude);
+  const order = alternating(lastSubject);
 
   const dueLearning = entries
     .filter(([, item]) => isLearning(item) && item.dueStep !== null && item.dueStep <= step)
-    .sort(byKey((item) => item.dueStep));
+    .sort(order((item) => item.dueStep));
   if (dueLearning.length) return dueLearning[0][0];
 
   const hungry = entries
     .filter(([, item]) => isHungry(item, now))
-    .sort(byKey((item) => item.dueAt));
+    .sort(order((item) => item.dueAt));
   if (hungry.length) return hungry[0][0];
 
   if (learningCount(state.items) < MAX_LEARNING) {
-    const fresh = unseenItems(state.items, state.tier)[0];
+    const fresh = unseenItems(state.items, tiers)[0];
     if (fresh) return fresh.id;
   }
 
   const graduated = entries
     .filter(([, item]) => item.phase === 'graduated')
-    .sort(byKey((item) => item.dueAt));
+    .sort(order((item) => item.dueAt));
   if (graduated.length) return graduated[0][0];
 
-  const anyLearning = entries.filter(([, item]) => isLearning(item)).sort(byKey((item) => item.seen));
+  const anyLearning = entries.filter(([, item]) => isLearning(item)).sort(order((item) => item.seen));
   if (anyLearning.length) return anyLearning[0][0];
 
-  // Everything is excluded or nothing exists: fall back to the excluded item, then to
-  // the very first unseen time in the curriculum.
+  // Everything is excluded or nothing exists: fall back to the excluded item, then to the
+  // very first thing any subject teaches.
   if (exclude && state.items[exclude]) return exclude;
-  return unseenItems(state.items, LAST_TIER)[0]?.id ?? timeId(1, 0);
+  return (
+    unseenItems(state.items, ALL_TIERS_MAX)[0]?.id ?? SUBJECTS[DEFAULT_SUBJECT].ALL_ITEMS[0].id
+  );
 }
 
-/** Recompute the unlocked tier after an answer; returns the new tier and whether it moved. */
-export function refreshTier(state) {
-  const tier = Math.max(state.tier, unlockedTier(state.items));
-  return { tier, unlocked: tier > state.tier };
+export { refreshTiers };
+
+/**
+ * The single-subject view of `refreshTiers`, kept because the shop's unlocks and the
+ * grown-ups panel's tier list are both about the clock specifically.
+ */
+export function refreshTier(state, subject = DEFAULT_SUBJECT) {
+  const { tiers } = refreshTiers(state);
+  const before = tiersOf(state)[subject] ?? 0;
+  const tier = tiers[subject] ?? 0;
+  return { tier, unlocked: tier > before };
 }

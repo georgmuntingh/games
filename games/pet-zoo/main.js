@@ -9,7 +9,6 @@ import {
   inferHour,
   minuteAngle,
   norm360,
-  parseTimeId,
   pickHand,
   pointOnFace,
   snapMinute,
@@ -17,7 +16,14 @@ import {
 } from './clock.js';
 import { TIERS, tierItems, tierMastery } from './curriculum.js';
 import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
-import { CRACK_STAGES, createItem, nextItem, refreshTier, review } from './srs.js';
+import { CRACK_STAGES, createItem, nextItem, refreshTiers, review } from './srs.js';
+import {
+  DEFAULT_SUBJECT,
+  SUBJECTS,
+  subjectIdOf,
+  subjectOf,
+  totalItemCount,
+} from './subjects/index.js';
 import * as session from './session.js';
 import {
   appearanceOf,
@@ -395,8 +401,15 @@ function animateHandsTo(from, to, duration) {
 
 function ensureItem(id) {
   if (state.items[id]) return state.items[id];
-  const { h, m } = parseTimeId(id);
-  state.items[id] = createItem({ h, m, species: speciesFor(h, m), reviewClock: state.reviewClock });
+  const subject = subjectOf(id) ?? SUBJECTS[DEFAULT_SUBJECT];
+  const payload = subject.parse(id);
+  state.items[id] = createItem({
+    subject: subject.id,
+    ...payload,
+    tier: subject.tierOf(payload),
+    species: speciesFor(payload.h, payload.m),
+    reviewClock: state.reviewClock,
+  });
   return state.items[id];
 }
 
@@ -489,10 +502,20 @@ function renderPrompt(item) {
 }
 
 function askNext() {
-  const id = nextItem(state, { now: now(), exclude: lastAskedId });
+  const id = nextItem(state, {
+    now: now(),
+    exclude: lastAskedId,
+    lastSubject: subjectIdOf(lastAskedId),
+  });
   const item = ensureItem(id);
   lastAskedId = id;
-  current = { id, target: { h: item.h, m: item.m }, startedAt: now(), reversals: 0 };
+  current = {
+    id,
+    subject: item.subject ?? DEFAULT_SUBJECT,
+    target: { h: item.h, m: item.m },
+    startedAt: now(),
+    reversals: 0,
+  };
 
   renderPrompt(item);
   el.submit.disabled = false;
@@ -581,13 +604,13 @@ async function submit() {
   const firstToday = days[days.length - 1] !== dayStamp(now());
   state = touchDay(state, now());
 
-  const { tier, unlocked } = refreshTier(state);
-  state.tier = tier;
+  const { tiers, unlocked } = refreshTiers(state);
+  state.tiers = tiers;
 
   // What this answer paid. A correct answer on its own pays nothing: what pays is a pet
   // arriving, a pet growing, a tier opening, and — below, once — turning up today at all.
   let paid = payoutFor(outcome.events);
-  if (unlocked) paid += TIER_COINS;
+  if (unlocked.length) paid += TIER_COINS * unlocked.length;
   if (firstToday) paid += dayBonusFor(state.stats.daysPlayed, dayStamp(now()));
   if (paid) state.coins = earn(state.coins, paid);
   // After the tier and the day have been recorded, because both are things a milestone is
@@ -602,7 +625,7 @@ async function submit() {
   // Paid but nothing to celebrate — a day bonus on a wrong first answer still lands.
   if (paid && !result.correct) showCoins(paid);
 
-  if (unlocked) await showUnlock(tier);
+  for (const subjectId of unlocked) await showUnlock(tiers[subjectId]);
 
   const reason = session.shouldEnd(state.session, {
     now: now(),
@@ -1082,7 +1105,7 @@ function renderShop() {
   const petLabel = escape(petName(pet, t.lang));
   el.shopGrid.innerHTML = shelf()
     .map((entry) => {
-      const locked = !isUnlocked(entry.id, state.tier);
+      const locked = !isUnlocked(entry.id, state.tiers.clock);
       const owned = home ? isOwned(pet, entry.id) : zooOwns(state.zooDecor, entry.id);
       const poor = !canAfford(state.coins, entry.price);
       const name = escape(t(`shop.${entry.id}`));
@@ -1147,7 +1170,7 @@ function askToBuyHome(entry) {
     );
     return;
   }
-  if (!isUnlocked(id, state.tier)) return note(t('shop.lockedHelp'));
+  if (!isUnlocked(id, state.tiers.clock)) return note(t('shop.lockedHelp'));
   if (isFull(pet, slotOf(id))) {
     // Which shelf is full matters: "sell something" is unhelpful advice if the child is
     // looking at an empty hill line and two things on the grass.
@@ -1175,7 +1198,7 @@ function askToBuyZoo(entry) {
     showConfirm(yard(sellZoo(state.zooDecor, id), copy), copy, t('shop.sell'));
     return;
   }
-  if (!isUnlocked(id, state.tier)) return note(t('shop.lockedHelp'));
+  if (!isUnlocked(id, state.tiers.clock)) return note(t('shop.lockedHelp'));
   if (zooIsFull(state.zooDecor)) return note(t('shop.fullZoo'));
   if (!canAfford(state.coins, entry.price)) return note(t('shop.tooDear'));
 
@@ -1278,7 +1301,7 @@ el.shopGrid.addEventListener('click', (event) => {
  */
 function grantBackPay() {
   if (state.coinsGrantedAt) return;
-  state.coins = earn(state.coins, retroGrant(state.items, state.tier));
+  state.coins = earn(state.coins, retroGrant(state.items, state.tiers.clock));
   state.coinsGrantedAt = now();
   save();
 }
@@ -1476,7 +1499,7 @@ function renderGrownups() {
     [t('grownups.answered'), state.stats.totalAnswered],
     [t('grownups.accuracy'), `${accuracy}%`],
     [t('grownups.streak'), state.stats.bestStreak],
-    [t('grownups.hatched'), `${hatched} / 144`],
+    [t('grownups.hatched'), `${hatched} / ${totalItemCount()}`],
     [t('grownups.days'), state.stats.daysPlayed.length],
   ];
   el.grownupsStats.innerHTML = rows
@@ -1485,7 +1508,7 @@ function renderGrownups() {
 
   el.grownupsTiers.innerHTML = TIERS.map((tier) => {
     const pct = Math.round(tierMastery(state.items, tier.id) * 100);
-    const locked = tier.id > state.tier;
+    const locked = tier.id > state.tiers.clock;
     return `
       <div class="tier-row${locked ? ' locked' : ''}">
         <div class="tier-head"><span>${escape(t(`tier.${tier.id}.name`))}${locked ? ' 🔒' : ''}</span><span>${pct}%</span></div>

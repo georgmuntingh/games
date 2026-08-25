@@ -77,9 +77,20 @@ import {
   migrateItems,
   STORAGE_KEY,
   touchDay,
+  upgrade,
   VERSION,
   write,
 } from '../store.js';
+import * as clockSubject from '../subjects/clock.js';
+import {
+  interleave,
+  refreshTiers,
+  SUBJECT_IDS,
+  subjectIdOf,
+  tiersOf,
+  totalItemCount,
+  unseenItems as unseenAcrossSubjects,
+} from '../subjects/index.js';
 import {
   applyImport,
   cleanItems,
@@ -979,7 +990,7 @@ test('a fresh state has no items, no tier progress and no session', () => {
   const s = freshState(1000);
   assertEqual(s.version, VERSION);
   assertEqual(Object.keys(s.items).length, 0);
-  assertEqual(s.tier, 0);
+  assertEqual(s.tiers.clock, 0);
   assertEqual(s.reviewClock, 0);
   assert(!isRunning(s.session));
 });
@@ -1714,7 +1725,7 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
+  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
 });
 
@@ -1760,7 +1771,7 @@ function playedState(now = 1000) {
     cracks: 2,
   };
   state.reviewClock = 12;
-  state.tier = 2;
+  state.tiers = { ...state.tiers, clock: 2 };
   state.stats = { totalAnswered: 40, totalCorrect: 31, streak: 2, bestStreak: 9, daysPlayed: ['2026-08-20'] };
   return state;
 }
@@ -1777,7 +1788,8 @@ test('an exported payload carries the pets, the schedule clock, the tier and the
   assertEqual(payload.app, TRANSFER_APP);
   assertEqual(payload.format, TRANSFER_FORMAT);
   assertEqual(payload.reviewClock, 12);
-  assertEqual(payload.tier, 2);
+  assertEqual(payload.tiers.clock, 2);
+  assertEqual(payload.tier, 2, 'the old scalar travels too, for a device still on one subject');
   assertEqual(payload.stats.bestStreak, 9);
   assertEqual(payload.items['4:15'].feeds, 4);
 });
@@ -1793,7 +1805,7 @@ test('progress survives the round trip through a file', () => {
   const json = payloadToJson(exportPayload(from, 2000));
   const landed = applyImport(receivingState(), parseTransfer(json), 5000);
   assertEqual(landed.reviewClock, 12);
-  assertEqual(landed.tier, 2);
+  assertEqual(landed.tiers.clock, 2);
   assertEqual(landed.stats.totalAnswered, 40);
   assertEqual(Object.keys(landed.items).length, 2);
   assertEqual(landed.items['4:15'].feeds, 4);
@@ -2984,6 +2996,224 @@ test('a hand-edited file cannot import a fortune or a piece this build cannot dr
     '4:15': { h: 4, m: 15, feeds: 1, cracks: 2, decor: ['house', 'trebuchet'], hatchedAt: 1 },
   });
   assertEqual(smuggled['4:15'].decor.join(), 'house');
+});
+
+
+/* ------------------------------------------------------------------ subjects */
+
+describe('subjects — one zoo, more than one thing to learn');
+
+test('an id is claimed by exactly the subject that owns it', () => {
+  assertEqual(subjectIdOf('4:15'), 'clock');
+  assertEqual(subjectIdOf('12:55'), 'clock');
+  assertEqual(subjectIdOf('add:3+5'), null, 'a subject this build lacks claims nothing');
+  assertEqual(subjectIdOf('nonsense'), null);
+  assertEqual(subjectIdOf(undefined), null, 'and a missing id does not throw');
+});
+
+test('the clock refuses ids that merely look like times', () => {
+  assert(clockSubject.owns('9:05'), '9:05 is a time');
+  assert(!clockSubject.owns('13:00'), 'there is no thirteen on this face');
+  assert(!clockSubject.owns('0:30'), 'nor a zero');
+  assert(!clockSubject.owns('4:5'), 'nor an unpadded minute');
+  assert(!clockSubject.owns('add:4:15'), 'and a prefix is not a time');
+});
+
+test('a tier map is read from either the new shape or the old scalar', () => {
+  assertEqual(tiersOf({ tiers: { clock: 3 } }).clock, 3, 'the current shape');
+  assertEqual(tiersOf({ tier: 2 }).clock, 2, 'a save written before subjects existed');
+  assertEqual(tiersOf({}).clock, 0, 'and a state carrying neither');
+  assertEqual(tiersOf(null).clock, 0, 'and no state at all');
+});
+
+test('a hand-edited tier cannot unlock material by being absurd', () => {
+  assertEqual(tiersOf({ tiers: { clock: -5 } }).clock, 0, 'negative is floored');
+  assertEqual(tiersOf({ tiers: { clock: 1.7 } }).clock, 1, 'fractional is truncated');
+  assertEqual(tiersOf({ tiers: { clock: 'lots' } }).clock, 0, 'and nonsense is nothing');
+  assertEqual(tiersOf({ tiers: { chemistry: 9 } }).clock, 0, 'a subject we lack is ignored');
+});
+
+test('new material is interleaved between subjects, not concatenated', () => {
+  assertEqual(interleave([['a', 'b', 'c'], [1, 2]]).join(), 'a,1,b,2,c');
+  assertEqual(interleave([[], [1, 2]]).join(), '1,2', 'a subject with nothing left drops out');
+  assertEqual(interleave([]).length, 0);
+});
+
+test('unseen material stops at the tier a subject has unlocked', () => {
+  const heads = unseenAcrossSubjects({}, { clock: 0 });
+  assert(heads.length > 0, 'a fresh zoo has everything to learn');
+  assert(heads.every((entry) => entry.tier === 0), 'and nothing above the unlocked tier');
+  assert(heads.every((entry) => entry.subject === 'clock'), 'each one knows its subject');
+});
+
+test('a seen item is never offered as new again', () => {
+  const first = unseenAcrossSubjects({}, { clock: 0 })[0];
+  const after = unseenAcrossSubjects({ [first.id]: { phase: 'learning' } }, { clock: 0 });
+  assert(!after.some((entry) => entry.id === first.id), 'it came back around');
+});
+
+test('the zoo counts every subject it teaches', () => {
+  const total = SUBJECT_IDS.reduce((sum, id) => sum + (id === 'clock' ? 144 : 0), 0);
+  assertEqual(totalItemCount(), total, 'the hardcoded 144 is gone, not merely moved');
+});
+
+test('a tier opens for one subject without opening another', () => {
+  const items = {};
+  for (const entry of unseenAcrossSubjects({}, { clock: 0 })) {
+    items[entry.id] = { subject: 'clock', phase: 'graduated' };
+  }
+  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0 } });
+  assertEqual(tiers.clock, 1, 'finishing tier 0 opens tier 1');
+  assertEqual(unlocked.join(), 'clock', 'and names the subject that moved');
+});
+
+test('a tier already earned is never taken back', () => {
+  const { tiers, unlocked } = refreshTiers({ items: {}, tiers: { clock: 3 } });
+  assertEqual(tiers.clock, 3, 'an empty zoo does not demote a save');
+  assertEqual(unlocked.length, 0, 'and standing still is not an unlock');
+});
+
+/* ------------------------------------------------- saves across a schema change */
+
+describe('saves — upgraded, never discarded');
+
+/** A save exactly as the single-subject build wrote it. */
+const v1Save = () => ({
+  version: 1,
+  createdAt: 100,
+  lastPlayedAt: 200,
+  reviewClock: 42,
+  tier: 2,
+  coins: 37,
+  zooDecor: [],
+  milestones: ['mastery:0'],
+  coinsGrantedAt: 1,
+  milestonesGrantedAt: 1,
+  settings: { sound: false, language: 'en', playMinutes: 7, showDigital: true },
+  session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
+  stats: { totalAnswered: 90, totalCorrect: 70, streak: 4, bestStreak: 9, daysPlayed: [] },
+  items: {
+    '4:15': { h: 4, m: 15, species: 'fizz', phase: 'graduated', feeds: 5, cracks: 2, decor: [], hatchedAt: 123 },
+    '1:00': { h: 1, m: 0, species: 'mochi', phase: 'learning', reps: 0, correctStreak: 3, hatchedAt: null },
+  },
+});
+
+const savedAs = (blob) => {
+  const storage = fakeStorage();
+  storage.setItem(STORAGE_KEY, JSON.stringify(blob));
+  return storage;
+};
+
+test('a save written before subjects existed keeps its whole zoo', () => {
+  const back = load(9999, savedAs(v1Save()));
+  assertEqual(Object.keys(back.items).length, 2, 'the pets are still there');
+  assertEqual(back.items['4:15'].feeds, 5, 'and so is what they had earned');
+  assertEqual(back.reviewClock, 42);
+  assertEqual(back.coins, 37);
+  assertEqual(back.version, VERSION, 'and it comes back at the current version');
+});
+
+test('the clock tier a v1 save had earned survives as a per-subject tier', () => {
+  const back = load(0, savedAs(v1Save()));
+  assertEqual(back.tiers.clock, 2, 'the scalar became the clock');
+  assertEqual(back.tier, undefined, 'and the scalar itself is gone');
+});
+
+test('every pet in an upgraded save learns which subject it belongs to', () => {
+  const back = load(0, savedAs(v1Save()));
+  assertEqual(back.items['4:15'].subject, 'clock');
+  assertEqual(back.items['1:00'].subject, 'clock');
+});
+
+test('a save from a future build is refused rather than half-read', () => {
+  const back = load(0, savedAs({ ...v1Save(), version: VERSION + 1 }));
+  assertEqual(back.reviewClock, 0, 'it started fresh instead of guessing');
+});
+
+test('a save with no version at all is not trusted', () => {
+  const { version, ...unversioned } = v1Save();
+  assertEqual(load(0, savedAs(unversioned)).reviewClock, 0);
+});
+
+test('upgrading is idempotent — a current save passes through untouched', () => {
+  const current = { ...freshState(0), reviewClock: 7 };
+  assertEqual(upgrade(current), current, 'it was needlessly rebuilt');
+});
+
+test('an item whose subject this build does not know is dropped, not carried', () => {
+  const save = v1Save();
+  save.items['chem:H2O'] = { phase: 'learning', hatchedAt: null };
+  const back = load(0, savedAs(save));
+  assertEqual(Object.keys(back.items).sort().join(), '1:00,4:15', 'the pet we cannot draw is gone');
+});
+
+test('a file carrying an unknown subject loses only that item', () => {
+  const kept = cleanItems({
+    '4:15': { h: 4, m: 15, hatchedAt: 1 },
+    'add:3+5': { a: 3, b: 5, hatchedAt: 1 },
+  });
+  assertEqual(Object.keys(kept).join(), '4:15', 'the rest of the zoo still lands');
+});
+
+/* --------------------------------------------------- scheduling across subjects */
+
+describe('scheduling — two subjects sharing one session');
+
+test('a new item is stamped with the subject that owns it', () => {
+  const item = createItem({ subject: 'clock', h: 4, m: 15, tier: 2, species: 'fizz' });
+  assertEqual(item.subject, 'clock');
+  assertEqual(item.tier, 2, 'the subject supplied the tier');
+  assertEqual(item.h, 4, 'and the payload still reads off the top level');
+});
+
+test('an item built the old way is still a clock item', () => {
+  const item = createItem({ h: 9, m: 30, species: 'fizz' });
+  assertEqual(item.subject, 'clock', 'the default holds for saves and older call sites');
+  assertEqual(item.tier, 1, 'and the tier is still derived when nobody supplies one');
+});
+
+test('the id an item is filed under is not copied into the item', () => {
+  const item = createItem({ id: '4:15', h: 4, m: 15, species: 'fizz' });
+  assert(!('id' in item), 'two sources of truth for one id');
+});
+
+test('two subjects due at once alternate rather than repeat', () => {
+  // The scheduler only ever reads `item.subject`, so a second subject can be simulated
+  // here before its curriculum exists.
+  const due = (subject, dueStep) => ({ subject, phase: 'learning', dueStep, seen: 0, dueAt: 0 });
+  const state = {
+    reviewClock: 10,
+    tiers: { clock: 0 },
+    items: {
+      '4:15': due('clock', 1),
+      '9:30': due('clock', 2),
+      'add:3+5': due('add', 3),
+    },
+  };
+  assertEqual(
+    nextItem(state, { now: 0, lastSubject: 'clock' }),
+    'add:3+5',
+    'after a clock question, the sum wins even though it is less overdue'
+  );
+  assertEqual(
+    nextItem(state, { now: 0, lastSubject: 'add' }),
+    '4:15',
+    'and after a sum, the most overdue clock face comes back'
+  );
+});
+
+test('alternating never overrides urgency within one subject', () => {
+  const due = (subject, dueStep) => ({ subject, phase: 'learning', dueStep, seen: 0, dueAt: 0 });
+  const state = {
+    reviewClock: 10,
+    tiers: { clock: 0 },
+    items: { '4:15': due('clock', 5), '9:30': due('clock', 1) },
+  };
+  assertEqual(
+    nextItem(state, { now: 0, lastSubject: 'clock' }),
+    '9:30',
+    'with nothing to alternate to, the longest overdue still wins'
+  );
 });
 
 const out = document.getElementById('out');

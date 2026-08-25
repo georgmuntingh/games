@@ -10,9 +10,12 @@ import { PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
+import { SUBJECT_IDS, subjectIdOf, tiersOf } from './subjects/index.js';
 
 export const STORAGE_KEY = 'pet-zoo/v1';
-export const VERSION = 1;
+// 2 added `subject` to every item and turned the single `tier` into one per subject. Bumping
+// this is safe *because* `load` upgrades rather than discards — see the version check there.
+export const VERSION = 2;
 const SAVE_DEBOUNCE_MS = 400;
 
 export function freshState(now) {
@@ -21,7 +24,9 @@ export function freshState(now) {
     createdAt: now,
     lastPlayedAt: now,
     reviewClock: 0,
-    tier: 0,
+    // One unlocked tier per subject: mastering the clock must not hand out addition facts
+    // the child has never been shown, nor the other way round.
+    tiers: Object.fromEntries(SUBJECT_IDS.map((id) => [id, 0])),
     coins: 0,
     // What the stall has sold for the yard, and which of the long-game milestones have
     // already been paid for. Both are lists of ids and nothing else: where a fountain stands
@@ -76,27 +81,48 @@ export function load(now, storage = safeStorage()) {
     const raw = storage?.getItem(STORAGE_KEY);
     if (!raw) return freshState(now);
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.version !== VERSION || typeof parsed.items !== 'object') {
-      return freshState(now);
-    }
+    if (!parsed || typeof parsed.items !== 'object') return freshState(now);
+    // A save from a *later* build is the only one we genuinely cannot read: it may lean on
+    // fields this build has never heard of. An older one is ours to bring forward — which is
+    // the whole point, because the alternative is silently deleting a child's zoo on the day
+    // they update the game.
+    if (!Number.isFinite(parsed.version) || parsed.version > VERSION) return freshState(now);
+    const save = upgrade(parsed);
     return {
       ...freshState(now),
-      ...parsed,
+      ...save,
       // A balance is the one number worth spending on: hand-edited, corrupt or absent, it
       // comes back as a whole number of coins that is not negative.
-      coins: normalizeCoins(parsed.coins),
+      coins: normalizeCoins(save.coins),
+      // Clamped and restricted to the subjects this build teaches, the same as the decor: a
+      // hand-edited save must not be able to unlock material by editing one number.
+      tiers: tiersOf(save),
       // Filtered rather than trusted, the same as a pet's decor: a hand-edited save must not
       // be able to put a piece this build cannot draw into the yard.
-      zooDecor: sanitizeZoo(parsed.zooDecor),
+      zooDecor: sanitizeZoo(save.zooDecor),
       // Ids only, so an unknown one from a future build is simply worth nothing rather than
       // being a number this build has to make sense of.
-      milestones: cleanMilestones(parsed.milestones),
-      settings: { ...freshState(now).settings, ...parsed.settings },
-      items: migrateItems(parsed.items),
+      milestones: cleanMilestones(save.milestones),
+      settings: { ...freshState(now).settings, ...save.settings },
+      items: migrateItems(save.items),
     };
   } catch {
     return freshState(now);
   }
+}
+
+/**
+ * Bring a whole save forward to the current schema. Field-by-field and additive, like
+ * `migrateItems` below: a save can be old in one way and current in another, and nothing here
+ * may ever throw away something it merely does not recognise.
+ */
+export function upgrade(parsed) {
+  if (!parsed || parsed.version >= VERSION) return parsed;
+  const save = { ...parsed, version: VERSION };
+  // v1 → v2: the lone `tier` was always the clock's. `tiersOf` reads either shape.
+  save.tiers = tiersOf(parsed);
+  delete save.tier;
+  return save;
 }
 
 /**
@@ -113,17 +139,23 @@ export function load(now, storage = safeStorage()) {
 export function migrateItems(items) {
   const out = {};
   for (const [id, item] of Object.entries(items ?? {})) {
+    // An id no subject in this build recognises came from a newer one. We cannot draw it,
+    // schedule it or grade it, so it is dropped rather than carried as a pet that never
+    // appears — the same reasoning as an unknown decor id, one level up.
+    const subject = subjectIdOf(id);
+    if (!subject) continue;
     const feeds =
       typeof item?.feeds === 'number' ? item.feeds : item?.reps || (item?.hatchedAt ? 1 : 0);
     const cracks =
       typeof item?.cracks === 'number' ? item.cracks : crackFor(item?.correctStreak ?? 0);
     const decor = sanitizeDecor(item?.decor);
     const current =
+      item?.subject === subject &&
       typeof item?.feeds === 'number' &&
       typeof item?.cracks === 'number' &&
       Array.isArray(item?.decor) &&
       decor.length === item.decor.length;
-    out[id] = current ? item : { ...item, feeds, cracks, decor };
+    out[id] = current ? item : { ...item, subject, feeds, cracks, decor };
   }
   return out;
 }

@@ -12,8 +12,8 @@
 // session do not. Language and play time are the grown-up's choices about the device in
 // their hand, and a nap started on the tablet is not a fact about the laptop.
 
-import { MINUTE_STEP, timeId } from './clock.js';
 import { sanitizeZoo } from './shop.js';
+import { subjectOf, tiersOf } from './subjects/index.js';
 import { cleanMilestones, dayStamp, freshState, migrateItems, VERSION } from './store.js';
 import { normalize as normalizeCoins } from './wallet.js';
 
@@ -45,7 +45,10 @@ export function exportPayload(state, now) {
     createdAt: state.createdAt,
     lastPlayedAt: state.lastPlayedAt,
     reviewClock: state.reviewClock,
-    tier: state.tier,
+    tiers: state.tiers,
+    // Also as the old scalar, so a device still running a single-subject build reads the
+    // clock's progress out of this file instead of starting its tiers again from zero.
+    tier: tiersOf(state).clock,
     coins: state.coins,
     // The yard travels with the zoo; the milestone latch travels so a device that receives a
     // save does not pay again for a week the child already banked on the device it came from.
@@ -127,19 +130,17 @@ export function parseTransfer(text) {
 }
 
 /**
- * Keep the records that describe a time this game actually teaches, and drop the rest.
+ * Keep the records that describe something this game actually teaches, and drop the rest.
  * One corrupt entry is not worth refusing a child their whole zoo, so this filters rather
- * than throws — and filtering by the id the item claims means a hand-edited file cannot
- * smuggle a pet onto a time that does not exist.
+ * than throws — and each subject checks the payload against the id it is filed under, so a
+ * hand-edited file cannot smuggle a pet onto a time, or a sum, that does not exist.
  */
 export function cleanItems(items) {
   const out = {};
   for (const [id, item] of Object.entries(items)) {
     if (!isPlainObject(item)) continue;
-    const { h, m } = item;
-    if (!Number.isInteger(h) || h < 1 || h > 12) continue;
-    if (!Number.isInteger(m) || m < 0 || m > 59 || m % MINUTE_STEP !== 0) continue;
-    if (id !== timeId(h, m)) continue;
+    const subject = subjectOf(id);
+    if (!subject || !subject.valid(id, item)) continue;
     out[id] = item;
   }
   // The same reconstruction a local load does, so a save exported from a build that
@@ -163,7 +164,9 @@ export function applyImport(state, payload, now) {
     createdAt: payload.createdAt ?? base.createdAt,
     lastPlayedAt: payload.lastPlayedAt ?? now,
     reviewClock: Number.isFinite(payload.reviewClock) ? payload.reviewClock : 0,
-    tier: Number.isFinite(payload.tier) ? payload.tier : 0,
+    // Reads either shape: a file from a single-subject build carries one `tier`, a current
+    // one carries a tier per subject.
+    tiers: tiersOf(payload),
     // A balance from a build that predates the shop, or from a hand-edited file, arrives as
     // nothing rather than as a fortune. What each pet owns rides along on the items.
     coins: normalizeCoins(payload.coins),
