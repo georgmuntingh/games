@@ -16,9 +16,16 @@ const gameInputs = Object.fromEntries(
     .flatMap((entry) => {
       const gameDir = resolve(gamesDir, entry.name);
       const entries = [[`games/${entry.name}`, resolve(gameDir, 'index.html')]];
-      const testsHtml = resolve(gameDir, 'tests', 'index.html');
-      if (existsSync(testsHtml)) {
-        entries.push([`games/${entry.name}/tests`, testsHtml]);
+      // Every page under tests/, not just index.html — a game may have more than one kind
+      // of check to run, and a page that is not a build input is a page that works in dev
+      // and 404s in production.
+      const testsDir = resolve(gameDir, 'tests');
+      if (existsSync(testsDir)) {
+        for (const file of readdirSync(testsDir)) {
+          if (!file.endsWith('.html')) continue;
+          const name = file === 'index.html' ? 'tests' : `tests/${file.replace(/\.html$/, '')}`;
+          entries.push([`games/${entry.name}/${name}`, resolve(testsDir, file)]);
+        }
       }
       return entries;
     })

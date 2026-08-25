@@ -81,6 +81,13 @@ import {
   VERSION,
   write,
 } from '../store.js';
+import { FEATURE_COUNT, featuresOf, FEATURE_NAMES, holesOf } from '../ink/features.js';
+import { logits, parameterCount } from '../ink/model.js';
+import { centreOfMass, rasterize, SIZE as INK_SIZE, toAscii } from '../ink/raster.js';
+import { mirror, recognize, UNSURE_BELOW } from '../ink/recognize.js';
+import { CAPACITY, recall, remember, sanitize as sanitizeMemory } from '../ink/memory.js';
+import { bounds as inkBounds, dedupe, hasInk, resample } from '../ink/strokes.js';
+import { CASES } from './ink-fixtures.js';
 import * as addSubject from '../subjects/addition.js';
 import * as clockSubject from '../subjects/clock.js';
 import { fillDuration, fillPlan, FRAME, tenFrameSvg } from '../tenframe.js';
@@ -3440,6 +3447,261 @@ test('writing a number is allowed to be slower than swinging two hands', () => {
 
 test('starting the answer over counts the same as waggling a hand', () => {
   assertEqual(qualityOf({ correct: true, ms: 500, reversals: 2, pace: 4 }), 3, 'pace never excuses hesitation');
+});
+
+
+/* --------------------------------------------------------------------- ink */
+
+const P = (...points) => points.map(([x, y]) => ({ x, y }));
+
+// Plain, textbook shapes in a 100x100 pad. They are not children's handwriting and no
+// number taken from them should be read as if they were — what they establish is that the
+// pipeline is wired end to end, which is a different and much smaller claim.
+const GLYPHS = {
+  0: [P([50, 12], [74, 28], [80, 50], [74, 72], [50, 88], [26, 72], [20, 50], [26, 28], [50, 12])],
+  1: [P([34, 26], [50, 12], [50, 88])],
+  2: [P([24, 30], [38, 14], [62, 14], [76, 30], [70, 48], [26, 86], [78, 86])],
+  3: [P([26, 18], [62, 12], [76, 28], [60, 48], [76, 66], [62, 86], [28, 82])],
+  4: [P([62, 12], [22, 60], [80, 60]), P([62, 36], [62, 88])],
+  5: [P([74, 14], [32, 14], [28, 44], [52, 40], [74, 52], [70, 76], [44, 88], [24, 80])],
+  6: [P([68, 14], [40, 30], [26, 58], [34, 80], [58, 88], [74, 72], [68, 52], [44, 48], [28, 60])],
+  7: [P([22, 14], [78, 14], [46, 88])],
+  8: [P([50, 12], [70, 24], [52, 46], [74, 64], [56, 86], [32, 80], [28, 60], [48, 46], [28, 32], [50, 12])],
+  9: [P([64, 50], [40, 54], [28, 38], [38, 18], [62, 12], [72, 30], [70, 58], [56, 84], [34, 90])],
+};
+
+const backwards = (strokes) => strokes.map((s) => s.map((p) => ({ x: 100 - p.x, y: p.y })));
+const inkRows = (image) => {
+  let rows = 0;
+  for (let y = 0; y < INK_SIZE; y += 1) {
+    for (let x = 0; x < INK_SIZE; x += 1) {
+      if (image[y * INK_SIZE + x] > 0.01) { rows += 1; break; }
+    }
+  }
+  return rows;
+};
+
+describe('ink — stroke maths');
+
+test('points are spaced evenly however fast the hand moved', () => {
+  const even = resample(P([0, 0], [10, 0]), 2);
+  assertEqual(even.map((p) => p.x).join(), '0,2,4,6,8,10');
+  // The same line captured at a different sampling rate must resample the same way.
+  const jittery = resample(P([0, 0], [1, 0], [1.2, 0], [7, 0], [10, 0]), 2);
+  assertEqual(jittery.map((p) => Math.round(p.x)).join(), '0,2,4,6,8,10');
+});
+
+test('a finger held still is not a line, but a deliberate dot is a dot', () => {
+  assertEqual(dedupe(P([0, 0], [0, 0], [0, 0], [1, 0])).length, 2);
+  assertEqual(resample(P([5, 5]), 2).length, 1, 'a dot must survive');
+});
+
+test('a stray tap is refused rather than guessed at', () => {
+  assert(!hasInk([P([5, 5])], 0.06, 100), 'a speck became a digit');
+  assert(!hasInk([], 0.06, 100));
+  assert(hasInk(GLYPHS[7], 0.06, 100), 'and a real digit is not refused');
+});
+
+test('bounds cover every stroke, and an empty drawing does not throw', () => {
+  const box = inkBounds(GLYPHS[4]);
+  assert(box.width > 0 && box.height > 0);
+  assertEqual(inkBounds([]).width, 0);
+});
+
+describe('ink — the rasteriser');
+
+test('the ink fills MNIST’s twenty pixels, stroke width included', () => {
+  // Round caps put half a stroke past each end; if that is not taken off the scale, every
+  // digit comes out a stroke wider than the ones the model was trained on.
+  assertEqual(inkRows(rasterize([P([50, 10], [50, 90])])), 20);
+  assertEqual(inkRows(rasterize(GLYPHS[0])), 20);
+});
+
+test('the digit is placed by centre of mass, as MNIST places it', () => {
+  for (const strokes of [GLYPHS[1], GLYPHS[7], GLYPHS[4]]) {
+    const com = centreOfMass(rasterize(strokes));
+    assertClose(com.x, (INK_SIZE - 1) / 2, 0.01, 'horizontally off centre');
+    assertClose(com.y, (INK_SIZE - 1) / 2, 0.01, 'vertically off centre');
+  }
+});
+
+test('how big the child wrote, and where, reaches nothing', () => {
+  const same = (a, b) => {
+    let worst = 0;
+    for (let i = 0; i < a.length; i += 1) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+    return worst;
+  };
+  const base = rasterize(GLYPHS[2]);
+  const huge = rasterize(GLYPHS[2].map((s) => s.map((p) => ({ x: p.x * 9, y: p.y * 9 }))));
+  const moved = rasterize(GLYPHS[2].map((s) => s.map((p) => ({ x: p.x + 137, y: p.y - 61 }))));
+  assertEqual(same(base, huge), 0, 'a bigger drawing rasterised differently');
+  assertEqual(same(base, moved), 0, 'a drawing in the corner rasterised differently');
+});
+
+test('a blank drawing gives a blank image rather than an exception', () => {
+  const empty = rasterize([]);
+  assertEqual(empty.length, INK_SIZE * INK_SIZE);
+  assertEqual(Math.max(...empty), 0);
+  assertEqual(centreOfMass(empty), null);
+});
+
+test('the picture can be looked at', () => {
+  assert(toAscii(rasterize(GLYPHS[1])).split('\n').length === INK_SIZE);
+});
+
+describe('ink — the classifier');
+
+test('the JavaScript forward pass agrees with the one that trained it', () => {
+  // The fixtures come from the same quantised weights the browser loads, so anything left
+  // is float32 rounding. A transposed axis or an off-by-one pad would show up here as a
+  // number instead of as "recognition feels a bit worse".
+  let worst = 0;
+  for (const item of CASES) {
+    const mine = logits(Float32Array.from(item.pixels));
+    for (let i = 0; i < mine.length; i += 1) {
+      worst = Math.max(worst, Math.abs(mine[i] - item.logits[i]));
+    }
+  }
+  assert(worst < 1e-3, `the two forward passes have diverged: ${worst}`);
+});
+
+test('and picks the same digit on every fixture', () => {
+  for (const item of CASES) {
+    const mine = Array.from(logits(Float32Array.from(item.pixels)));
+    const want = item.logits.indexOf(Math.max(...item.logits));
+    assertEqual(mine.indexOf(Math.max(...mine)), want, `fixture for ${item.label}`);
+  }
+});
+
+test('the weights are small enough to inline', () => {
+  assert(parameterCount() < 60000, `${parameterCount()} parameters is more than planned`);
+});
+
+describe('ink — structure');
+
+test('enclosed loops are found, and counted right', () => {
+  assertEqual(holesOf(rasterize(GLYPHS[1])).count, 0, 'a 1 has no hole');
+  assertEqual(holesOf(rasterize(GLYPHS[7])).count, 0, 'nor a 7');
+  assertEqual(holesOf(rasterize(GLYPHS[0])).count, 1, 'a 0 has one');
+  assertEqual(holesOf(rasterize(GLYPHS[8])).count, 2, 'an 8 has two');
+});
+
+test('the feature vector is the length everything else expects', () => {
+  assertEqual(FEATURE_NAMES.length, FEATURE_COUNT);
+  assertEqual(featuresOf(GLYPHS[3], rasterize(GLYPHS[3])).length, FEATURE_COUNT);
+  assertEqual(featuresOf([], rasterize([])).length, FEATURE_COUNT, 'even for nothing at all');
+});
+
+test('a 1 and a 7 differ where the tiebreak looks', () => {
+  const at = (name) => FEATURE_NAMES.indexOf(name);
+  const one = featuresOf(GLYPHS[1], rasterize(GLYPHS[1]));
+  const seven = featuresOf(GLYPHS[7], rasterize(GLYPHS[7]));
+  assert(seven[at('aspect')] > one[at('aspect')], 'a 7 is wider than a 1');
+  assert(seven[at('crossCentre')] > one[at('crossCentre')], 'a 7’s bar is crossed twice');
+});
+
+describe('ink — this child’s handwriting');
+
+test('a correction is remembered, and the oldest fall off the end', () => {
+  const vector = (seed) => Float32Array.from({ length: FEATURE_COUNT }, (_, i) => ((i * seed) % 7) / 7);
+  let memory = [];
+  for (let i = 0; i < CAPACITY + 20; i += 1) memory = remember(memory, vector(i + 1), i % 10);
+  assert(memory.length <= CAPACITY, 'the memory grew without bound');
+});
+
+test('one stubborn digit cannot crowd out the other nine', () => {
+  const vector = Float32Array.from({ length: FEATURE_COUNT }, () => 0.5);
+  let memory = [];
+  for (let i = 0; i < CAPACITY; i += 1) memory = remember(memory, vector, 7);
+  assert(memory.length <= Math.ceil(CAPACITY / 3), 'sevens filled the whole memory');
+});
+
+test('a hand-edited memory cannot throw', () => {
+  assertEqual(sanitizeMemory([{ d: 99, f: [] }, null, 'x', { d: 3, f: [1, 2] }, undefined]).length, 0);
+  assertEqual(sanitizeMemory('not a list').length, 0);
+  assertEqual(sanitizeMemory(undefined).length, 0);
+});
+
+test('an empty memory has no opinion at all', () => {
+  const vector = Float32Array.from({ length: FEATURE_COUNT }, () => 0.5);
+  assertEqual(recall([], vector).strength, 0, 'it voted with nothing to go on');
+});
+
+test('the nearest corrections are the ones that vote', () => {
+  const vector = (seed) => Float32Array.from({ length: FEATURE_COUNT }, (_, i) => ((i * seed) % 7) / 7);
+  let memory = [];
+  for (const digit of [1, 2, 3, 4, 5, 6]) memory = remember(memory, vector(digit + 1), digit);
+  const voted = recall(memory, vector(4));
+  assertEqual(voted.votes.indexOf(Math.max(...voted.votes)), 3, 'it reached for the wrong neighbour');
+  assert(voted.strength > 0);
+});
+
+describe('ink — reading a digit');
+
+test('nothing on the pad reads as nothing, not as a one', () => {
+  const blank = recognize([], { pad: 100 });
+  assertEqual(blank.digit, null);
+  assertEqual(blank.reason, 'blank');
+  assertEqual(recognize([P([50, 50])], { pad: 100 }).digit, null, 'a stray tap became a digit');
+});
+
+test('every textbook digit is read as itself', () => {
+  // Establishes that strokes, rasteriser, model and fusion are joined up correctly. It says
+  // nothing about a six-year-old's handwriting — that is what the corpus on tests/ink.html
+  // is for, and until somebody has written into it that number is unknown.
+  for (const [digit, strokes] of Object.entries(GLYPHS)) {
+    assertEqual(String(recognize(strokes, { pad: 100 }).digit), digit, `read ${digit} wrong`);
+  }
+});
+
+test('a backwards digit is still that digit', () => {
+  // Reversing 3, 5, 7 and 9 is ordinary at this age and must never cost a child the sum.
+  for (const [digit, strokes] of Object.entries(GLYPHS)) {
+    const read = recognize(backwards(strokes), { pad: 100 });
+    assertEqual(String(read.digit), digit, `a backwards ${digit} was misread`);
+  }
+});
+
+test('and the game knows it was backwards — where that means anything', () => {
+  for (const digit of [1, 2, 3, 4, 5, 6, 7, 9]) {
+    assert(recognize(backwards(GLYPHS[digit]), { pad: 100 }).mirrored, `${digit} was not flagged`);
+  }
+  // 0 and 8 are their own mirror image, so there is nothing to nudge anybody about.
+  for (const digit of [0, 8]) {
+    assert(!recognize(GLYPHS[digit], { pad: 100 }).mirrored, `${digit} was flagged for nothing`);
+  }
+});
+
+test('an upright digit is never called backwards', () => {
+  for (const [digit, strokes] of Object.entries(GLYPHS)) {
+    assert(!recognize(strokes, { pad: 100 }).mirrored, `upright ${digit} was flagged`);
+  }
+});
+
+test('a reading always carries enough to show it back and to learn from it', () => {
+  const read = recognize(GLYPHS[6], { pad: 100 });
+  assert(read.confidence > 0 && read.confidence <= 1, 'confidence out of range');
+  assertEqual(read.image.length, INK_SIZE * INK_SIZE);
+  assertEqual(read.features.length, FEATURE_COUNT);
+  assert(read.unsure === read.confidence < UNSURE_BELOW, 'unsure disagrees with confidence');
+  if (read.unsure) assert(read.alternative !== null, 'unsure but nothing offered instead');
+});
+
+test('mirroring an image twice changes nothing', () => {
+  const image = rasterize(GLYPHS[7]);
+  const back = mirror(mirror(image));
+  let worst = 0;
+  for (let i = 0; i < image.length; i += 1) worst = Math.max(worst, Math.abs(image[i] - back[i]));
+  assertEqual(worst, 0);
+});
+
+test('the child’s own corrections reach the reading', () => {
+  const strokes = GLYPHS[3];
+  const features = featuresOf(strokes, rasterize(strokes));
+  let memory = [];
+  for (let i = 0; i < 10; i += 1) memory = remember(memory, features, 8);
+  const read = recognize(strokes, { memory, pad: 100 });
+  assert(read.detail.memoryStrength > 0, 'the memory was not consulted');
 });
 
 const out = document.getElementById('out');
