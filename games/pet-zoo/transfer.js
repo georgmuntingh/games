@@ -13,7 +13,8 @@
 // their hand, and a nap started on the tablet is not a fact about the laptop.
 
 import { MINUTE_STEP, timeId } from './clock.js';
-import { dayStamp, freshState, migrateItems, VERSION } from './store.js';
+import { sanitizeZoo } from './shop.js';
+import { cleanMilestones, dayStamp, freshState, migrateItems, VERSION } from './store.js';
 import { normalize as normalizeCoins } from './wallet.js';
 
 export const TRANSFER_APP = 'pet-zoo';
@@ -46,6 +47,10 @@ export function exportPayload(state, now) {
     reviewClock: state.reviewClock,
     tier: state.tier,
     coins: state.coins,
+    // The yard travels with the zoo; the milestone latch travels so a device that receives a
+    // save does not pay again for a week the child already banked on the device it came from.
+    zooDecor: state.zooDecor,
+    milestones: state.milestones,
     stats: state.stats,
     items: state.items,
   };
@@ -162,6 +167,11 @@ export function applyImport(state, payload, now) {
     // A balance from a build that predates the shop, or from a hand-edited file, arrives as
     // nothing rather than as a fortune. What each pet owns rides along on the items.
     coins: normalizeCoins(payload.coins),
+    zooDecor: sanitizeZoo(payload.zooDecor),
+    milestones: cleanMilestones(payload.milestones),
+    // A save that lists its milestones has had them read on the device it came from; one that
+    // does not is from a build that predates them, and is left for the latch at boot.
+    milestonesGrantedAt: Array.isArray(payload.milestones) ? now : 0,
     // A save that carries a balance was already paid its back pay on the device it came
     // from; one from a build that predates the shop has not been, and is left for the grant
     // at boot to pick up — otherwise moving an old zoo across would quietly cost the child

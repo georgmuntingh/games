@@ -1129,6 +1129,27 @@ body.in-habitat .zoo-bar {
   white-space: nowrap;
 }
 
+/* The yard: the zoo's own patch of ground, with the stall standing at the front of it. It
+   is a strip rather than a scene — the habitat's 200x120 box cropped hard from the top, the
+   same crop a habitat already survives in landscape. */
+.zoo-yard {
+  /* An aspect ratio rather than a height, so the crop is the same on every screen: at any
+     width this shows the habitat box from y=58 down, which is a hand's width of sky above
+     the tallest thing the yard sells. A fixed height would crop by however wide the phone
+     happened to be, and take the top off the bunting on the wide ones. */
+  aspect-ratio: 200 / 62;
+  margin-bottom: -14px;
+  border-radius: 20px 20px 0 0;
+  overflow: hidden;
+  box-shadow: var(--pz-shadow);
+}
+
+.zoo-yard .yard {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* The stall itself: a place in the zoo, so it is a wide card rather than another tab. */
 .stall {
   display: flex;
@@ -1144,6 +1165,9 @@ body.in-habitat .zoo-bar {
   color: var(--pz-ink);
   box-shadow: var(--pz-shadow);
   text-align: left;
+  /* Above the yard it stands on, so its shadow falls onto the grass rather than under it. */
+  position: relative;
+  z-index: 1;
 }
 
 .stall:active {
@@ -1208,6 +1232,36 @@ body.in-habitat .zoo-bar {
   margin: 0.5rem 0;
 }
 
+/* Two shelves. A tab rather than a filter: at this age the question "who is it for?" and
+   the question "what is it?" must not be asked at the same time. */
+.shop-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0.2rem;
+}
+
+.shop-tab {
+  flex: 1;
+  min-height: 44px;
+  padding: 0.45rem 0.6rem;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  background: var(--pz-card-soft, rgba(128, 128, 128, 0.1));
+  color: var(--pz-ink-soft);
+  font: inherit;
+  font-weight: 700;
+}
+
+.shop-tab.is-on {
+  border-color: var(--pz-accent);
+  background: var(--pz-accent-soft);
+  color: var(--pz-ink);
+}
+
+.shop-tab:active {
+  transform: translateY(1px);
+}
+
 .shop-pick {
   margin: 0.6rem 0 0.4rem;
   color: var(--pz-ink-soft);
@@ -1222,6 +1276,15 @@ body.in-habitat .zoo-bar {
   overflow-x: auto;
   padding-bottom: 0.3rem;
   scrollbar-width: thin;
+}
+
+/* The picker belongs to the home shelf and goes away with it, and both shelves go away with
+   an empty zoo. `display: flex` above would otherwise win over the hidden attribute — the
+   same reason .badge and .overlay say this. */
+.shop-tabs[hidden],
+.shop-pets[hidden],
+.shop-pick[hidden] {
+  display: none;
 }
 
 .shop-pet {

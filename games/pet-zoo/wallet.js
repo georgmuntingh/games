@@ -13,7 +13,17 @@
 // What pays is the things a child already celebrates — a pet arriving, a pet growing, a
 // tier opening — plus two bonuses for the shape of play the scheduler actually needs:
 // finishing a session rather than bailing, and coming back tomorrow.
+//
+// On top of those, three *milestones*: a tier finished outright, a week of days in a row,
+// and every pet of one species collected. They are the long game, and they are handled
+// differently from the events above — an event pays as it happens and is gone, whereas a
+// milestone is a fact about the save that stays true once it is true. So the state records
+// which ones have been awarded, and `milestonesReached` simply reports what is true now; the
+// difference between those two lists is what is owed. That is what makes paying twice
+// impossible without the scheduler having to remember anything.
 
+import { TIERS, tierMastery } from './curriculum.js';
+import { SPECIES_IDS, timesOfSpecies } from './pets.js';
 import { formFor } from './srs.js';
 
 /**
@@ -70,6 +80,92 @@ export function dayBonusFor(days, today) {
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   return previous === yesterday.toISOString().slice(0, 10) ? DAY_STREAK_COINS : DAY_COINS;
 }
+
+/* -------------------------------------------------------------- milestones */
+
+/**
+ * A tier finished outright. A tier *opens* the next one at 80% and pays TIER_COINS for it;
+ * this is the other 20% — the handful of times a child has been quietly avoiding, which the
+ * unlock rule deliberately lets them skip. Paying more for the stragglers than for the
+ * opening is the whole point of having it.
+ */
+export const MASTERY_COINS = 40;
+
+/** Seven days in a row. Paid again for each further week, because a streak is not a trophy. */
+export const WEEK_STREAK_COINS = 30;
+
+/** Every pet of one species. The longest horizon in the game, and the rarest payout. */
+export const SPECIES_COINS = 50;
+
+export const STREAK_WEEK_DAYS = 7;
+
+/**
+ * How many days at the end of `daysPlayed` are consecutive. The list is kept in order and
+ * trimmed to the last sixty by `touchDay`, so the run at the end is the streak running now.
+ */
+export function streakDays(days) {
+  const list = Array.isArray(days) ? days : [];
+  let run = 0;
+  let expected = null;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const day = list[i];
+    if (typeof day !== 'string') break;
+    if (expected !== null && day !== expected) break;
+    run += 1;
+    const previous = new Date(`${day}T00:00:00Z`);
+    if (Number.isNaN(previous.getTime())) return run;
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    expected = previous.toISOString().slice(0, 10);
+  }
+  return run;
+}
+
+/**
+ * Every milestone the save currently satisfies, as ids. Pure, and derived entirely from state
+ * that was already being stored — no counter anywhere had to be added to support this.
+ *
+ * Ids are `mastery:<tier>`, `week:<n>` (the nth full week of a streak) and `species:<id>`.
+ */
+export function milestonesReached(items, stats) {
+  const out = [];
+  const zoo = items ?? {};
+
+  for (const tier of TIERS) {
+    if (tierMastery(zoo, tier.id) >= 1) out.push(`mastery:${tier.id}`);
+  }
+
+  const weeks = Math.floor(streakDays(stats?.daysPlayed) / STREAK_WEEK_DAYS);
+  for (let week = 1; week <= weeks; week += 1) out.push(`week:${week}`);
+
+  for (const species of SPECIES_IDS) {
+    const times = timesOfSpecies(species);
+    if (times.length && times.every((id) => zoo[id]?.hatchedAt)) out.push(`species:${species}`);
+  }
+
+  return out;
+}
+
+/** What one milestone is worth. An id this build does not recognise is worth nothing. */
+export function coinsForMilestone(id) {
+  const kind = String(id ?? '').split(':')[0];
+  if (kind === 'mastery') return MASTERY_COINS;
+  if (kind === 'week') return WEEK_STREAK_COINS;
+  if (kind === 'species') return SPECIES_COINS;
+  return 0;
+}
+
+/**
+ * The milestones reached but not yet paid for, and what they come to. The caller records the
+ * ids it was handed; anything already in `awarded` is skipped, so a reload, a second answer
+ * in the same second, or a save that arrives from another device cannot pay for one twice.
+ */
+export function settleMilestones(items, stats, awarded) {
+  const paid = new Set(Array.isArray(awarded) ? awarded : []);
+  const fresh = milestonesReached(items, stats).filter((id) => !paid.has(id));
+  return { ids: fresh, coins: fresh.reduce((sum, id) => sum + coinsForMilestone(id), 0) };
+}
+
+/* ------------------------------------------------------------------- purse */
 
 const purse = (n) => Math.max(0, Math.floor(Number.isFinite(n) ? n : 0));
 

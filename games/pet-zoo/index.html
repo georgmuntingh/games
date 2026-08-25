@@ -110,6 +110,7 @@
 
       <!-- ------------------------------------------------------------- zoo -->
       <section id="zoo-scene" class="scene" hidden>
+        <div id="zoo-yard" class="zoo-yard"></div>
         <button id="shop-stall" type="button" class="stall" aria-label="Gå til butikken">
           <svg class="stall-art" viewBox="0 0 72 44" aria-hidden="true" focusable="false">
             <path class="stall-post" d="M9 44 L9 20 M63 44 L63 20" />
@@ -176,6 +177,13 @@
         <p id="shop-empty" class="shop-empty" data-i18n="shop.empty" hidden>
           Ingen dyr ennå! Klekk det første egget, så åpner butikken.
         </p>
+
+        <div id="shop-tabs" class="shop-tabs" role="tablist">
+          <button class="shop-tab is-on" type="button" role="tab" aria-selected="true"
+                  data-tab="home" data-i18n="shop.tabHome">Hjemme hos dyra</button>
+          <button class="shop-tab" type="button" role="tab" aria-selected="false"
+                  data-tab="zoo" data-i18n="shop.tabZoo">Hele dyrehagen</button>
+        </div>
 
         <div id="shop-body">
           <p id="shop-pick" class="shop-pick" data-i18n="shop.pickPet">Hvem skal det være til?</p>
