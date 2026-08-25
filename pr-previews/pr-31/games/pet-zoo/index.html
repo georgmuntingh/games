@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Pet Zoo</title>
+    <script type="module" crossorigin src="/games/pr-previews/pr-31/assets/games/pet-zoo-DrfghXE4.js"></script>
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/yard-DZqbJ8wy.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-31/assets/pet-zoo-DgTtOJlN.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-31/assets/ui-IHdlRC7L.css">
+  </head>
+  <body>
+    <div id="sky" class="sky" aria-hidden="true"></div>
+    <a class="back-link" href="../../" data-i18n="back">← Tilbake til spillene</a>
+
+    <main>
+      <header class="zoo-bar">
+        <h1 id="title">Pet Zoo</h1>
+        <nav class="tabs" data-i18n-aria-label="nav.scenes" aria-label="Visninger">
+          <button id="tab-play" type="button" class="tab is-on" aria-pressed="true" data-i18n="tab.play">Mate</button>
+          <button id="tab-zoo" type="button" class="tab" aria-pressed="false">
+            <span data-i18n="tab.zoo">Dyrehagen</span>
+            <span id="zoo-badge" class="badge" hidden>0</span>
+          </button>
+          <button id="sound" type="button" class="icon-btn" aria-pressed="true" aria-label="Lyd på">
+            🔊
+          </button>
+          <button
+            id="open-settings"
+            type="button"
+            class="icon-btn"
+            data-i18n-aria-label="settings.open"
+            aria-label="Innstillinger"
+          >
+            ⚙️
+          </button>
+        </nav>
+      </header>
+
+      <!-- ---------------------------------------------------------- feeding -->
+      <section id="play-scene" class="scene">
+        <div class="prompt-card">
+          <div id="pet-stage" class="pet-stage"></div>
+          <div class="prompt-text">
+            <p id="prompt-line" class="prompt-line" data-i18n="prompt.booting">Vekker dyrehagen…</p>
+            <p class="prompt-time">
+              <span id="prompt-digital" class="digital">--:--</span>
+              <span id="prompt-spoken" class="spoken"></span>
+            </p>
+          </div>
+        </div>
+
+        <div class="clock-wrap">
+          <svg
+            id="clock"
+            viewBox="0 0 400 400"
+            role="application"
+            data-i18n-aria-label="clock.aria"
+            aria-label="Dra viserne for å stille klokka"
+          ></svg>
+        </div>
+
+        <p id="feedback" class="feedback" aria-live="polite"></p>
+        <button id="submit" type="button" class="big-btn">Feed!</button>
+      </section>
+
+      <!-- ------------------------------------------------------------- nap -->
+      <section id="nap-scene" class="scene" hidden>
+        <div class="nap-card">
+          <div id="nap-pets" class="nap-pets"></div>
+          <h2 data-i18n="nap.title">Dyrene sover!</h2>
+          <p class="nap-copy" data-i18n="nap.copy">
+            Det var en god økt. Alle tar seg en blund — du kan fortsatt besøke dem i
+            dyrehagen.
+          </p>
+          <p class="nap-count"><span data-i18n="nap.countdown">Våkner om</span> <span id="nap-timer">2:00</span></p>
+          <button id="wake" type="button" class="big-btn" data-i18n="nap.wake" disabled>Vekk dyrene</button>
+          <button id="nap-to-zoo" type="button" class="ghost-btn" data-i18n="nap.visit">Besøk dyrehagen</button>
+        </div>
+      </section>
+
+      <!-- --------------------------------------------------------- habitat -->
+      <section id="habitat-scene" class="scene scene-full" hidden>
+        <div class="hab-bar">
+          <button
+            id="habitat-back"
+            type="button"
+            class="icon-btn hab-back-btn"
+            data-i18n-aria-label="habitat.back"
+            aria-label="Tilbake til dyrehagen"
+          >
+            ←
+          </button>
+          <div class="hab-who">
+            <span id="habitat-name" class="hab-name"></span>
+            <span id="habitat-rank" class="hab-rank"></span>
+          </div>
+          <span id="habitat-time" class="hab-time"></span>
+          <button
+            id="habitat-rename"
+            type="button"
+            class="icon-btn"
+            data-i18n-aria-label="habitat.rename"
+            aria-label="Gi dyret et nytt navn"
+          >
+            ✏️
+          </button>
+        </div>
+        <div id="habitat-host" class="hab-host"></div>
+        <p id="habitat-note" class="hab-note" aria-live="polite"></p>
+      </section>
+
+      <!-- ------------------------------------------------------------- zoo -->
+      <section id="zoo-scene" class="scene" hidden>
+        <div id="zoo-yard" class="zoo-yard"></div>
+        <button id="shop-stall" type="button" class="stall" aria-label="Gå til butikken">
+          <svg class="stall-art" viewBox="0 0 72 44" aria-hidden="true" focusable="false">
+            <path class="stall-post" d="M9 44 L9 20 M63 44 L63 20" />
+            <path class="stall-roof" d="M4 21 L36 5 L68 21 Z" />
+            <path class="stall-awning" d="M6 21 h60 v6 q-7.5 5 -15 0 q-7.5 5 -15 0 q-7.5 5 -15 0 q-7.5 5 -15 0 Z" />
+            <rect class="stall-counter" x="14" y="30" width="44" height="14" rx="2.5" />
+            <circle class="stall-coin" cx="27" cy="36" r="4" />
+            <circle class="stall-coin" cx="36" cy="34" r="4" />
+            <circle class="stall-coin" cx="45" cy="36" r="4" />
+          </svg>
+          <span class="stall-label" data-i18n="shop.open">Gå til butikken</span>
+          <span id="stall-balance" class="coin-chip"></span>
+        </button>
+        <p id="zoo-empty" class="zoo-empty" data-i18n="zoo.empty" hidden>
+          Ingen dyr ennå! Still klokka riktig noen ganger, så klekkes det første egget
+          ditt.
+        </p>
+        <div id="zoo-grid" class="zoo-grid"></div>
+      </section>
+
+      <details class="how-to">
+        <summary data-i18n="howto.summary">Slik spiller du</summary>
+        <ul>
+          <li data-i18n-html="howto.1">Et dyr sier når det spiser. Dra viserne til det klokkeslettet.</li>
+          <li data-i18n-html="howto.2">
+            Den <b>lange tynne viseren</b> er minuttene — den hopper fem minutter om
+            gangen. Den <b>korte tjukke viseren</b> er timen.
+          </li>
+          <li data-i18n-html="howto.3">
+            Se hvordan den korte viseren sniker seg framover når du flytter den lange.
+            Kvart over fire har den allerede forlatt 4-tallet — sånn funker en ekte klokke.
+          </li>
+          <li data-i18n-html="howto.4">
+            Klarer du samme klokkeslett fire ganger, sprekker egget til et dyr som blir ditt.
+          </li>
+          <li data-i18n-html="howto.5">
+            Etter noen minutter blir dyrene trøtte, og spillet stopper. Du kan fortsatt gå
+            rundt i dyrehagen mens de sover.
+          </li>
+          <li class="grown-up-hint" data-i18n-html="howto.6">
+            Voksne: hold inne tittelen for å se framgang.
+          </li>
+        </ul>
+      </details>
+    </main>
+
+    <!-- ------------------------------------------------------- overlays -->
+    <div id="unlock-overlay" class="overlay" hidden>
+      <div class="overlay-card">
+        <div id="unlock-pets" class="unlock-pets"></div>
+        <h2 id="unlock-title">Nye dyr har kommet!</h2>
+        <p id="unlock-copy"></p>
+        <button id="unlock-close" type="button" class="big-btn" data-i18n="unlock.close">Kom igjen!</button>
+      </div>
+    </div>
+
+    <div id="shop-overlay" class="overlay" hidden>
+      <div class="overlay-card shop">
+        <div class="shop-head">
+          <h2 data-i18n="shop.title">Dyrehagebutikken</h2>
+          <span id="shop-balance" class="coin-chip"></span>
+        </div>
+
+        <p id="shop-empty" class="shop-empty" data-i18n="shop.empty" hidden>
+          Ingen dyr ennå! Klekk det første egget, så åpner butikken.
+        </p>
+
+        <div id="shop-tabs" class="shop-tabs" role="tablist">
+          <button class="shop-tab is-on" type="button" role="tab" aria-selected="true"
+                  data-tab="home" data-i18n="shop.tabHome">Hjemme hos dyra</button>
+          <button class="shop-tab" type="button" role="tab" aria-selected="false"
+                  data-tab="zoo" data-i18n="shop.tabZoo">Hele dyrehagen</button>
+        </div>
+
+        <div id="shop-body">
+          <p id="shop-pick" class="shop-pick" data-i18n="shop.pickPet">Hvem skal det være til?</p>
+          <div id="shop-pets" class="shop-pets" role="group" aria-labelledby="shop-pick"></div>
+          <div id="shop-grid" class="shop-grid"></div>
+        </div>
+
+        <p id="shop-note" class="shop-note" aria-live="polite"></p>
+        <button id="shop-close" type="button" class="big-btn" data-i18n="shop.close">Ferdig</button>
+      </div>
+    </div>
+
+    <div id="shop-confirm" class="overlay" hidden>
+      <div class="overlay-card shop-confirm-card">
+        <div id="confirm-preview" class="confirm-preview"></div>
+        <p id="confirm-copy" class="confirm-copy"></p>
+        <div class="confirm-row">
+          <button id="confirm-buy" type="button" class="big-btn">Kjøp!</button>
+          <button id="confirm-cancel" type="button" class="ghost-btn" data-i18n="shop.cancel">
+            Ikke nå
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settings-overlay" class="overlay" hidden>
+      <div class="overlay-card settings">
+        <h2 data-i18n="settings.title">Innstillinger</h2>
+
+        <div class="setting">
+          <label class="setting-label" for="language" data-i18n="settings.language">Språk</label>
+          <select id="language" class="setting-select"></select>
+        </div>
+
+        <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="show-digital" data-i18n="settings.digital">
+              Vis digital tid
+            </label>
+            <input id="show-digital" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.digitalHelp">
+            Av til vanlig. Når den er av, sier dyrene måltidet sitt bare med ord, så urskiva
+            er eneste stedet å lese det.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-head">
+            <label class="setting-label" for="play-minutes" data-i18n="settings.playTime">
+              Spilletid
+            </label>
+            <output id="play-minutes-value" class="setting-value" for="play-minutes"></output>
+          </div>
+          <input
+            id="play-minutes"
+            class="setting-range"
+            type="range"
+            min="2"
+            max="15"
+            step="1"
+            value="5"
+          />
+          <p class="setting-help" data-i18n="settings.playTimeHelp">
+            Hvor lenge en økt varer før dyrene må sove. Korte økter funker best — tre til
+            fem minutter.
+          </p>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label" data-i18n="settings.transfer">Flytt til en annen enhet</span>
+          <div class="setting-actions">
+            <button id="export-file" type="button" class="ghost-btn" data-i18n="transfer.exportFile">
+              Lagre fil
+            </button>
+            <button id="export-code" type="button" class="ghost-btn" data-i18n="transfer.copyCode">
+              Kopier kode
+            </button>
+            <button id="import-file" type="button" class="ghost-btn" data-i18n="transfer.importFile">
+              Åpne fil …
+            </button>
+            <button id="import-code" type="button" class="ghost-btn" data-i18n="transfer.pasteCode">
+              Lim inn kode
+            </button>
+          </div>
+          <input id="import-input" type="file" accept="application/json,.json,text/plain,.txt" hidden />
+          <p id="transfer-status" class="setting-status" aria-live="polite"></p>
+          <p class="setting-help" data-i18n="settings.transferHelp">
+            Lagre dyrehagen som en fil, eller kopier den som en kode du kan sende i en
+            melding. Åpner du en av delene på en annen enhet, blir alle dyrene med.
+            Dyrehagen som allerede er der, blir erstattet.
+          </p>
+        </div>
+
+        <button id="settings-close" type="button" class="big-btn" data-i18n="settings.done">
+          Ferdig
+        </button>
+      </div>
+    </div>
+
+    <div id="grownups-overlay" class="overlay" hidden>
+      <div class="overlay-card grownups">
+        <h2 data-i18n="grownups.title">Framgang</h2>
+        <dl id="grownups-stats" class="stats"></dl>
+        <div id="grownups-tiers" class="tier-bars"></div>
+        <p class="fine-print" data-i18n="grownups.fine">
+          Klokkeslettene planlegges med en gjentakelsesalgoritme: hvert av dem kommer
+          tilbake akkurat når det holder på å bli glemt. Alt lagres bare i denne
+          nettleseren.
+        </p>
+        <div class="btn-row">
+          <button id="grownups-close" type="button" class="big-btn" data-i18n="grownups.close">
+            Lukk
+          </button>
+          <button
+            id="grownups-reset"
+            type="button"
+            class="ghost-btn danger"
+            data-i18n="grownups.reset"
+          >
+            Start på nytt
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="fx" class="fx-layer" aria-hidden="true"></div>
+
+  </body>
+</html>
