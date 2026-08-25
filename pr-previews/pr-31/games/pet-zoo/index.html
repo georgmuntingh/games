@@ -4,10 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pet Zoo</title>
-    <script type="module" crossorigin src="/games/pr-previews/pr-31/assets/games/pet-zoo-CEHlsfGA.js"></script>
+    <script type="module" crossorigin src="/games/pr-previews/pr-31/assets/games/pet-zoo-MX_bszR_.js"></script>
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/yard-CaAsBIjF.js">
-    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-31/assets/pet-zoo-AiHSHGAr.css">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/recognize-DolGw8_D.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/yard-ClLRdgIg.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-31/assets/pad-C9HCjdes.js">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-31/assets/pet-zoo-BnucixpL.css">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-31/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -64,6 +66,24 @@
 
         <div id="answer-sum" class="sum-wrap" hidden>
           <div id="tenframe-host" class="tenframe-host" hidden></div>
+
+          <div id="answer-write" class="write-wrap" hidden>
+            <div id="write-boxes" class="write-boxes"></div>
+            <div id="write-picker" class="write-picker" hidden>
+              <p id="write-picker-title" class="write-picker-title" data-i18n="answer.fixTitle">
+                Hvilket tall var det?
+              </p>
+              <div id="write-picker-keys" class="write-picker-keys"></div>
+            </div>
+            <div class="write-tools">
+              <button id="write-undo" type="button" class="write-tool" data-i18n="answer.undo">
+                Angre
+              </button>
+              <button id="write-clear" type="button" class="write-tool" data-i18n="answer.clear">
+                Tøm
+              </button>
+            </div>
+          </div>
           <div
             id="keypad"
             class="keypad"
@@ -251,6 +271,18 @@
             Svarer med
           </label>
           <select id="answer-mode" class="setting-select"></select>
+        </div>
+
+        <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="mirror-nudge" data-i18n="settings.mirrorNudge">
+              Øv på hvilken vei tallene vender
+            </label>
+            <input id="mirror-nudge" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.mirrorNudgeHelp">
+            Av til å begynne med.
+          </p>
         </div>
 
         <div class="setting">
