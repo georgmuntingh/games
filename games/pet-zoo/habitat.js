@@ -13,6 +13,9 @@
 
 import { timeId } from './clock.js';
 import {
+  BACKDROP,
+  BACKDROP_HALF_WIDTH,
+  BACKDROP_SCALE,
   BALL,
   BALL_REST,
   DETAIL,
@@ -41,7 +44,7 @@ import {
   WALK_Y,
 } from './habitat-parts.js';
 import { hash, SPECIES, speciesFor, traitIndexFor } from './pets.js';
-import { itemById as shopItemById, MAX_DECOR, sanitizeDecor } from './shop.js';
+import { itemById as shopItemById, MAX_DECOR, sanitizeDecor, slotOf } from './shop.js';
 
 export { HORIZON, PET_FOOT, PET_SIZE, ROAM, SAFE, VIEW, WALK_Y };
 
@@ -345,6 +348,43 @@ export function furnitureSpotsFor(layout, count = MAX_DECOR) {
   return spots.sort((a, b) => a - b);
 }
 
+/**
+ * Where a bought backdrop piece stands, on the hill line. One spot, derived the same way the
+ * ground spots are — never stored, so the same pet has the same skyline on every device.
+ *
+ * Scanned outermost-in, exactly like the ground spots and for the same two reasons: a piece
+ * at the edge of the safe box is still wholly visible, and the readable middle belongs to the
+ * pet, which is taller than the horizon and would stand in front of anything put there.
+ *
+ * What it adds is a clearance test against the ground pieces. A far tower directly behind a
+ * bought house is two silhouettes in one column and the child can read neither; one gap over,
+ * the habitat looks like a place with two things in it rather than a pile.
+ */
+export function backdropSpotFor(layout, groundSpots = furnitureSpotsFor(layout)) {
+  const busy = [...groundSpots, homeSpotFor(layout, ROAM)];
+  const candidates = [];
+  for (let x = SAFE.x0 + BACKDROP_HALF_WIDTH; x <= SAFE.x1 - BACKDROP_HALF_WIDTH; x += 2) {
+    if (x >= CENTRE_KEEP.x0 && x <= CENTRE_KEEP.x1) continue;
+    candidates.push(x);
+  }
+  candidates.sort((a, b) => Math.abs(b - 100) - Math.abs(a - 100) || a - b);
+
+  const clear = candidates.find((x) => busy.every((b) => Math.abs(b - x) >= FURNITURE_GAP));
+  // Every layout has one, but a fallback beats a habitat that renders nothing: the widest gap
+  // going, which is still a spot inside the safe box and outside the middle.
+  if (clear !== undefined) return n(clear);
+  let best = candidates[0] ?? SAFE.x0 + BACKDROP_HALF_WIDTH;
+  let bestGap = -1;
+  for (const x of candidates) {
+    const gap = Math.min(...busy.map((b) => Math.abs(b - x)));
+    if (gap > bestGap) {
+      bestGap = gap;
+      best = x;
+    }
+  }
+  return n(best);
+}
+
 /** Bigger reads as nearer, and nearer reads as lower. Depth for free, and never wrong. */
 export const sceneryY = (scale) => n(HORIZON + 10 + (scale - 0.5) * 40);
 
@@ -460,7 +500,9 @@ export function habitatFor(h, m) {
     // Filled in by habitatOf from what the child has actually bought. A generated habitat
     // owns nothing, which is why 144 of them still cost no bytes.
     furniture: [],
+    backdrop: null,
     spots: furnitureSpotsFor(layout),
+    backdropSpot: backdropSpotFor(layout),
     seed,
   };
 }
@@ -473,7 +515,11 @@ export function habitatFor(h, m) {
  */
 export function habitatOf(item) {
   const generated = habitatFor(item.h, item.m);
-  const base = { ...generated, furniture: furnitureFor(generated, item?.decor) };
+  const base = {
+    ...generated,
+    furniture: furnitureFor(generated, item?.decor),
+    backdrop: backdropFor(generated, item?.decor),
+  };
   const over = item?.habitat;
   if (!over || typeof over !== 'object') return base;
   return {
@@ -491,12 +537,23 @@ export function habitatOf(item) {
  * the larder while a flowerbed sits in the open.
  */
 export function furnitureFor(habitat, decor) {
-  const ids = sanitizeDecor(decor);
+  const ids = sanitizeDecor(decor).filter((id) => slotOf(id) === 'ground');
   const spots = habitat.spots ?? [];
   const wide = (id) => shopItemById.get(id)?.band === 'wide';
   // One wide piece and one narrow: the wide one takes whichever spot has more room around it.
   const order = ids.length === 2 && !wide(ids[0]) && wide(ids[1]) ? [...spots].reverse() : spots;
   return ids.slice(0, spots.length).map((id, i) => ({ id, x: order[i], y: WALK_Y }));
+}
+
+/**
+ * The one bought backdrop piece, or nothing. Standing on the horizon rather than the walk
+ * line, and drawn small: the scale is what carries the last of the distance, once the two flat
+ * far tones have carried the rest.
+ */
+export function backdropFor(habitat, decor) {
+  const id = sanitizeDecor(decor).find((entry) => slotOf(entry) === 'backdrop');
+  if (!id) return null;
+  return { id, x: habitat.backdropSpot ?? 100, y: HORIZON, scale: BACKDROP_SCALE };
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -548,6 +605,14 @@ export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } 
   </g>
 
   <g class="hab-far">${(FAR[biome.far] ?? FAR.hills)(c)}</g>
+
+  ${
+    habitat.backdrop
+      ? `<g class="hab-backdrop" transform="translate(${habitat.backdrop.x} ${habitat.backdrop.y}) scale(${habitat.backdrop.scale})">${
+          (BACKDROP[habitat.backdrop.id] ?? BACKDROP.farGrove)(c)
+        }</g>`
+      : ''
+  }
 
   <g class="hab-ground">
     ${groundMarkup(c, uid)}

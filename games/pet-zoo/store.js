@@ -7,7 +7,7 @@
 
 import { DEFAULT_LANGUAGE } from './i18n.js';
 import { PLAY_MINUTES_DEFAULT } from './session.js';
-import { sanitizeDecor } from './shop.js';
+import { sanitizeDecor, sanitizeZoo } from './shop.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
 
@@ -23,9 +23,18 @@ export function freshState(now) {
     reviewClock: 0,
     tier: 0,
     coins: 0,
+    // What the stall has sold for the yard, and which of the long-game milestones have
+    // already been paid for. Both are lists of ids and nothing else: where a fountain stands
+    // is derived from the yard's slots, exactly as a pet's furniture is from its habitat's.
+    zooDecor: [],
+    milestones: [],
     // When the shop's back pay was handed out. Set once, so a zoo that predates coins is
     // paid for the pets it already had exactly once however often it is reloaded.
     coinsGrantedAt: 0,
+    // And when the milestones were first read. Its own latch rather than a share of
+    // `coinsGrantedAt`, because a zoo that has already been paid its back pay has that flag
+    // down and would otherwise have its milestone history read as brand new — and paid for.
+    milestonesGrantedAt: 0,
     settings: {
       sound: true,
       haptics: true,
@@ -40,6 +49,20 @@ export function freshState(now) {
     items: {},
   };
 }
+
+/**
+ * Milestone ids are the only thing this build stores that it does not itself enumerate — a
+ * save from a later build may name one this one has never heard of, and that is fine: an id
+ * it cannot price is worth nothing. What it must not do is carry something that is not an id
+ * at all, so the shape is checked and the length is bounded. Shared with `transfer.js`, so a
+ * file and a save are held to exactly one rule.
+ */
+export const isMilestoneId = (value) =>
+  typeof value === 'string' && value.length > 0 && value.length <= 40;
+
+/** Whatever is safe to keep from a stored or imported list of them. */
+export const cleanMilestones = (list) =>
+  Array.isArray(list) ? list.filter(isMilestoneId) : [];
 
 export const dayStamp = (now) => new Date(now).toISOString().slice(0, 10);
 
@@ -62,6 +85,12 @@ export function load(now, storage = safeStorage()) {
       // A balance is the one number worth spending on: hand-edited, corrupt or absent, it
       // comes back as a whole number of coins that is not negative.
       coins: normalizeCoins(parsed.coins),
+      // Filtered rather than trusted, the same as a pet's decor: a hand-edited save must not
+      // be able to put a piece this build cannot draw into the yard.
+      zooDecor: sanitizeZoo(parsed.zooDecor),
+      // Ids only, so an unknown one from a future build is simply worth nothing rather than
+      // being a number this build has to make sense of.
+      milestones: cleanMilestones(parsed.milestones),
       settings: { ...freshState(now).settings, ...parsed.settings },
       items: migrateItems(parsed.items),
     };

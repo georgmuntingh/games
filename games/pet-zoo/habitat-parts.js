@@ -502,6 +502,44 @@ export const BALL_REST = (c) => `
  * `WIDE` lists the pieces that need elbow room; shop.js gives those the roomier side band.
  */
 export const FURNITURE = {
+  stump: (c) => `
+    <ellipse cx="0" cy="-0.4" rx="8.4" ry="2.6" fill="${c.groundRim}" />
+    <path d="M-7.4 -1 L-6.4 -8.6 L6.4 -8.6 L7.4 -1 Z" fill="${c.wood}" />
+    <ellipse cx="0" cy="-8.6" rx="6.4" ry="2.2" fill="${c.nestLight}" />
+    <ellipse cx="0" cy="-8.6" rx="3.4" ry="1.1" fill="none" stroke="${c.nestDark}" stroke-width="0.8" />
+    <path d="M-7 -4.6 q-3.4 -0.6 -4.4 -3.4 q3 0.4 4.6 2" fill="${c.leaf}" />
+    <circle cx="5.4" cy="-10.2" r="1.6" fill="${c.bloom}" />`,
+
+  sandpit: (c) => `
+    <ellipse cx="0" cy="-1.6" rx="12.6" ry="4.6" fill="${c.groundRim}" />
+    <ellipse cx="0" cy="-2.2" rx="11" ry="3.6" fill="${c.stoneLight}" />
+    <path d="M-10.6 -3.4 L-9 -1 M-4 -4.2 L-3 -1.6 M4 -4.2 L3 -1.6 M10.6 -3.4 L9 -1"
+          stroke="${c.stone}" stroke-width="0.8" stroke-linecap="round" opacity="0.6" />
+    <path d="M-5.6 -4 q1.4 -3.4 4.4 -3.4 q3 0 4.4 3.4 Z" fill="${c.nest}" />
+    <path d="M-1.2 -7.2 L-1.2 -10.4 L4.2 -8.8 L-1.2 -7.4" fill="${c.accent}" />
+    <path d="M-1.2 -7.2 L-1.2 -10.4" stroke="${c.wood}" stroke-width="0.9" stroke-linecap="round" />`,
+
+  beehive: (c) => `
+    <path d="M-2 0 L-2 -6 L2 -6 L2 0 Z" fill="${c.wood}" />
+    <ellipse cx="0" cy="-8.4" rx="7.4" ry="3.4" fill="${c.nestDark}" />
+    <ellipse cx="0" cy="-11.8" rx="7" ry="3.4" fill="${c.nest}" />
+    <ellipse cx="0" cy="-15" rx="5.8" ry="3.2" fill="${c.nestLight}" />
+    <ellipse cx="0" cy="-17.8" rx="4" ry="2.6" fill="${c.nest}" />
+    <ellipse cx="0" cy="-19.8" rx="2" ry="1.4" fill="${c.nestDark}" />
+    <ellipse cx="0" cy="-11.4" rx="1.8" ry="1.2" fill="${c.groundRim}" />
+    <circle cx="-8.4" cy="-16.4" r="1.3" fill="${c.glowDeep}" />
+    <circle cx="8.6" cy="-13" r="1.1" fill="${c.glowDeep}" />`,
+
+  feeder: (c) => `
+    <ellipse cx="0" cy="-0.6" rx="4.4" ry="1.8" fill="${c.groundRim}" />
+    <path d="M-1.1 -1.4 L-1.1 -14 L1.1 -14 L1.1 -1.4 Z" fill="${c.wood}" />
+    <path d="M-7 -14 L7 -14 L5.4 -18.4 L-5.4 -18.4 Z" fill="${c.nest}" />
+    <path d="M-8 -13.4 L8 -13.4 L8 -14.6 L-8 -14.6 Z" fill="${c.nestDark}" />
+    <path d="M0 -18.4 L-6.2 -22.4 L6.2 -22.4 Z" fill="${c.nestDark}" />
+    <path d="M0 -20.4 L-4.4 -22.8 L4.4 -22.8 Z" fill="${c.nestLight}" />
+    <circle cx="-3" cy="-15.6" r="0.9" fill="${c.accent}" />
+    <circle cx="1.4" cy="-15.4" r="0.9" fill="${c.bloom}" />
+    <circle cx="4" cy="-16" r="0.8" fill="${c.accent}" />`,
   flowerbed: (c) => `
     <path d="M-9 0 L-7.6 -4.4 L7.6 -4.4 L9 0 Z" fill="${c.wood}" />
     <path d="M-7.6 -4.4 L7.6 -4.4 L6.6 -5.6 L-6.6 -5.6 Z" fill="${c.groundRim}" />
@@ -586,6 +624,190 @@ export const FURNITURE_IDS = Object.keys(FURNITURE);
 
 /** How much room each piece needs either side of its spot, for the spacing check. */
 export const FURNITURE_HALF_WIDTH = 16;
+
+/* ----------------------------------------------------------------- backdrop */
+
+/**
+ * The far pieces, standing on the hill line rather than on the walk line.
+ *
+ * The rule that makes these work is restraint: everything here is drawn in `far` and
+ * `farDark` only, at reduced detail, because a distant thing that is as colourful and as
+ * finely drawn as the pet's own lantern does not read as distant — it reads as a second
+ * habitat behind the first. Two flat tones and a silhouette is all distance needs.
+ *
+ * They also have to survive the crop. `xMidYMax slice` throws the top of the scene away
+ * first, so a landscape phone keeps the ground and loses the sky; a piece put in the sky is
+ * a piece a child paid for and cannot see. These sit *on* the horizon and stay visible in
+ * every aspect ratio the game is played at.
+ *
+ * The one exception to the two-tone rule is a light: `glow` is light rather than surface and
+ * so does not take the night tint, which is why a far window is still lit at midnight.
+ */
+export const BACKDROP = {
+  farGrove: (c) => `
+    <ellipse cx="0" cy="0" rx="22" ry="3" fill="${c.farDark}" />
+    <path d="M-15 0 L-15 -7 L-13 -7 L-13 0 Z" fill="${c.farDark}" />
+    <ellipse cx="-14" cy="-12" rx="8" ry="7" fill="${c.far}" />
+    <path d="M-1 0 L-1 -9 L1 -9 L1 0 Z" fill="${c.farDark}" />
+    <ellipse cx="0" cy="-16" rx="10" ry="8.5" fill="${c.far}" />
+    <ellipse cx="0" cy="-19" rx="6" ry="5" fill="${c.far}" />
+    <path d="M13 0 L13 -6 L15 -6 L15 0 Z" fill="${c.farDark}" />
+    <ellipse cx="14" cy="-10" rx="7" ry="6" fill="${c.far}" />`,
+
+  farMill: (c) => `
+    <ellipse cx="0" cy="0" rx="16" ry="2.6" fill="${c.farDark}" />
+    <path d="M-7 0 L-4.5 -20 L4.5 -20 L7 0 Z" fill="${c.far}" />
+    <path d="M-7 0 L-4.5 -20 L0 -20 L0 0 Z" fill="${c.farDark}" />
+    <path d="M-6 -21 L6 -21 L4 -25 L-4 -25 Z" fill="${c.farDark}" />
+    <g stroke="${c.farDark}" stroke-width="2" stroke-linecap="round">
+      <path d="M0 -23 L-12 -31 M0 -23 L12 -15 M0 -23 L-8 -11 M0 -23 L8 -35" />
+    </g>
+    <rect x="-2" y="-13" width="4" height="5" fill="${c.glow}" opacity="0.75" />`,
+
+  farArch: (c) => `
+    <ellipse cx="0" cy="0" rx="20" ry="2.6" fill="${c.farDark}" />
+    <path d="M-14 0 L-14 -10 Q-14 -22 0 -22 Q14 -22 14 -10 L14 0 L9 0 L9 -10
+             Q9 -17 0 -17 Q-9 -17 -9 -10 L-9 0 Z" fill="${c.far}" />
+    <path d="M-14 0 L-14 -10 Q-14 -22 0 -22 L0 -17 Q-9 -17 -9 -10 L-9 0 Z" fill="${c.farDark}" />
+    <path d="M-16 -22 L16 -22 L14 -25 L-14 -25 Z" fill="${c.farDark}" />`,
+
+  farTower: (c) => `
+    <ellipse cx="0" cy="0" rx="15" ry="2.6" fill="${c.farDark}" />
+    <path d="M-8 0 L-6 -26 L6 -26 L8 0 Z" fill="${c.far}" />
+    <path d="M-8 0 L-6 -26 L0 -26 L0 0 Z" fill="${c.farDark}" />
+    <path d="M-9 -26 L9 -26 L9 -29 L-9 -29 Z" fill="${c.farDark}" />
+    <path d="M0 -42 L8 -29 L-8 -29 Z" fill="${c.far}" />
+    <path d="M0 -42 L0 -29 L-8 -29 Z" fill="${c.farDark}" />
+    <rect x="-2.5" y="-22" width="5" height="6" fill="${c.glow}" opacity="0.75" />
+    <rect x="-2" y="-38" width="4" height="4" fill="${c.glow}" opacity="0.6" />`,
+};
+
+export const BACKDROP_IDS = Object.keys(BACKDROP);
+
+/**
+ * Distance is drawn, not just scaled — but the scale carries the last of it.
+ *
+ * The number is set by the crop rather than by taste. A short landscape window keeps only
+ * about ten units above the horizon, so nothing tall is ever *guaranteed* whole up there —
+ * which is why the sky was ruled out for bought pieces in the first place. What the hill line
+ * can promise is this: a bought piece never rises higher than the biome's own far scenery
+ * already does, so it is cropped no worse than the hills it stands among and is never the one
+ * thing on screen that is cut off. At this scale the tallest of them, the tower, reaches
+ * twenty units — inside the twenty-four that `FAR.hills` reaches on its own.
+ *
+ * In portrait, which is how a phone is held, the whole sky is on screen and all of this is
+ * moot: every far piece stands complete.
+ */
+export const BACKDROP_SCALE = 0.48;
+
+/** The tallest a far piece may be drawn, before scaling. Held to by a test. */
+export const BACKDROP_MAX_HEIGHT = 42;
+
+/** How far above the horizon the biome's own far art already reaches — the budget to stay in. */
+export const FAR_REACH = 24;
+
+/** Half a scaled piece, for the spacing check — the widest is farGrove at 22. */
+export const BACKDROP_HALF_WIDTH = 13;
+
+/* --------------------------------------------------------------------- yard */
+
+/**
+ * What stands in the zoo yard. Same contract again — base at (0, 0), growing into -y — but
+ * these are drawn at the yard's own scale rather than a habitat's, and they belong to the
+ * whole collection rather than to one pet, so they may use the full palette.
+ *
+ * Nothing here is a cage, a fence or a gate, for the same reason no biome has one: a zoo in
+ * this game is somewhere pets live, not somewhere they are kept.
+ */
+export const YARD_PIECES = {
+  signpost: (c) => `
+    <ellipse cx="0" cy="-0.6" rx="5" ry="2" fill="${c.groundRim}" />
+    <path d="M-1.4 -1.6 L-1.4 -22 L1.4 -22 L1.4 -1.6 Z" fill="${c.wood}" />
+    <path d="M-11 -20 L7 -20 L10 -17 L7 -14 L-11 -14 Z" fill="${c.nest}" />
+    <path d="M-8 -17.6 L2 -17.6 M-8 -16 L0 -16" stroke="${c.nestDark}" stroke-width="1.1"
+          stroke-linecap="round" />
+    <path d="M11 -12 L-7 -12 L-10 -9 L-7 -6 L11 -6 Z" fill="${c.nestLight}" />
+    <path d="M-4 -9.6 L6 -9.6 M-4 -8 L4 -8" stroke="${c.nestDark}" stroke-width="1.1"
+          stroke-linecap="round" />
+    <circle cx="0" cy="-23.4" r="2" fill="${c.accent}" />`,
+
+  topiary: (c) => `
+    <ellipse cx="0" cy="-0.6" rx="9" ry="2.6" fill="${c.groundRim}" />
+    <path d="M-6.6 -1.4 L-5.6 -6 L5.6 -6 L6.6 -1.4 Z" fill="${c.stone}" />
+    <path d="M-5.6 -6 L5.6 -6 L4.8 -7.4 L-4.8 -7.4 Z" fill="${c.stoneLight}" />
+    <path d="M-1.4 -7.4 L-1.4 -12 L1.4 -12 L1.4 -7.4 Z" fill="${c.wood}" />
+    <circle cx="0" cy="-16" r="5.6" fill="${c.leaf}" />
+    <circle cx="0" cy="-16" r="5.6" fill="none" stroke="${c.leafDark}" stroke-width="1" />
+    <circle cx="0" cy="-24.4" r="4.4" fill="${c.leaf}" />
+    <circle cx="0" cy="-24.4" r="4.4" fill="none" stroke="${c.leafDark}" stroke-width="1" />
+    <path d="M0 -20.4 L0 -18.6" stroke="${c.wood}" stroke-width="1.6" />
+    <circle cx="-3" cy="-26.6" r="1.5" fill="${c.bloom}" />
+    <circle cx="3.4" cy="-14.4" r="1.5" fill="${c.bloom}" />`,
+
+  bunting: (c) => `
+    <path d="M-23.2 0 L-22.4 -28 L-20.8 -28 L-20 0 Z" fill="${c.wood}" />
+    <path d="M20 0 L20.8 -28 L22.4 -28 L23.2 0 Z" fill="${c.wood}" />
+    <circle cx="-21.6" cy="-29" r="1.8" fill="${c.stoneLight}" />
+    <circle cx="21.6" cy="-29" r="1.8" fill="${c.stoneLight}" />
+    <path d="M-21.6 -27.6 q21.6 9 43.2 0" fill="none" stroke="${c.nestDark}" stroke-width="1" />
+    <g>
+      <path d="M-17.4 -25.6 L-11.4 -24 L-15 -19 Z" fill="${c.accent}" />
+      <path d="M-8.8 -23.2 L-2.8 -22.2 L-6 -16.8 Z" fill="${c.bloom}" />
+      <path d="M0 -22 L6 -22.6 L2.8 -16.4 Z" fill="${c.glowDeep}" />
+      <path d="M8.8 -23 L14.6 -24.4 L11.2 -18.4 Z" fill="${c.accent}" />
+    </g>
+`,
+
+  pathLamps: (c) => `
+    <g transform="translate(-8.5 0)">
+      <ellipse cx="0" cy="-0.6" rx="4.4" ry="1.8" fill="${c.stone}" />
+      <path d="M-1.3 -1.6 L-1 -18 L1 -18 L1.3 -1.6 Z" fill="${c.wood}" />
+      <circle cx="0" cy="-23" r="7.5" fill="${c.glow}" opacity="0.4" />
+      <path d="M-3.2 -18 L-2.4 -25 L2.4 -25 L3.2 -18 Z" fill="${c.glowDeep}" />
+      <path d="M-3.2 -18 L-2.4 -25 L2.4 -25 L3.2 -18 Z" fill="none" stroke="${c.wood}"
+            stroke-width="1.1" />
+      <path d="M-2.8 -25.4 L2.8 -25.4 L1.4 -27.4 L-1.4 -27.4 Z" fill="${c.stoneLight}" />
+      <ellipse cx="17" cy="-0.6" rx="3.6" ry="1.5" fill="${c.stone}" />
+      <path d="M15.9 -1.4 L16.2 -13.4 L17.8 -13.4 L18.1 -1.4 Z" fill="${c.wood}" />
+      <circle cx="17" cy="-17.4" r="6" fill="${c.glow}" opacity="0.32" />
+      <path d="M14.4 -13.4 L15.1 -18.8 L18.9 -18.8 L19.6 -13.4 Z" fill="${c.glowDeep}" />
+      <path d="M14.8 -19.2 L19.2 -19.2 L18.1 -20.8 L15.9 -20.8 Z" fill="${c.stoneLight}" />
+    </g>
+`,
+
+  fountain: (c) => `
+    <ellipse cx="0" cy="-2" rx="20" ry="7.6" fill="${c.groundRim}" />
+    <ellipse cx="0" cy="-3.4" rx="17.4" ry="6.2" fill="${c.water}" />
+    <ellipse cx="-4" cy="-4.6" rx="7" ry="2.2" fill="${c.waterLight}" opacity="0.7" />
+    <path d="M-2.4 -5 L-2.4 -13 L2.4 -13 L2.4 -5 Z" fill="${c.stone}" />
+    <ellipse cx="0" cy="-13.4" rx="7.6" ry="2.8" fill="${c.stoneLight}" />
+    <ellipse cx="0" cy="-14.6" rx="6" ry="2" fill="${c.water}" />
+    <path d="M-1.2 -15 L-1.2 -21 L1.2 -21 L1.2 -15 Z" fill="${c.stone}" />
+    <circle cx="0" cy="-22.4" r="2.2" fill="${c.stoneLight}" />
+    <g fill="${c.waterLight}" opacity="0.75">
+      <path d="M0 -23.6 q-6 3.4 -7.4 9.4 q3.4 -6.6 7.4 -7.6 Z" />
+      <path d="M0 -23.6 q6 3.4 7.4 9.4 q-3.4 -6.6 -7.4 -7.6 Z" />
+    </g>
+    <circle cx="-11" cy="-4.4" r="1.6" fill="${c.stoneLight}" />
+    <circle cx="11.6" cy="-3.4" r="1.4" fill="${c.stoneLight}" />`,
+
+  statue: (c) => `
+    <ellipse cx="0" cy="-1" rx="12.6" ry="4" fill="${c.groundRim}" />
+    <path d="M-9.6 -2 L-8.6 -7.4 L8.6 -7.4 L9.6 -2 Z" fill="${c.stone}" />
+    <path d="M-8.6 -7.4 L8.6 -7.4 L7.6 -9 L-7.6 -9 Z" fill="${c.stoneLight}" />
+    <path d="M-6 -9 L-5.4 -12.4 L5.4 -12.4 L6 -9 Z" fill="${c.stone}" />
+    <ellipse cx="0" cy="-19" rx="7" ry="7.4" fill="${c.stoneLight}" />
+    <ellipse cx="0" cy="-27.4" rx="5.4" ry="5" fill="${c.stoneLight}" />
+    <ellipse cx="-4" cy="-31.4" rx="2.2" ry="3" transform="rotate(-18 -4 -31.4)" fill="${c.stoneLight}" />
+    <ellipse cx="4" cy="-31.4" rx="2.2" ry="3" transform="rotate(18 4 -31.4)" fill="${c.stoneLight}" />
+    <circle cx="-2" cy="-28" r="1.1" fill="${c.stone}" />
+    <circle cx="2" cy="-28" r="1.1" fill="${c.stone}" />
+    <path d="M-2.2 -25 q2.2 1.8 4.4 0" fill="none" stroke="${c.stone}" stroke-width="0.9"
+          stroke-linecap="round" />
+    <circle cx="0" cy="-13.6" r="2" fill="${c.accent}" />`,
+};
+
+export const YARD_PIECE_IDS = Object.keys(YARD_PIECES);
 
 /* -------------------------------------------------------------------- extra */
 

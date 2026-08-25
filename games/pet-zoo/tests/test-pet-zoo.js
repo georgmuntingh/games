@@ -117,6 +117,7 @@ import {
 } from '../pets.js';
 import {
   BALL_R,
+  backdropSpotFor,
   BIOME_IDS,
   biomeOfSpecies,
   CENTRE_KEEP,
@@ -136,6 +137,12 @@ import {
   stepBall,
 } from '../habitat.js';
 import {
+  BACKDROP,
+  BACKDROP_HALF_WIDTH,
+  BACKDROP_IDS,
+  BACKDROP_MAX_HEIGHT,
+  BACKDROP_SCALE,
+  FAR_REACH,
   FURNITURE,
   FURNITURE_HALF_WIDTH,
   FURNITURE_IDS,
@@ -149,19 +156,34 @@ import {
   SAFE,
   SCENERY_IDS,
   TREAT_IDS,
+  VIEW,
   WALK_Y,
+  YARD_PIECES,
+  YARD_PIECE_IDS,
 } from '../habitat-parts.js';
 import {
   buy,
+  buyZoo,
   CATALOG,
+  countIn,
+  HOME_CATALOG,
   isFull,
   isOwned,
   isUnlocked,
   itemById as shopItemById,
   MAX_DECOR,
+  MAX_ZOO_DECOR,
   sanitizeDecor,
+  sanitizeZoo,
   sell,
+  sellZoo,
+  SLOT_CAPS,
+  slotOf,
+  ZOO_CATALOG,
+  zooIsFull,
+  zooOwns,
 } from '../shop.js';
+import { yardPalette, yardPiecesFor, YARD_SLOTS, yardSvg } from '../yard.js';
 import {
   canAfford,
   DAY_COINS,
@@ -172,10 +194,17 @@ import {
   HATCH_COINS,
   normalize,
   payoutFor,
+  coinsForMilestone,
+  MASTERY_COINS,
+  milestonesReached,
   retroGrant,
   SESSION_COINS,
+  settleMilestones,
+  SPECIES_COINS,
   spend,
+  streakDays,
   TIER_COINS,
+  WEEK_STREAK_COINS,
 } from '../wallet.js';
 import {
   ACCESSORIES,
@@ -1131,7 +1160,7 @@ test('neither language is missing a string the other has', () => {
 test('no string is left untranslated — every Norwegian value differs from the English', () => {
   const t = { nb: translator('nb'), en: translator('en') };
   // Bar the handful that are the same word in both, or carry only placeholders.
-  const shared = new Set(['unlock.copy', 'coins.earned']);
+  const shared = new Set(['unlock.copy', 'coins.earned', 'shop.statue']);
   const identical = languageKeys('nb').filter(
     (key) => !shared.has(key) && t.nb(key) === t.en(key)
   );
@@ -2353,11 +2382,37 @@ describe('the shop — locking, owning and the two-slot cap');
 
 test('every catalogue entry is priced, tiered and drawable', () => {
   assert(CATALOG.length > 0);
+  // Each shelf is drawn from its own map, and a piece is only ever looked up in the one its
+  // scope and slot say it belongs to — so a piece filed under the wrong one is a blank card.
+  const drawnBy = {
+    zoo: YARD_PIECE_IDS,
+    ground: FURNITURE_IDS,
+    backdrop: BACKDROP_IDS,
+  };
   for (const entry of CATALOG) {
     assert(entry.price > 0, `${entry.id} is free`);
     assert(entry.tier >= 0 && entry.tier <= LAST_TIER, `${entry.id} sits outside the curriculum`);
-    assert(FURNITURE_IDS.includes(entry.id), `${entry.id} has nothing to draw`);
-    assert(['wide', 'narrow'].includes(entry.band), `${entry.id} has no width`);
+    assert(['home', 'zoo'].includes(entry.scope), `${entry.id} belongs to no shelf`);
+    const ids = drawnBy[entry.scope === 'zoo' ? 'zoo' : entry.slot];
+    assert(ids && ids.includes(entry.id), `${entry.id} has nothing to draw`);
+    // Width is a ground-slot idea: it decides which of the two side bands a piece takes.
+    // Nothing competes for room on the hill line or in the yard, so nothing declares one.
+    if (entry.scope === 'home' && entry.slot === 'ground') {
+      assert(['wide', 'narrow'].includes(entry.band), `${entry.id} has no width`);
+    }
+  }
+});
+
+test('every shelf has something on it, from the very first tier', () => {
+  for (const shelf of [HOME_CATALOG, ZOO_CATALOG]) {
+    assert(shelf.length > 0, 'a tab with an empty grid is a dead end');
+    assert(shelf.some((entry) => entry.tier === 0), 'a shelf must not open entirely locked');
+  }
+  for (const slot of Object.keys(SLOT_CAPS)) {
+    assert(
+      HOME_CATALOG.some((entry) => entry.slot === slot && entry.tier === 0),
+      `nothing fits the ${slot} slot at tier 0`
+    );
   }
 });
 
@@ -2409,7 +2464,16 @@ test('only ids this build can draw ever reach a habitat', () => {
   assertEqual(sanitizeDecor(['house', 'bogus', 'house', 'lantern']).join(), 'house,lantern');
   assertEqual(sanitizeDecor('house').length, 0, 'a string is not a list of pieces');
   assertEqual(sanitizeDecor(null).length, 0);
-  assertEqual(sanitizeDecor(CATALOG.map((e) => e.id)).length, MAX_DECOR, 'the cap holds on load too');
+  // Every id there is, filtered down to one full habitat: two on the ground, one on the hill.
+  const everything = sanitizeDecor(CATALOG.map((e) => e.id));
+  assertEqual(everything.filter((id) => slotOf(id) === 'ground').length, MAX_DECOR);
+  assertEqual(everything.filter((id) => slotOf(id) === 'backdrop').length, SLOT_CAPS.backdrop);
+  assertEqual(everything.length, MAX_DECOR + SLOT_CAPS.backdrop, 'the cap holds on load too');
+  assertEqual(
+    sanitizeDecor(['house', 'fountain', 'lantern']).join(),
+    'house,lantern',
+    'a yard piece is the wrong scale for a habitat and must never reach one'
+  );
 });
 
 describe('the shop — what a purchase puts in a habitat');
@@ -2476,6 +2540,271 @@ test('a habitat with furniture in it actually renders it', () => {
   assert(!svg.includes('undefined'));
 });
 
+describe('the shop — the slot on the hill line');
+
+test('a backdrop piece fits alongside a full pair on the ground', () => {
+  let pet = { decor: [] };
+  for (const id of ['house', 'lantern', 'pond']) pet = buy(pet, id);
+  assertEqual(pet.decor.join(), 'house,lantern', 'the ground cap gave way');
+  pet = buy(pet, 'farTower');
+  assertEqual(pet.decor.join(), 'house,lantern,farTower', 'the hill line has room of its own');
+  // And it is full at one: the horizon is a single readable band.
+  const refused = buy(pet, 'farMill');
+  assertEqual(refused.decor.join(), pet.decor.join(), 'a second far piece got in');
+});
+
+test('each slot is counted and reported on its own', () => {
+  const pet = { decor: ['house', 'farTower'] };
+  assertEqual(countIn(pet, 'ground'), 1);
+  assertEqual(countIn(pet, 'backdrop'), 1);
+  assert(!isFull(pet, 'ground'), 'one of two is not full');
+  assert(isFull(pet, 'backdrop'), 'one of one is');
+  assertEqual(slotOf('house'), 'ground');
+  assertEqual(slotOf('farTower'), 'backdrop');
+  assertEqual(slotOf('bogus'), 'ground', 'an unknown id is capped somewhere rather than nowhere');
+});
+
+test('selling a far piece frees the hill line and nothing else', () => {
+  const pet = { decor: ['house', 'lantern', 'farTower'] };
+  const after = sell(pet, 'farTower');
+  assertEqual(after.decor.join(), 'house,lantern');
+  assert(!isFull(after, 'backdrop'), 'the slot did not come back');
+  assert(isFull(after, 'ground'), 'selling one thing emptied another slot');
+});
+
+test('every habitat has a far spot, whole, clear of the ground pieces and out of the middle', () => {
+  for (const layout of LAYOUTS) {
+    const ground = furnitureSpotsFor(layout);
+    const x = backdropSpotFor(layout, ground);
+    assert(x - BACKDROP_HALF_WIDTH >= SAFE.x0, `a far piece at ${x} loses its left side`);
+    assert(x + BACKDROP_HALF_WIDTH <= SAFE.x1, `a far piece at ${x} loses its right side`);
+    assert(x < CENTRE_KEEP.x0 || x > CENTRE_KEEP.x1, 'the middle belongs to the pet');
+    for (const g of ground) {
+      assert(Math.abs(g - x) >= 12, `a far piece at ${x} stands right behind one at ${g}`);
+    }
+  }
+});
+
+test('a far piece stands on the horizon, drawn small, and only when it was bought', () => {
+  for (const item of ALL_ITEMS) {
+    assertEqual(habitatOf(item).backdrop, null, `${item.id} was given a skyline free`);
+    const bought = habitatOf({ ...item, decor: ['farTower'] }).backdrop;
+    assertEqual(bought.id, 'farTower');
+    assertEqual(bought.y, HORIZON, 'a far piece must sit on the hill line');
+    assert(bought.scale < 1, 'distance is carried by the scale as well as the colour');
+  }
+});
+
+test('the two slots do not move each other', () => {
+  const item = { h: 4, m: 15, decor: ['farTower'] };
+  const alone = habitatOf(item).backdrop;
+  const crowded = habitatOf({ ...item, decor: ['house', 'lantern', 'farTower'] });
+  assertEqual(crowded.backdrop.x, alone.x, 'buying furniture moved the skyline');
+  const ground = habitatOf({ h: 4, m: 15, decor: ['house', 'lantern'] }).furniture;
+  assertEqual(
+    JSON.stringify(crowded.furniture),
+    JSON.stringify(ground),
+    'buying a far piece moved the furniture'
+  );
+});
+
+test('a far piece is cropped no worse than the hills it stands among', () => {
+  // A short landscape window keeps only about ten units above the horizon, so nothing up there
+  // is guaranteed whole. What must hold is that a piece the child *paid for* is never the one
+  // thing on screen that is cut off: it has to stay inside the reach the biome's own far
+  // scenery already has, which is what the crop was tuned around in the first place.
+  for (const id of BACKDROP_IDS) {
+    const markup = BACKDROP[id](habitatFor(12, 0).palette);
+    const highest = Math.min(
+      0,
+      ...[...markup.matchAll(/-?\d+(?:\.\d+)?/g)].map(Number).filter((v) => v < 0)
+    );
+    assert(
+      Math.abs(highest) <= BACKDROP_MAX_HEIGHT,
+      `${id} is drawn ${Math.abs(highest)} tall, over the ${BACKDROP_MAX_HEIGHT} a far piece may be`
+    );
+    assert(
+      Math.abs(highest) * BACKDROP_SCALE <= FAR_REACH,
+      `${id} stands ${Math.abs(highest) * BACKDROP_SCALE} above the horizon, past the ${FAR_REACH} the hills reach`
+    );
+  }
+});
+
+test('every far piece draws, in every palette, without a hole in it', () => {
+  for (const habitat of [habitatFor(12, 0), habitatFor(11, 30), habitatFor(3, 45)]) {
+    for (const id of BACKDROP_IDS) {
+      const markup = BACKDROP[id](habitat.palette);
+      assert(markup.length > 0, `${id} draws nothing`);
+      assert(!markup.includes('undefined'), `${id} asks for a colour the palette has not got`);
+    }
+  }
+});
+
+test('a habitat with a far piece in it actually renders it, once', () => {
+  const svg = habitatSvg(habitatOf({ h: 4, m: 15, decor: ['house', 'farTower'] }), { label: 'x' });
+  assertEqual((svg.match(/hab-backdrop/g) ?? []).length, 1);
+  assertEqual((svg.match(/hab-furniture/g) ?? []).length, 1);
+  assert(!svg.includes('undefined'));
+  // Behind the ground, so the crest and the grass overlap its base and it reads as distance.
+  assert(svg.indexOf('hab-backdrop') < svg.indexOf('hab-ground'), 'the far piece is in front');
+});
+
+describe('the shop — the zoo yard');
+
+test('the yard holds three pieces, in the order they were bought', () => {
+  let yard = [];
+  for (const id of ['fountain', 'bunting', 'signpost']) yard = buyZoo(yard, id);
+  assertEqual(yard.join(), 'fountain,bunting,signpost');
+  assert(zooIsFull(yard), 'three is the yard full');
+  assertEqual(buyZoo(yard, 'statue').join(), yard.join(), 'a fourth piece got in');
+  assertEqual(buyZoo(yard, 'fountain').join(), yard.join(), 'it was bought twice');
+  assertEqual(yard.length, MAX_ZOO_DECOR);
+});
+
+test('the yard refuses what belongs in a habitat, and does not mutate what it was handed', () => {
+  const yard = ['fountain'];
+  assertEqual(buyZoo(yard, 'house').join(), 'fountain', 'a habitat piece got into the yard');
+  assertEqual(buyZoo(yard, 'bogus').join(), 'fountain');
+  assertEqual(yard.length, 1, 'the list handed in was mutated');
+  assert(zooOwns(yard, 'fountain'));
+  assert(!zooOwns(yard, 'statue'));
+});
+
+test('selling from the yard gives the slot back and cannot be done twice', () => {
+  const yard = ['fountain', 'bunting'];
+  const after = sellZoo(yard, 'fountain');
+  assertEqual(after.join(), 'bunting');
+  assertEqual(sellZoo(after, 'fountain').join(), 'bunting', 'selling it twice invented a coin');
+});
+
+test('only ids this build can draw ever reach the yard', () => {
+  assertEqual(sanitizeZoo(['fountain', 'bogus', 'fountain', 'statue']).join(), 'fountain,statue');
+  assertEqual(sanitizeZoo(['house', 'farTower']).length, 0, 'a habitat piece is the wrong scale');
+  assertEqual(sanitizeZoo('fountain').length, 0, 'a string is not a list of pieces');
+  assertEqual(sanitizeZoo(null).length, 0);
+  assertEqual(sanitizeZoo(CATALOG.map((e) => e.id)).length, MAX_ZOO_DECOR, 'the cap holds on load');
+});
+
+test('every yard slot is inside the box, and far enough apart for the widest piece', () => {
+  assertEqual(YARD_SLOTS.length, MAX_ZOO_DECOR, 'a slot without a piece, or a piece without one');
+  for (const x of YARD_SLOTS) {
+    assert(x - 24 >= 0 && x + 24 <= VIEW.w, `a piece at ${x} would run off the yard`);
+  }
+  for (let i = 1; i < YARD_SLOTS.length; i += 1) {
+    assert(YARD_SLOTS[i] - YARD_SLOTS[i - 1] >= 48, 'two pieces would read as one');
+  }
+});
+
+test('yard pieces take their slots in order, and buying a second does not move the first', () => {
+  const one = yardPiecesFor(['fountain']);
+  const two = yardPiecesFor(['fountain', 'statue']);
+  assertEqual(one[0].x, two[0].x, 'the first piece moved when a second arrived');
+  assertEqual(two[1].x, YARD_SLOTS[1]);
+  assertEqual(one[0].y, WALK_Y, 'the yard stands on the same ground a habitat does');
+});
+
+test('every yard piece draws, at every hour, without a hole in it', () => {
+  for (const hour of [0, 6, 12, 18, 23]) {
+    const c = yardPalette(phaseOfHour(hour));
+    for (const id of YARD_PIECE_IDS) {
+      const markup = YARD_PIECES[id](c);
+      assert(markup.length > 0, `${id} draws nothing`);
+      assert(!markup.includes('undefined'), `${id} asks for a colour the palette has not got`);
+    }
+  }
+});
+
+test('an empty yard still draws — the place a fountain would go is worth seeing', () => {
+  const empty = yardSvg([], { hour24: 12, label: 'zoo' });
+  assert(empty.includes('<svg'), 'a child with nothing bought gets a gap');
+  assertEqual((empty.match(/yard-piece"/g) ?? []).length, 0);
+  assert(!empty.includes('undefined'));
+});
+
+test('a yard with pieces in it renders each of them once, at every hour', () => {
+  for (const hour of [0, 9, 15, 22]) {
+    const svg = yardSvg(['fountain', 'bunting', 'bogus'], { hour24: hour, label: 'zoo' });
+    assertEqual((svg.match(/yard-piece"/g) ?? []).length, 2, `${hour}:00 drew the junk id`);
+    assert(!svg.includes('undefined'), `${hour}:00 asks for a colour that is not there`);
+  }
+});
+
+describe('coins — the long game');
+
+test('a run of days is counted from the end, and a gap ends it', () => {
+  assertEqual(streakDays([]), 0);
+  assertEqual(streakDays(null), 0);
+  assertEqual(streakDays(['2026-08-20', '2026-08-21', '2026-08-22']), 3);
+  assertEqual(streakDays(['2026-08-01', '2026-08-21', '2026-08-22']), 2, 'a gap must end the run');
+  assertEqual(streakDays(['2026-02-28', '2026-03-01']), 2, 'and it has to know the calendar');
+});
+
+test('a week of days in a row pays, and a second week pays again', () => {
+  const days = (n) =>
+    Array.from({ length: n }, (_, i) => new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10));
+  assertEqual(milestonesReached({}, { daysPlayed: days(6) }).join(), '', 'six days is not a week');
+  assertEqual(milestonesReached({}, { daysPlayed: days(7) }).join(), 'week:1');
+  assertEqual(milestonesReached({}, { daysPlayed: days(14) }).join(), 'week:1,week:2');
+});
+
+test('a tier pays again when the last of it is finished, over and above its unlock', () => {
+  const items = {};
+  const tier0 = tierItems(0);
+  for (const item of tier0.slice(0, tier0.length - 1)) items[item.id] = { phase: 'graduated' };
+  assert(!milestonesReached(items, {}).includes('mastery:0'), 'nearly is not finished');
+  items[tier0[tier0.length - 1].id] = { phase: 'graduated' };
+  assert(milestonesReached(items, {}).includes('mastery:0'), 'the last one paid nothing');
+  assert(MASTERY_COINS > TIER_COINS, 'the stragglers must be worth more than the opening');
+});
+
+test('a species pays only once every one of its pets has hatched', () => {
+  const items = {};
+  const times = timesOfSpecies('mochi');
+  for (const id of times.slice(0, times.length - 1)) items[id] = { hatchedAt: 1 };
+  assertEqual(milestonesReached(items, {}).join(), '', 'an incomplete species paid');
+  items[times[times.length - 1]] = { hatchedAt: 1 };
+  assertEqual(milestonesReached(items, {}).join(), 'species:mochi');
+  // An egg is not a pet: a time that has been seen but never hatched does not complete a set.
+  const eggs = { ...items, [times[0]]: { hatchedAt: null } };
+  assertEqual(milestonesReached(eggs, {}).join(), '', 'an unhatched egg completed a species');
+});
+
+test('what one milestone is worth, and that an unknown one is worth nothing', () => {
+  assertEqual(coinsForMilestone('mastery:2'), MASTERY_COINS);
+  assertEqual(coinsForMilestone('week:9'), WEEK_STREAK_COINS);
+  assertEqual(coinsForMilestone('species:pip'), SPECIES_COINS);
+  assertEqual(coinsForMilestone('trebuchet:1'), 0, 'a future build must not mint coins here');
+  assertEqual(coinsForMilestone(undefined), 0);
+});
+
+test('a milestone is paid exactly once, however many times it is settled', () => {
+  const items = {};
+  for (const id of timesOfSpecies('mochi')) items[id] = { hatchedAt: 1 };
+  const stats = { daysPlayed: ['2026-08-01'] };
+
+  const first = settleMilestones(items, stats, []);
+  assertEqual(first.ids.join(), 'species:mochi');
+  assertEqual(first.coins, SPECIES_COINS);
+
+  const again = settleMilestones(items, stats, first.ids);
+  assertEqual(again.coins, 0, 'the same milestone paid twice');
+  assertEqual(again.ids.length, 0);
+});
+
+test('a zoo that has already reached one can have it recorded without being paid for it', () => {
+  // What the latch at boot does: read what is true, hand over no coins. A six-week zoo meeting
+  // this build must not be handed a fortune for history it earned before the rules existed.
+  const items = {};
+  for (const id of timesOfSpecies('mochi')) items[id] = { hatchedAt: 1 };
+  const awarded = milestonesReached(items, {});
+  assertEqual(awarded.join(), 'species:mochi');
+  assertEqual(settleMilestones(items, {}, awarded).coins, 0, 'the latch leaked');
+});
+
+test('a zoo starting today has nothing latched away from it', () => {
+  assertEqual(milestonesReached({}, freshState(1000).stats).join(), '', 'a new zoo was written off');
+});
+
 describe('the shop — what a save has to remember');
 
 test('a fresh zoo starts with an empty purse and no back pay yet paid', () => {
@@ -2515,7 +2844,111 @@ test('a purse and what each pet owns both survive a save and a reload', () => {
   });
 });
 
+test('a fresh zoo starts with an empty yard and no milestone history yet read', () => {
+  const state = freshState(1000);
+  assertEqual(state.zooDecor.length, 0);
+  assertEqual(state.milestones.length, 0);
+  assertEqual(state.milestonesGrantedAt, 0, 'the latch must start open');
+});
+
+test('the yard and the milestone latch survive a save and a reload', () => {
+  withStorage((storage) => {
+    write(
+      {
+        ...freshState(1000),
+        zooDecor: ['fountain', 'bunting'],
+        milestones: ['week:1', 'species:mochi'],
+        milestonesGrantedAt: 1000,
+      },
+      storage
+    );
+    const back = load(2000, storage);
+    assertEqual(back.zooDecor.join(), 'fountain,bunting');
+    assertEqual(back.milestones.join(), 'week:1,species:mochi');
+    assertEqual(back.milestonesGrantedAt, 1000, 'the latch came back open');
+  });
+});
+
+test('a hand-edited yard and a hand-edited latch are both pulled back to something sane', () => {
+  withStorage((storage) => {
+    write(
+      { ...freshState(1000), zooDecor: ['fountain', 'trebuchet', 'house'], milestones: ['ok', 7, null] },
+      storage
+    );
+    const back = load(2000, storage);
+    assertEqual(back.zooDecor.join(), 'fountain', 'a piece this build cannot draw reached the yard');
+    assertEqual(back.milestones.join(), 'ok', 'a milestone that is not an id got in');
+    write({ ...freshState(1000), zooDecor: 'fountain', milestones: 'week:1' }, storage);
+    const junk = load(2000, storage);
+    assertEqual(junk.zooDecor.length, 0, 'a string is not a yard');
+    assertEqual(junk.milestones.length, 0, 'a string is not a list of milestones');
+  });
+});
+
+test('a save written by the build before this one loads with everything it had intact', () => {
+  withStorage((storage) => {
+    // Exactly the shape the shipped shop wrote: v1, a balance, its back pay already paid, two
+    // ground pieces — and no idea that a yard or a milestone was ever going to exist.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: VERSION,
+        tier: 2,
+        coins: 210,
+        coinsGrantedAt: 500,
+        settings: { language: 'nb' },
+        stats: { totalAnswered: 40, totalCorrect: 33, streak: 3, bestStreak: 9, daysPlayed: [] },
+        items: { '4:15': { h: 4, m: 15, feeds: 3, cracks: 2, decor: ['house', 'lantern'], hatchedAt: 1 } },
+      })
+    );
+    const back = load(2000, storage);
+    assertEqual(back.coins, 210, 'an existing purse was emptied by the upgrade');
+    assertEqual(back.tier, 2);
+    assertEqual(back.items['4:15'].decor.join(), 'house,lantern', 'bought furniture was lost');
+    assertEqual(back.settings.language, 'nb');
+    assertEqual(back.zooDecor.length, 0, 'a yard was invented');
+    assertEqual(back.milestones.length, 0);
+    // And the milestone latch is still open, so the history is read — not paid for — at boot.
+    assertEqual(back.milestonesGrantedAt, 0, 'the history would never be read');
+  });
+});
+
 describe('the shop — coins cross between devices');
+
+test('the yard and the milestone latch travel with the zoo', () => {
+  const state = {
+    ...freshState(1000),
+    coins: 90,
+    zooDecor: ['fountain', 'signpost'],
+    milestones: ['week:2'],
+    items: { '4:15': { h: 4, m: 15, feeds: 1, cracks: 0, decor: ['farTower'], hatchedAt: 1 } },
+  };
+  const arrived = applyImport(freshState(5000), exportPayload(state, 2000), 5000);
+  assertEqual(arrived.zooDecor.join(), 'fountain,signpost');
+  assertEqual(arrived.items['4:15'].decor.join(), 'farTower', 'the hill line did not travel');
+  assertEqual(arrived.milestones.join(), 'week:2');
+  // A save that lists its milestones has had them read already, so the receiving device must
+  // not read them again — that is what would pay a second time for the same week.
+  assertEqual(arrived.milestonesGrantedAt, 5000, 'the latch arrived open');
+});
+
+test('a save from before the yard arrives with the latch still open', () => {
+  const payload = exportPayload(freshState(1000), 2000);
+  delete payload.milestones;
+  delete payload.zooDecor;
+  const arrived = applyImport(freshState(5000), payload, 5000);
+  assertEqual(arrived.zooDecor.length, 0);
+  assertEqual(arrived.milestonesGrantedAt, 0, 'its history would never be read');
+});
+
+test('a hand-edited file cannot smuggle a piece into the yard', () => {
+  const payload = exportPayload(freshState(1000), 2000);
+  payload.zooDecor = ['fountain', 'trebuchet', 'house'];
+  payload.milestones = ['week:1', 42];
+  const arrived = applyImport(freshState(5000), payload, 5000);
+  assertEqual(arrived.zooDecor.join(), 'fountain');
+  assertEqual(arrived.milestones.join(), 'week:1');
+});
 
 test('a balance and the furniture travel with the zoo', () => {
   const state = {
