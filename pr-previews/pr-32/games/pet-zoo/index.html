@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pet Zoo</title>
-    <script type="module" crossorigin src="/games/pr-previews/pr-32/assets/games/pet-zoo-WH5e9WE8.js"></script>
+    <script type="module" crossorigin src="/games/pr-previews/pr-32/assets/games/pet-zoo-CfWZzozP.js"></script>
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/recognize-DolGw8_D.js">
-    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/yard-B5e84WGE.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/yard-CbcjNDy9.js">
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/pad-C9HCjdes.js">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-32/assets/pet-zoo-CIcFexaX.css">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-32/assets/ui-IHdlRC7L.css">
@@ -320,6 +320,28 @@
             Av til vanlig. Med den på vises bare det ferdige svaret, uten å regne det ut. Da
             får barnet vite at det ble feil, men ikke hvorfor — så dette er for en som
             allerede kan oppstilling godt.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-head">
+            <label class="setting-label" for="admire-seconds" data-i18n="settings.admire">
+              Tid til å se på dyret
+            </label>
+            <output id="admire-seconds-value" class="setting-value" for="admire-seconds"></output>
+          </div>
+          <input
+            id="admire-seconds"
+            class="setting-range"
+            type="range"
+            min="1"
+            max="8"
+            step="0.5"
+            value="3"
+          />
+          <p class="setting-help" data-i18n="settings.admireHelp">
+            Hvor lenge et nyklekket dyr — eller et som nettopp har vokst — blir stående før
+            neste oppgave. Barnet kan trykke på dyret for å gå videre med én gang.
           </p>
         </div>
 
