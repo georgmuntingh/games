@@ -10,7 +10,7 @@
 // The loop runs only while the scene is open. Closing it cancels the frame and drops every
 // node, so nothing animates behind a hidden section.
 
-import { appearanceOf, eggSvg, petSvg } from './pets.js';
+import { appearanceOf, eggSvg, petSvg, portraitOf } from './pets.js';
 import {
   ballSvg,
   BALL_R,
@@ -101,7 +101,7 @@ export function createHabitatScene({ host, fx }) {
   function petMarkup(mood) {
     if (!item) return '';
     return item.hatchedAt === null
-      ? eggSvg(appearanceOf(item).species, {
+      ? eggSvg(portraitOf(item), {
           cracks: item.cracks ?? 0,
           title: pet?.title ?? '',
         })

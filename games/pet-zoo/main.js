@@ -60,6 +60,7 @@ import {
   moodOf,
   petName,
   petSvg,
+  portraitOf,
   speciesAppearance,
   speciesFor,
   speciesForFact,
@@ -518,7 +519,7 @@ function eggTitle(item) {
 function renderPetStage(item, mood) {
   const markup =
     item.hatchedAt === null
-      ? eggSvg(appearanceOf(item).species, { cracks: item.cracks ?? 0, title: eggTitle(item) })
+      ? eggSvg(portraitOf(item), { cracks: item.cracks ?? 0, title: eggTitle(item) })
       : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
   el.petStage.innerHTML = markup;
   const pet = el.petStage.querySelector('.pet');
@@ -533,7 +534,7 @@ function renderPetStage(item, mood) {
  * animations on `.pet-inner` would fight.
  */
 function renderEggStage(item, cracks, { fresh = false } = {}) {
-  el.petStage.innerHTML = eggSvg(appearanceOf(item).species, { cracks, title: eggTitle(item) });
+  el.petStage.innerHTML = eggSvg(portraitOf(item), { cracks, title: eggTitle(item) });
   const pet = el.petStage.querySelector('.pet');
   if (fresh) pet.querySelector(`.egg-crack-${cracks}`)?.classList.add('is-new');
   return pet;
@@ -1663,7 +1664,7 @@ function renderZoo() {
       const isEgg = item.hatchedAt === null;
       const mood = moodOf(item, at, { napping });
       const art = isEgg
-        ? eggSvg(appearanceOf(item).species, { cracks: item.cracks ?? 0, title: eggTitle(item) })
+        ? eggSvg(portraitOf(item), { cracks: item.cracks ?? 0, title: eggTitle(item) })
         : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
       // Eggs no longer carry progress dots — the broken shell is the progress, and `eggTitle`
       // is what says so to anyone not looking at it.

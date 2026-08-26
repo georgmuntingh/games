@@ -571,3 +571,50 @@ export const SIGNATURES = {
       <path d="M70 30 C92 28 98 10 82 2 C68 -4 56 8 62 20 C66 26 72 24 72 18" />
     </g>`,
 };
+
+/* -------------------------------------------------------------------- eggs */
+
+// An egg is the first thing a child sees of a new pet, and for a long time every egg of a
+// species was exactly the same egg — one shell, one belly patch, four speckles in four fixed
+// places. A zoo half full of eggs looked like a zoo half full of one egg.
+//
+// These are the axes an egg varies along. All of them are picked from the pet's trait index,
+// the same number its colours and its name come from, so an egg is stable for as long as it
+// exists and no two eggs sitting next to each other are alike.
+
+// How big the egg is drawn, as a multiple of the shell's own size. Kept inside a range the
+// 100-unit box can hold at every combination with the shapes below.
+export const EGG_SIZES = [0.86, 0.93, 1, 1.07];
+
+// And what shape it is. `sx`/`sy` scale the whole egg — shell, speckles and cracks together —
+// so a narrow egg's cracks are narrow too and stay where they were drawn, on the shell.
+export const EGG_SHAPES = [
+  { id: 'round', sx: 1.03, sy: 0.95 },
+  { id: 'tall', sx: 0.93, sy: 1.05 },
+  { id: 'plump', sx: 1.06, sy: 1 },
+  { id: 'slim', sx: 0.9, sy: 1.02 },
+  { id: 'squat', sx: 1.01, sy: 0.9 },
+];
+
+// What is on the shell. Each is a different idea rather than a different amount of the same
+// one, because "a few more dots" is not something a child notices and "that one has a stripe"
+// is. Drawn by `eggMarks` in pets.js, which keeps every mark inside the shell.
+export const EGG_PATTERNS = [
+  'plain',
+  'spots',
+  'freckles',
+  'dapple',
+  'band',
+  'rings',
+  'crown',
+  'scatter',
+];
+
+// Which of the species' own three colours the marks are drawn in. Its own colours and no
+// others: the egg is a promise about what is inside it, so a lilac egg had better not hatch
+// something orange.
+export const EGG_TINTS = [
+  { id: 'accent', fill: 'accent', opacity: 0.68 },
+  { id: 'soft', fill: 'accent', opacity: 0.42 },
+  { id: 'belly', fill: 'belly', opacity: 0.95 },
+];

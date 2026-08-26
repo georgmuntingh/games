@@ -155,7 +155,10 @@ import {
   appearanceOf,
   defaultName,
   EGG_CRACK_MAX,
+  eggLookFrom,
+  eggMarksFor,
   eggSvg,
+  shellHalfWidth,
   isCrowned,
   LOUD_FAMILIES,
   MARKING_IDS,
@@ -276,6 +279,10 @@ import {
   FACIAL,
   HAIR,
   HAIR_CROWN,
+  EGG_PATTERNS,
+  EGG_SHAPES,
+  EGG_SIZES,
+  EGG_TINTS,
   MARKINGS,
   SIGNATURES,
   stageOf,
@@ -4235,6 +4242,141 @@ test('a column sum can be said out loud, past twenty and past a hundred', () => 
       assert(!/\d/.test(numberWordOf(lang, n)), `${lang} fell back to digits at ${n}`);
     }
   }
+});
+
+
+describe('eggs — no two the same');
+
+test('an egg is stable: the same pet always gets the same egg', () => {
+  // A child is waiting on *this* egg. One that changed shape between two glances would be a
+  // different egg, and the whole point of it is that it is theirs.
+  for (const species of SPECIES_IDS.slice(0, 6)) {
+    for (const index of [0, 1, 7, 23]) {
+      const once = eggLookFrom({ species, index });
+      const twice = eggLookFrom({ species, index });
+      assertEqual(JSON.stringify(once), JSON.stringify(twice), `${species}/${index}`);
+    }
+  }
+});
+
+test('two eggs side by side differ in every way at once', () => {
+  // Not "a speckle moved": a child does not notice that. The strides are chosen so that
+  // neighbours change size, shape, pattern and colour together.
+  for (const species of SPECIES_IDS) {
+    for (let i = 0; i < 12; i += 1) {
+      const a = eggLookFrom({ species, index: i });
+      const b = eggLookFrom({ species, index: i + 1 });
+      assert(a.size !== b.size, `${species}: ${i} and ${i + 1} are the same size`);
+      assert(a.shape !== b.shape, `${species}: ${i} and ${i + 1} are the same shape`);
+      assert(a.pattern !== b.pattern, `${species}: ${i} and ${i + 1} wear the same pattern`);
+      assert(a.tint.id !== b.tint.id, `${species}: ${i} and ${i + 1} are the same colour`);
+    }
+  }
+});
+
+test('a zoo of one species meets every pattern, every size and every shape', () => {
+  // Twenty-odd eggs of a species is roughly what a full zoo holds, and a look nobody ever
+  // sees is a look that need not exist.
+  const seen = { pattern: new Set(), size: new Set(), shape: new Set(), tint: new Set() };
+  for (let i = 0; i < 24; i += 1) {
+    const look = eggLookFrom({ species: 'mochi', index: i });
+    seen.pattern.add(look.pattern);
+    seen.size.add(look.size);
+    seen.shape.add(look.shape);
+    seen.tint.add(look.tint.id);
+  }
+  assertEqual(seen.pattern.size, EGG_PATTERNS.length, 'a pattern never came up');
+  assertEqual(seen.size.size, EGG_SIZES.length, 'a size never came up');
+  assertEqual(seen.shape.size, EGG_SHAPES.length, 'a shape never came up');
+  assertEqual(seen.tint.size, EGG_TINTS.length, 'a tint never came up');
+});
+
+test('two species do not run through the same eggs in the same order', () => {
+  const line = (species) =>
+    Array.from({ length: 8 }, (_, i) => {
+      const look = eggLookFrom({ species, index: i });
+      return `${look.size}${look.shape}${look.pattern}`;
+    }).join('|');
+  const lines = SPECIES_IDS.map(line);
+  assert(new Set(lines).size > 1, 'every species lays exactly the same eggs in the same order');
+});
+
+test('not one speckle hangs off the side of the egg', () => {
+  // The single thing that would make the whole idea look broken. Checked against the shell's
+  // own width rather than by eye, for every mark of every pattern.
+  for (const pattern of EGG_PATTERNS) {
+    for (const mark of eggMarksFor(pattern)) {
+      const half = shellHalfWidth(mark.y);
+      assert(half > 0, `${pattern}: a mark at y=${mark.y} is off the end of the shell`);
+      const reach = mark.kind === 'dot' ? Math.abs(mark.x - 50) + mark.r : mark.rx;
+      assert(
+        reach <= half,
+        `${pattern}: a ${mark.kind} reaches ${reach.toFixed(1)} where the shell is only ${half.toFixed(1)}`
+      );
+    }
+  }
+});
+
+test('the shell is widest at its waist and comes to nothing at both ends', () => {
+  assertEqual(shellHalfWidth(12), 0, 'the top');
+  assertEqual(shellHalfWidth(90), 0, 'the bottom');
+  assertEqual(shellHalfWidth(4), 0, 'and above the top there is no shell at all');
+  assertClose(shellHalfWidth(58), 30, 1e-9, 'the waist');
+  assert(shellHalfWidth(40) < shellHalfWidth(58), 'it narrows going up');
+  assert(shellHalfWidth(80) < shellHalfWidth(58), 'and going down');
+});
+
+test('every pattern but the plain one actually puts something on the shell', () => {
+  assertEqual(eggMarksFor('plain').length, 0);
+  for (const pattern of EGG_PATTERNS.filter((p) => p !== 'plain')) {
+    assert(eggMarksFor(pattern).length > 0, `${pattern} draws nothing`);
+  }
+  assertEqual(eggMarksFor('nonsense').length, 0, 'and an unknown pattern is simply plain');
+});
+
+test('a plain egg is glossy, so it reads as plain rather than as unfinished', () => {
+  let plains = 0;
+  for (const species of SPECIES_IDS) {
+    for (let i = 0; i < 24; i += 1) {
+      const look = eggLookFrom({ species, index: i });
+      if (look.pattern !== 'plain') continue;
+      plains += 1;
+      assert(look.glint, `${species}/${i} is a bare shell with nothing on it at all`);
+    }
+  }
+  assert(plains > 0, 'no plain eggs came up to check');
+});
+
+test('the whole egg scales together, cracks and all', () => {
+  // The cracks are drawn for one shell at one size. They only stay on a small or a tall egg
+  // because they sit inside the same scaled group the shell does.
+  const svg = eggSvg({ species: 'mochi', index: 1 }, { cracks: EGG_CRACK_MAX });
+  const body = svg.slice(svg.indexOf('<g class="egg-body"'));
+  assert(/class="egg-body" transform="translate\([\d.]+ [\d.]+\) scale\([\d.]+ [\d.]+\)/.test(svg), 'no scale');
+  for (let i = 1; i <= EGG_CRACK_MAX; i += 1) {
+    assert(body.includes(`egg-crack-${i}`), `crack ${i} is outside the scaled group`);
+  }
+  assert(body.includes('egg-shell'), 'the shell is outside the scaled group');
+});
+
+test('an egg is drawn in its own pet\'s colours and nobody else\'s', () => {
+  // The egg is a promise about what is inside it.
+  for (const species of SPECIES_IDS) {
+    const svg = eggSvg({ species, index: 3 });
+    const palette = SPECIES[species].palette;
+    for (const colour of svg.match(/#[0-9a-f]{6}/gi) ?? []) {
+      assert(palette.includes(colour), `${species}'s egg is wearing ${colour}`);
+    }
+  }
+});
+
+test('a bare species id still draws an egg, as it always did', () => {
+  // Two callers hand over a portrait; the unlock exemplars and the tests hand over a name.
+  const svg = eggSvg('mochi', { cracks: 1 });
+  assert(svg.includes('egg-shell'), 'a species id no longer draws anything');
+  assert(svg.includes('egg-crack-1'));
+  assertEqual(eggLookFrom({ species: 'nonsense' }).species, 'mochi', 'and an unknown species falls back');
+  assert(eggSvg('nonsense').includes('egg-shell'), 'rather than throwing');
 });
 
 describe('the ten-frame');

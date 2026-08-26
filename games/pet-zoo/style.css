@@ -2059,6 +2059,13 @@ body.in-habitat .zoo-bar {
 /* ------------------------------------------------------------ the egg breaking */
 
 /* Cracks are drawn, not filled — a dark hairline that reads on every species palette. */
+/* The wet look on a fresh shell. White rather than a lightened body colour, because it is
+   meant to read as light landing on the egg rather than as one more speckle. */
+.egg-glint {
+  fill: #fff;
+  opacity: 0.34;
+}
+
 .egg-crack {
   fill: none;
   stroke: rgba(46, 32, 24, 0.58);
