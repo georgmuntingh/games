@@ -802,6 +802,12 @@ main {
   text-overflow: ellipsis;
 }
 
+/* A pet that keeps a sum wears the sum, where one that keeps a time wears a clock face. */
+.collar-sum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .pen-time {
   display: flex;
   align-items: center;
@@ -1362,6 +1368,90 @@ body.in-habitat .zoo-bar {
 
 .tier-row.locked {
   opacity: 0.5;
+}
+
+/* ------------------------------------------------------- what to practise */
+
+.grownups-sub {
+  font-size: 0.95rem;
+  margin: 1.1rem 0 0.2rem;
+}
+
+.practice-subject + .practice-subject {
+  margin-top: 0.9rem;
+}
+
+.practice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.practice-name {
+  font-weight: 700;
+}
+
+.practice-subject.is-off .tier-row {
+  opacity: 0.4;
+}
+
+/* A skipped rung stays visible with its real mastery on it: the point is to be able to see
+   what was skipped and why it looked skippable. */
+.tier-row.is-skipped .tier-head > span:first-child {
+  text-decoration: line-through;
+  color: var(--pz-ink-soft);
+}
+
+.tier-row .tier-head {
+  align-items: baseline;
+}
+
+.tier-note {
+  font-size: 0.78rem;
+  color: var(--pz-ink-soft);
+}
+
+.tier-skip {
+  border: 1px solid var(--pz-line);
+  border-radius: 999px;
+  background: var(--pz-card);
+  color: var(--pz-ink-soft);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.1rem 0.6rem;
+  min-height: 30px;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tier-skip:active {
+  background: var(--pz-accent-soft);
+}
+
+.tier-skip[disabled] {
+  opacity: 0.4;
+}
+
+.grownups-note {
+  font-size: 0.82rem;
+  color: var(--pz-warn);
+  margin: 0.4rem 0 0;
+}
+
+.grownups-note[hidden] {
+  display: none;
+}
+
+/* A pet nobody is being asked about. Deliberately not the nap's sleeping face — that means
+   "back in two minutes", and this means "not just now". */
+.pen.is-resting {
+  opacity: 0.45;
+}
+
+.pen.is-resting .pen-flag {
+  opacity: 1;
 }
 
 .fine-print {

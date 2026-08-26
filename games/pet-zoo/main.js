@@ -15,15 +15,28 @@ import {
 } from './clock.js';
 import { TIERS, tierItems } from './curriculum.js';
 import { DEFAULT_LANGUAGE, isLanguage, LANGUAGES, translator } from './i18n.js';
-import { CRACK_STAGES, createItem, nextItem, refreshTiers, review } from './srs.js';
+import {
+  applyPractice,
+  CRACK_STAGES,
+  createItem,
+  nextItem,
+  refreshTiers,
+  review,
+} from './srs.js';
 import * as addition from './subjects/addition.js';
 import {
   DEFAULT_SUBJECT,
+  enabledItemCount,
+  enabledSubjects,
+  floorOf,
+  isEnabled,
+  isResting,
+  practiceOf,
+  SUBJECT_IDS,
   SUBJECTS,
   subjectIdOf,
   subjectOf,
   tierMastery,
-  totalItemCount,
 } from './subjects/index.js';
 import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
 import { remember } from './ink/memory.js';
@@ -193,6 +206,7 @@ const el = {
   grownups: $('grownups-overlay'),
   grownupsStats: $('grownups-stats'),
   grownupsTiers: $('grownups-tiers'),
+  grownupsNote: $('grownups-note'),
   grownupsClose: $('grownups-close'),
   grownupsReset: $('grownups-reset'),
   fx: $('fx'),
@@ -1320,11 +1334,38 @@ setInterval(() => {
 
 function renderZooBadge() {
   const at = now();
+  const practice = practiceOf(state);
   const hungry = Object.values(state.items).filter(
-    (item) => item.hatchedAt !== null && item.phase === 'graduated' && item.dueAt <= at
+    (item) =>
+      item.hatchedAt !== null &&
+      item.phase === 'graduated' &&
+      item.dueAt <= at &&
+      // A resting pet never asks to be fed. Nagging a child about questions the game has
+      // been told not to ask would be the worst of both.
+      !isResting(item, practice)
   ).length;
   el.zooBadge.hidden = hungry === 0;
   el.zooBadge.textContent = String(hungry);
+}
+
+// Where a pet sits in the zoo. Clock pets keep the chronological order they have always
+// had — an existing zoo must not rearrange itself — and the sums follow in teaching order
+// after them. Sorting sums by `h` and `m`, which they do not have, was comparing NaN and
+// leaving them in whatever order the save happened to list them.
+const SUM_ORDER = new Map(addition.ALL_ITEMS.map((fact, index) => [fact.id, index]));
+const zooRank = (item) =>
+  isSum(item)
+    ? 10000 + (SUM_ORDER.get(addition.idOf(item)) ?? 0)
+    : (item.h ?? 0) * 60 + (item.m ?? 0);
+
+/** What a pet wears to say which question it keeps: a clock face, or its sum. */
+function penCollar(item, digits) {
+  if (isSum(item)) {
+    // Not hidden behind the digital setting, unlike the clock's: the sum is the question,
+    // and seeing it gives the answer away no more than the pet's name does.
+    return `<span class="collar-sum">${item.a} + ${item.b}</span>`;
+  }
+  return `${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}`;
 }
 
 function renderZoo() {
@@ -1332,10 +1373,11 @@ function renderZoo() {
   renderYard();
   const at = now();
   const digits = digitalOn();
+  const practice = practiceOf(state);
   const napping = session.isNapping(state.session, at);
   const items = Object.entries(state.items).sort(([, a], [, b]) => {
     if ((a.hatchedAt === null) !== (b.hatchedAt === null)) return a.hatchedAt === null ? 1 : -1;
-    return a.h - b.h || a.m - b.m;
+    return zooRank(a) - zooRank(b);
   });
 
   el.zooEmpty.hidden = items.length > 0;
@@ -1348,20 +1390,25 @@ function renderZoo() {
         : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
       // Eggs no longer carry progress dots — the broken shell is the progress, and `eggTitle`
       // is what says so to anyone not looking at it.
-      const flag = !isEgg && mood === 'hungry' ? '🍎' : '';
+      const resting = isResting(item, practice);
+      // A moon rather than the nap's sleeping face: the nap means "back in two minutes" and
+      // this means "not just now", and a child should be able to tell them apart.
+      const flag = resting ? '🌙' : !isEgg && mood === 'hungry' ? '🍎' : '';
+      const name = petName(item, t.lang);
       const label = escape(
         isEgg
           ? t('zoo.egg', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
-          : petName(item, t.lang)
+          : name
       );
       const rank = !isEgg && formFor(item.feeds ?? 0) >= 2 ? escape(formLabel(item)) : '';
       return `
-        <button class="pen${isEgg ? ' is-egg' : ''}" type="button" data-id="${id}">
+        <button class="pen${isEgg ? ' is-egg' : ''}${resting ? ' is-resting' : ''}" type="button"
+          data-id="${id}"${resting ? ` title="${escape(t('zoo.resting', { name }))}"` : ''}>
           <span class="pen-flag">${flag}</span>
           ${art}
           <span class="pen-name">${label}</span>
           ${rank ? `<span class="pen-rank">${rank}</span>` : ''}
-          <span class="pen-time">${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}</span>
+          <span class="pen-time">${penCollar(item, digits)}</span>
         </button>`;
     })
     .join('');
@@ -1913,36 +1960,123 @@ function renderGrownups() {
   const accuracy = state.stats.totalAnswered
     ? Math.round((state.stats.totalCorrect / state.stats.totalAnswered) * 100)
     : 0;
-  const hatched = Object.values(state.items).filter((i) => i.hatchedAt !== null).length;
+  const practice = practiceOf(state);
+  const hatched = Object.values(state.items).filter(
+    (item) => item.hatchedAt !== null && !isResting(item, practice)
+  ).length;
   const rows = [
     [t('grownups.answered'), state.stats.totalAnswered],
     [t('grownups.accuracy'), `${accuracy}%`],
     [t('grownups.streak'), state.stats.bestStreak],
-    [t('grownups.hatched'), `${hatched} / ${totalItemCount()}`],
+    // Counted over what is switched on. A target that includes material the game has been
+    // told not to ask about is a target the child cannot reach.
+    [t('grownups.hatched'), `${hatched} / ${enabledItemCount(practice)}`],
     [t('grownups.days'), state.stats.daysPlayed.length],
   ];
   el.grownupsStats.innerHTML = rows
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
     .join('');
 
-  const ladder = (subjectId, tiers, keyOf) =>
-    tiers
+  /**
+   * One block per subject: a switch, then its rungs.
+   *
+   * The floor moves one rung at a time, and only the two rungs either side of it carry a
+   * button — "skip this" on the lowest one still being practised, "practise this" on the
+   * highest one skipped. Offering `skip` on every rung would let a tap on tier 4 silently
+   * skip tiers 0 to 3 as well, which is not what anybody pressing it would expect.
+   */
+  const block = (subjectId, tiers, keyOf) => {
+    const on = isEnabled(practice, subjectId);
+    const floor = floorOf(practice, subjectId);
+    const last = tiers[tiers.length - 1].id;
+    const bars = tiers
       .map((tier) => {
         const pct = Math.round(tierMastery(state.items, subjectId, tier.id) * 100);
         const locked = tier.id > (state.tiers[subjectId] ?? 0);
+        const skipped = tier.id < floor;
+        const button =
+          on && tier.id === floor && tier.id < last
+            ? `<button type="button" class="tier-skip" data-skip="${subjectId}" data-tier="${tier.id}">${escape(t('grownups.skip'))}</button>`
+            : on && tier.id === floor - 1
+              ? `<button type="button" class="tier-skip" data-unskip="${subjectId}" data-tier="${tier.id}">${escape(t('grownups.practiseThis'))}</button>`
+              : '';
+        const right = skipped
+          ? `<span class="tier-note">${escape(t('grownups.skipped'))}</span>`
+          : `<span class="tier-note">${pct}%</span>`;
         return `
-      <div class="tier-row${locked ? ' locked' : ''}">
-        <div class="tier-head"><span>${escape(t(keyOf(tier)))}${locked ? ' 🔒' : ''}</span><span>${pct}%</span></div>
-        <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+      <div class="tier-row${locked ? ' locked' : ''}${skipped ? ' is-skipped' : ''}">
+        <div class="tier-head">
+          <span>${escape(t(keyOf(tier)))}${locked ? ' 🔒' : ''}</span>
+          ${right}${button}
+        </div>
+        <div class="track"><div class="fill" style="width:${skipped ? 0 : pct}%"></div></div>
       </div>`;
       })
       .join('');
+    return `
+      <div class="practice-subject${on ? '' : ' is-off'}">
+        <div class="practice-head">
+          <span class="practice-name">${escape(t(`subject.${subjectId}`))}</span>
+          <input type="checkbox" class="setting-switch" data-subject="${subjectId}"
+            aria-label="${escape(t(`subject.${subjectId}`))}" ${on ? 'checked' : ''} />
+        </div>
+        ${bars}
+      </div>`;
+  };
 
   el.grownupsTiers.innerHTML =
-    ladder('clock', TIERS, (tier) => `tier.${tier.id}.name`) +
-    ladder(addition.id, addition.TIERS, (tier) => `tier.add.${tier.id}.name`);
+    block('clock', TIERS, (tier) => `tier.${tier.id}.name`) +
+    block(addition.id, addition.TIERS, (tier) => `tier.add.${tier.id}.name`);
   el.grownups.hidden = false;
 }
+
+/**
+ * Record a change of mind about what gets practised. `applyPractice` does the work: it puts
+ * to sleep whatever just went away and wakes whatever came back, resuming each schedule
+ * where it stopped rather than letting a month of due dates pile up behind it.
+ */
+function setPractice(next) {
+  state = applyPractice(state, next, now());
+  // A skipped rung counts as passed, so the ladder has to be recomputed or the subject
+  // would sit forever waiting for mastery of something nobody is being asked.
+  const { tiers } = refreshTiers(state);
+  state.tiers = tiers;
+  save();
+  renderGrownups();
+  renderZooBadge();
+  // The question on screen may be one we have just stopped practising.
+  if (scene === 'play' && !locked) askNext();
+}
+
+el.grownupsTiers.addEventListener('click', (event) => {
+  const practice = practiceOf(state);
+  const toggle = event.target.closest('input[data-subject]');
+  if (toggle) {
+    const subjectId = toggle.dataset.subject;
+    const turningOff = !toggle.checked;
+    // Something has to be left to ask about.
+    if (turningOff && enabledSubjects(practice).length <= 1) {
+      toggle.checked = true;
+      el.grownupsNote.textContent = t('grownups.lastSubject');
+      el.grownupsNote.hidden = false;
+      return;
+    }
+    el.grownupsNote.hidden = true;
+    setPractice({ ...practice, [subjectId]: { ...practice[subjectId], on: !turningOff } });
+    return;
+  }
+
+  const button = event.target.closest('button[data-skip], button[data-unskip]');
+  if (!button) return;
+  el.grownupsNote.hidden = true;
+  const skipping = button.dataset.skip !== undefined;
+  const subjectId = skipping ? button.dataset.skip : button.dataset.unskip;
+  const tier = Number(button.dataset.tier);
+  setPractice({
+    ...practice,
+    [subjectId]: { ...practice[subjectId], floor: skipping ? tier + 1 : tier },
+  });
+});
 
 // Tucked behind a long press so a child hunting for buttons never lands in it by accident.
 let holdTimer = null;

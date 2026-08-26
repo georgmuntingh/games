@@ -205,6 +205,16 @@ const STRINGS = {
       'After a few minutes the pets get sleepy and the game stops. You can still wander the zoo while they nap.',
     'howto.6': 'Grown-ups: press and hold the title for progress.',
 
+    'grownups.practise': 'What to practise',
+    'grownups.practiseHelp':
+      'Switch off anything they do not need just now, or skip the rungs they have already got. Pets from anything switched off go and rest — they keep everything they have earned, they stop getting hungry, and they carry on exactly where they left off if you switch it back on.',
+    'grownups.skip': 'Skip this',
+    'grownups.practiseThis': 'Practise this',
+    'grownups.skipped': 'skipped',
+    'grownups.lastSubject': 'There has to be something left to practise.',
+    'subject.clock': 'The clock',
+    'subject.add': 'Adding up',
+    'zoo.resting': '{name} is resting',
     'grownups.title': 'Progress',
     'grownups.answered': 'Times answered',
     'grownups.accuracy': 'Correct first try',
@@ -438,6 +448,16 @@ const STRINGS = {
       'Etter noen minutter blir dyrene trøtte, og spillet stopper. Du kan fortsatt gå rundt i dyrehagen mens de sover.',
     'howto.6': 'Voksne: hold inne tittelen for å se framgang.',
 
+    'grownups.practise': 'Hva som øves på',
+    'grownups.practiseHelp':
+      'Skru av det de ikke trenger akkurat nå, eller hopp over trinnene de allerede kan. Dyr fra noe som er skrudd av går og hviler — de beholder alt de har tjent opp, de blir ikke sultne, og de fortsetter nøyaktig der de slapp hvis du skrur det på igjen.',
+    'grownups.skip': 'Hopp over',
+    'grownups.practiseThis': 'Øv på denne',
+    'grownups.skipped': 'hoppet over',
+    'grownups.lastSubject': 'Det må være noe igjen å øve på.',
+    'subject.clock': 'Klokka',
+    'subject.add': 'Pluss',
+    'zoo.resting': '{name} hviler',
     'grownups.title': 'Framgang',
     'grownups.answered': 'Klokkeslett svart på',
     'grownups.accuracy': 'Riktig på første forsøk',

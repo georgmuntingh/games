@@ -11,7 +11,7 @@ import { sanitizeDecor, sanitizeZoo } from './shop.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
 import { sanitize as sanitizeInk } from './ink/memory.js';
-import { SUBJECT_IDS, subjectIdOf, tiersOf } from './subjects/index.js';
+import { DEFAULT_PRACTICE, practiceOf, SUBJECT_IDS, subjectIdOf, tiersOf } from './subjects/index.js';
 
 export const STORAGE_KEY = 'pet-zoo/v1';
 // 2 added `subject` to every item and turned the single `tier` into one per subject. Bumping
@@ -28,6 +28,10 @@ export function freshState(now) {
     // One unlocked tier per subject: mastering the clock must not hand out addition facts
     // the child has never been shown, nor the other way round.
     tiers: Object.fromEntries(SUBJECT_IDS.map((id) => [id, 0])),
+    // What a grown-up has chosen to work on: every subject, from the bottom, until they say
+    // otherwise. See subjects/index.js — a switched-off subject or a tier below the floor is
+    // simply never asked, and its pets sleep rather than starve.
+    practice: structuredClone(DEFAULT_PRACTICE),
     coins: 0,
     // What the stall has sold for the yard, and which of the long-game milestones have
     // already been paid for. Both are lists of ids and nothing else: where a fountain stands
@@ -109,6 +113,10 @@ export function load(now, storage = safeStorage()) {
       // Clamped and restricted to the subjects this build teaches, the same as the decor: a
       // hand-edited save must not be able to unlock material by editing one number.
       tiers: tiersOf(save),
+      // Clamped the same way, and for the same reason: a hand-edited floor must not be able
+      // to reach past the ladder, and a save that predates any of this simply has everything
+      // switched on.
+      practice: practiceOf(save),
       // Filtered rather than trusted, the same as a pet's decor: a hand-edited save must not
       // be able to put a piece this build cannot draw into the yard.
       zooDecor: sanitizeZoo(save.zooDecor),

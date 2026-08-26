@@ -39,6 +39,8 @@ import {
   MAX_INTERVAL_DAYS,
   MAX_LEARNING,
   nextInterval,
+  applyPractice,
+  hungryCount,
   nextItem,
   qualityOf,
   refreshTier,
@@ -99,6 +101,14 @@ import {
   tiersOf,
   totalItemCount,
   unseenItems as unseenAcrossSubjects,
+  DEFAULT_PRACTICE,
+  enabledItemCount,
+  enabledSubjects,
+  floorOf,
+  isResting,
+  practiceOf,
+  unlockedTier as unlockedTierOf,
+  tierMastery as tierMasteryOf,
 } from '../subjects/index.js';
 import {
   applyImport,
@@ -3749,6 +3759,179 @@ test('one child’s handwriting does not travel to another child’s device', ()
   assert(!('ink' in payload), 'the handwriting memory travelled');
   const landed = applyImport(receivingState(), parseTransfer(payloadToJson(payload)), 5000);
   assertEqual(landed.ink.length, 0, 'and it must not arrive on the far side either');
+});
+
+
+/* --------------------------------------------------------- what to practise */
+
+describe('practice — choosing what the game asks about');
+
+const practiceWith = (clock, add) => practiceOf({ practice: { clock, add } });
+
+test('a save that predates any of this practises everything', () => {
+  const chosen = practiceOf({});
+  assertEqual(chosen.clock.on, true);
+  assertEqual(chosen.add.on, true);
+  assertEqual(chosen.clock.floor, 0);
+  assertEqual(practiceOf(undefined).add.floor, 0, 'and no state at all does not throw');
+});
+
+test('a hand-edited floor cannot reach past the ladder', () => {
+  assertEqual(practiceWith({ floor: 99 }, {}).clock.floor, LAST_TIER);
+  assertEqual(practiceWith({ floor: -4 }, {}).clock.floor, 0);
+  assertEqual(practiceWith({ floor: 'lots' }, {}).clock.floor, 0);
+  assertEqual(practiceWith({ floor: 2.7 }, {}).clock.floor, 2, 'fractional is truncated');
+});
+
+test('there is always something left to practise', () => {
+  // Switching off the last subject would leave the game with no question to ask at all.
+  const nothing = practiceWith({ on: false }, { on: false });
+  assertEqual(enabledSubjects(nothing).length, 1, 'the game was left with nothing to ask');
+  assertEqual(nothing.clock.on, true);
+});
+
+test('resting is decided by the choices, not stored on the pet', () => {
+  const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
+  assert(isResting({ subject: 'clock', tier: 3 }, chosen), 'a switched-off subject rests');
+  assert(isResting({ subject: 'add', tier: 1 }, chosen), 'and so does a tier below the floor');
+  assert(!isResting({ subject: 'add', tier: 2 }, chosen), 'the floor itself is practised');
+  assert(!isResting({ subject: 'add', tier: 4 }, chosen), 'and everything above it');
+});
+
+test('an item from a subject this build does not know is left alone', () => {
+  assert(!isResting({ subject: 'chemistry', tier: 0 }, DEFAULT_PRACTICE));
+});
+
+test('the zoo counts towards what is switched on', () => {
+  assertEqual(enabledItemCount(DEFAULT_PRACTICE), totalItemCount());
+  const chosen = practiceWith({ on: false }, { on: true, floor: 2 });
+  // A target that includes what the game has been told not to ask is a target nobody can reach.
+  assertEqual(enabledItemCount(chosen), 30, 'only the addition tiers from 2 up');
+});
+
+test('nothing skipped is ever introduced', () => {
+  const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
+  const fresh = unseenAcrossSubjects({}, { clock: 3, add: 4 }, chosen);
+  assert(fresh.length > 0);
+  assert(fresh.every((entry) => entry.subject === 'add'), 'a switched-off subject was taught');
+  assert(fresh.every((entry) => entry.tier >= 2), 'a skipped tier was taught');
+});
+
+describe('practice — the ladder walks past a skipped rung');
+
+test('the unlocked tier starts at the floor', () => {
+  // A tier nobody is asked about can never reach the 80% bar, so a ladder starting at zero
+  // would stall the whole subject forever.
+  assertEqual(unlockedTierOf({}, 'add', 2), 2, 'an empty zoo still opens the floor');
+  assertEqual(unlockedTierOf({}, 'add', 0), 0);
+});
+
+test('but mastery keeps telling the truth, so nobody is paid for skipping', () => {
+  // wallet.js awards mastery:<tier> on tierMastery >= 1. If a skipped tier reported itself
+  // mastered, a child would be handed forty coins for work they never did.
+  assertEqual(tierMasteryOf({}, 'add', 0), 0, 'a skipped tier claimed to be mastered');
+  const reached = milestonesReached({}, { daysPlayed: [] });
+  assert(!reached.includes('mastery:add:0'), 'a skipped tier was paid for');
+  assert(!reached.includes('mastery:0'));
+});
+
+describe('practice — pets that are resting');
+
+const restingState = (extra = {}) => ({
+  reviewClock: 0,
+  tiers: { clock: 3, add: 4 },
+  practice: practiceWith({ on: false, floor: 0 }, { on: true, floor: 0 }),
+  items: {},
+  ...extra,
+});
+
+test('a resting pet is never chosen, whichever queue it would have been in', () => {
+  const clockItem = (over) => ({ subject: 'clock', tier: 0, seen: 0, dueStep: null, dueAt: 0, ...over });
+  for (const [what, item] of [
+    ['due for learning', clockItem({ phase: 'learning', dueStep: 1 })],
+    ['hungry', clockItem({ phase: 'graduated', dueAt: 0 })],
+    ['merely graduated', clockItem({ phase: 'graduated', dueAt: 9e15 })],
+  ]) {
+    const picked = nextItem(restingState({ items: { '1:00': item } }), { now: 1000 });
+    assertEqual(subjectIdOf(picked), 'add', `a resting pet was asked about while ${what}`);
+  }
+});
+
+test('a resting pet never asks to be fed', () => {
+  const items = { '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: 0 } };
+  assertEqual(hungryCount(items, 1000), 1, 'it is hungry when it is being practised');
+  assertEqual(hungryCount(items, 1000, restingState().practice), 0, 'and not when it is resting');
+});
+
+test('the last-resort fallback does not smuggle back what was switched off', () => {
+  // Everything excluded and nothing left: the one moment nobody is watching for it.
+  const state = restingState({ items: { '1:00': { subject: 'clock', tier: 0, phase: 'learning', dueStep: 99, dueAt: 0, seen: 0 } } });
+  assertEqual(subjectIdOf(nextItem(state, { now: 1000, exclude: '1:00' })), 'add');
+});
+
+describe('practice — the schedule is frozen, not left running');
+
+test('a pet due in two days is still due in two days after a month asleep', () => {
+  // This is the whole point. Letting the clock run while a subject is off means coming back
+  // to forty starving pets, which is a punishment for a grown-up changing a setting.
+  const start = 1_000_000_000;
+  const before = {
+    reviewClock: 10,
+    practice: DEFAULT_PRACTICE,
+    items: {
+      '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: start + 2 * DAY_MS, dueStep: null },
+      '2:00': { subject: 'clock', tier: 0, phase: 'learning', dueAt: 0, dueStep: 12 },
+    },
+  };
+  const off = practiceWith({ on: false }, { on: true });
+  const asleep = applyPractice(before, off, start);
+  assertEqual(asleep.items['1:00'].restedAt, start, 'it was not stamped');
+  assertEqual(asleep.items['2:00'].restedStep, 10);
+
+  // A month passes, and forty questions of the other subject are answered.
+  const later = start + 30 * DAY_MS;
+  const awake = applyPractice({ ...asleep, reviewClock: 50 }, DEFAULT_PRACTICE, later);
+  assertEqual(awake.items['1:00'].dueAt - later, 2 * DAY_MS, 'the days ran on while it slept');
+  // The review clock counts questions, not days, and it keeps advancing while the *other*
+  // subject is played — so freezing only the timestamps is not enough.
+  assertEqual(awake.items['2:00'].dueStep - 50, 2, 'the questions ran on while it slept');
+});
+
+test('waking clears the stamps, so a second sleep starts fresh', () => {
+  const off = practiceWith({ on: false }, { on: true });
+  const state = { reviewClock: 0, items: { '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: 500, dueStep: null } } };
+  const awake = applyPractice(applyPractice(state, off, 100), DEFAULT_PRACTICE, 900);
+  assert(!('restedAt' in awake.items['1:00']), 'the stamp was left behind');
+  assert(!('restedStep' in awake.items['1:00']), 'and so was the step');
+  assertEqual(awake.items['1:00'].dueAt, 500 + 800, 'it should have slept for eight hundred');
+});
+
+test('a pet that was already resting is not re-stamped', () => {
+  const off = practiceWith({ on: false }, { on: true });
+  const state = { reviewClock: 0, items: { '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: 500 } } };
+  const once = applyPractice(state, off, 100);
+  const twice = applyPractice({ ...once, reviewClock: 40 }, off, 5000);
+  assertEqual(twice.items['1:00'].restedAt, 100, 'the sleep restarted, losing a month of freeze');
+});
+
+test('raising the floor puts the pets below it to sleep too', () => {
+  // Consistent with switching a subject off: anything no longer asked stops going hungry.
+  const state = {
+    reviewClock: 0,
+    items: { 'add:0+0': { subject: 'add', tier: 0, phase: 'graduated', dueAt: 0, hatchedAt: 1 } },
+  };
+  const raised = applyPractice(state, practiceWith({}, { floor: 2 }), 1000);
+  assertEqual(raised.items['add:0+0'].restedAt, 1000);
+  assertEqual(hungryCount(raised.items, 2000, raised.practice), 0, 'a skipped pet still nagged');
+});
+
+test('the choices survive a reload, clamped', () => {
+  const storage = fakeStorage();
+  write({ ...freshState(0), practice: { clock: { on: false, floor: 9 }, add: { on: true, floor: 1 } } }, storage);
+  const back = load(0, storage);
+  assertEqual(back.practice.clock.on, false);
+  assertEqual(back.practice.clock.floor, LAST_TIER, 'a floor past the ladder was kept');
+  assertEqual(back.practice.add.floor, 1);
 });
 
 const out = document.getElementById('out');

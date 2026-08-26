@@ -41,6 +41,68 @@ export const subjectIdOf = (itemId) => subjectOf(itemId)?.id ?? null;
 export const totalItemCount = () =>
   SUBJECT_IDS.reduce((sum, id) => sum + SUBJECTS[id].ALL_ITEMS.length, 0);
 
+/* --------------------------------------------------------------- what to practise */
+
+// What a grown-up has chosen to work on. A subject can be switched off entirely, and each
+// one has a floor: the tier to start from, so a child who can already read o'clock is not
+// drilled on it. Being asked what you already know is not neutral — it is the quickest way
+// to decide a game is boring.
+export const DEFAULT_PRACTICE = Object.fromEntries(
+  SUBJECT_IDS.map((id) => [id, { on: true, floor: 0 }])
+);
+
+/**
+ * The choices a state is standing on. Tolerant in the same way `tiersOf` is: a save written
+ * before any of this existed simply has everything on, a floor beyond the ladder is clamped
+ * to it, and a subject this build does not teach is ignored.
+ *
+ * Never returns "nothing at all". Switching off the last subject would leave the game with
+ * no question to ask, so the default subject is switched back on rather than allowed.
+ */
+export function practiceOf(state) {
+  const raw = state?.practice && typeof state.practice === 'object' ? state.practice : null;
+  const out = {};
+  for (const id of SUBJECT_IDS) {
+    const entry = raw?.[id];
+    const floor = Number.isFinite(entry?.floor) ? Math.floor(entry.floor) : 0;
+    out[id] = {
+      on: entry?.on === undefined ? true : Boolean(entry.on),
+      floor: Math.max(0, Math.min(floor, SUBJECTS[id].LAST_TIER)),
+    };
+  }
+  if (!SUBJECT_IDS.some((id) => out[id].on)) out[DEFAULT_SUBJECT].on = true;
+  return out;
+}
+
+export const isEnabled = (practice, subjectId) => Boolean(practice?.[subjectId]?.on);
+
+export const floorOf = (practice, subjectId) => practice?.[subjectId]?.floor ?? 0;
+
+/** Whether more than one subject is switched on — what the last toggle checks before it lets go. */
+export const enabledSubjects = (practice) => SUBJECT_IDS.filter((id) => isEnabled(practice, id));
+
+/**
+ * True for an item the game is no longer asking about — its subject is switched off, or its
+ * tier sits below the floor. Derived from the choices rather than stored on the item, so the
+ * two can never drift apart; the fields an item *does* carry (`restedAt`, `restedStep`) are
+ * only there to freeze its schedule while it sleeps.
+ */
+export function isResting(item, practice) {
+  const entry = practice?.[item?.subject ?? DEFAULT_SUBJECT];
+  // An item from a subject this build has never heard of is left alone rather than hidden.
+  if (!entry) return false;
+  if (!entry.on) return true;
+  return (item?.tier ?? 0) < entry.floor;
+}
+
+/** How many items the child is actually working towards — the zoo's denominator. */
+export const enabledItemCount = (practice) =>
+  SUBJECT_IDS.reduce((sum, id) => {
+    if (!isEnabled(practice, id)) return sum;
+    const floor = floorOf(practice, id);
+    return sum + SUBJECTS[id].ALL_ITEMS.filter((entry) => entry.tier >= floor).length;
+  }, 0);
+
 /**
  * The tiers a state is standing on, tolerating both shapes. Saves written before there was
  * more than one subject carry a single `tier`, and so do the hand-built states in tests;
@@ -70,11 +132,22 @@ export function tierMastery(items, subjectId, tierId) {
   return done / list.length;
 }
 
-/** The highest tier of one subject the child may draw new material from. */
-export function unlockedTier(items, subjectId) {
+/**
+ * The highest tier of one subject the child may draw new material from.
+ *
+ * The ladder starts at the floor rather than at zero, which is how a skipped tier is walked
+ * past: a tier nobody is being asked can never reach the 80% bar, so starting below the
+ * floor would stall the whole subject forever.
+ *
+ * Note what this does *not* do. `tierMastery` is left alone and keeps reporting the real
+ * graduated fraction, because `wallet.js` awards the `mastery:<tier>` milestone on it — if a
+ * skipped tier reported itself mastered, a child would be paid forty coins for work they
+ * never did.
+ */
+export function unlockedTier(items, subjectId, floor = 0) {
   const subject = SUBJECTS[subjectId];
   if (!subject) return 0;
-  let tier = 0;
+  let tier = Math.max(0, Math.min(floor, subject.LAST_TIER));
   while (tier < subject.LAST_TIER && tierMastery(items, subjectId, tier) >= UNLOCK_RATIO) {
     tier += 1;
   }
@@ -88,14 +161,19 @@ export function unlockedTier(items, subjectId) {
  * face in the game before ever showing an addition fact. Zipping them means the two subjects
  * are introduced in step, and a subject that runs out simply stops appearing.
  */
-export function unseenItems(items, tiers) {
+export function unseenItems(items, tiers, practice = DEFAULT_PRACTICE) {
   const zoo = items ?? {};
   const level = typeof tiers === 'object' && tiers !== null ? tiers : { [DEFAULT_SUBJECT]: tiers };
+  const chosen = practice ?? DEFAULT_PRACTICE;
   const queues = SUBJECT_IDS.map((id) => {
     const subject = SUBJECTS[id];
+    if (!isEnabled(chosen, id)) return [];
     const top = Math.min(Number.isFinite(level[id]) ? level[id] : 0, subject.LAST_TIER);
     const out = [];
-    for (let tier = 0; tier <= top; tier += 1) {
+    // Starting at the floor is what stops skipped material ever being introduced — the
+    // pets below it are never hatched in the first place, so there is nothing to put to
+    // sleep later.
+    for (let tier = floorOf(chosen, id); tier <= top; tier += 1) {
       for (const entry of subject.tierItems(tier)) {
         if (!zoo[entry.id]) out.push({ ...entry, subject: id });
       }
@@ -129,10 +207,11 @@ export function interleave(queues) {
  */
 export function refreshTiers(state) {
   const current = tiersOf(state);
+  const chosen = practiceOf(state);
   const tiers = {};
   const unlocked = [];
   for (const id of SUBJECT_IDS) {
-    const next = Math.max(current[id], unlockedTier(state?.items ?? {}, id));
+    const next = Math.max(current[id], unlockedTier(state?.items ?? {}, id, floorOf(chosen, id)));
     tiers[id] = next;
     if (next > current[id]) unlocked.push(id);
   }
