@@ -8,6 +8,8 @@
 
 import { pointOnFace, timeId } from './clock.js';
 import { ALL_ITEMS, TIERS } from './curriculum.js';
+import * as addition from './subjects/addition.js';
+import { SUBJECTS } from './subjects/index.js';
 import { DEFAULT_LANGUAGE, NAMES } from './i18n.js';
 import {
   ACCESSORIES,
@@ -89,23 +91,43 @@ export function speciesFor(h, m) {
 }
 
 /**
+ * The same idea for a sum. Adding has five tiers to the clock's four, so the pools are
+ * cycled rather than indexed — every tier still opens a distinct corner of the zoo, and a
+ * child working through both subjects meets the same sixteen creatures either way.
+ */
+export function speciesForFact(a, b) {
+  const pool = TIER_SPECIES[addition.tierOf({ a, b }) % TIER_SPECIES.length];
+  return pool[hash(addition.idOf({ a, b })) % pool.length];
+}
+
+/** The id an item is filed under, rebuilt from the item itself. */
+export const keyOf = (item) =>
+  (SUBJECTS[item?.subject ?? 'clock'] ?? SUBJECTS.clock).idOf(item);
+
+/** Which creature an item hatches, whichever subject it belongs to. */
+export const speciesOf = (item) =>
+  item?.subject === addition.id ? speciesForFact(item.a, item.b) : speciesFor(item.h, item.m);
+
+/**
  * The name a pet is born with. Deterministic per time *and* per language: switching the
  * app's language renames the whole zoo into the child's own words, which is the point —
  * the association being built is "Vaffel eats at quarter past four", one sentence in one
  * language. A pet the child has renamed themselves keeps that name in both.
  */
-export const defaultName = (h, m, lang = DEFAULT_LANGUAGE) => {
+export const nameFrom = ({ species, index }, lang = DEFAULT_LANGUAGE) => {
   const pool = NAMES[lang] ?? NAMES[DEFAULT_LANGUAGE];
-  const species = speciesFor(h, m);
   // Walking the pool from a per-species starting point means no two pets of the same
   // species can share a name — the case where a repeat is actually confusing, since they
   // are the ones sitting next to each other looking alike.
   const offset = hash(`n${species}`) % pool.length;
-  return pool[(offset + traitIndexFor(h, m)) % pool.length];
+  return pool[(offset + index) % pool.length];
 };
 
+export const defaultName = (h, m, lang = DEFAULT_LANGUAGE) =>
+  nameFrom({ species: speciesFor(h, m), index: traitIndexFor(h, m) }, lang);
+
 export const petName = (item, lang = DEFAULT_LANGUAGE) =>
-  item.name || defaultName(item.h, item.m, lang);
+  item.name || nameFrom(portraitOf(item), lang);
 
 /* ------------------------------------------------------------ appearance */
 
@@ -180,17 +202,64 @@ export const isCrowned = (speciesId) => TOPPER_CROWN.has(SPECIES[speciesId]?.top
 export const validLoudFor = (speciesId) =>
   LOUD_LISTS[isCrowned(speciesId) ? 'crowned' : 'free'];
 
-// Every time that maps to a species, in a fixed order. A pet's position in this list is
-// its trait index: unique within the species by construction, and stable between sessions
+// Everything that maps to a species, in a fixed order. A pet's position in this list is its
+// trait index: unique within the species by construction, and stable between sessions
 // because it comes from the curriculum rather than from the order pets were hatched.
-const SPECIES_TIMES = new Map();
+//
+// The clock's times are added first and in exactly the order they always were, so every
+// index a saved zoo already depends on stays where it is — a pet that changed colour and
+// name because the game learned to add would be a bug with feelings attached. The sums then
+// take the indices after them.
+const SPECIES_ITEMS = new Map();
+const fileUnder = (speciesId, itemId) => {
+  if (!SPECIES_ITEMS.has(speciesId)) SPECIES_ITEMS.set(speciesId, []);
+  SPECIES_ITEMS.get(speciesId).push(itemId);
+};
+
+const CLOCK_TIMES = new Map();
 for (const item of [...ALL_ITEMS].sort((a, b) => a.h - b.h || a.m - b.m)) {
   const id = speciesFor(item.h, item.m);
-  if (!SPECIES_TIMES.has(id)) SPECIES_TIMES.set(id, []);
-  SPECIES_TIMES.get(id).push(item.id);
+  if (!CLOCK_TIMES.has(id)) CLOCK_TIMES.set(id, []);
+  CLOCK_TIMES.get(id).push(item.id);
+  fileUnder(id, item.id);
 }
 
-export const timesOfSpecies = (speciesId) => SPECIES_TIMES.get(speciesId) ?? [];
+const SPECIES_FACTS = new Map();
+for (const fact of addition.ALL_ITEMS) {
+  const id = speciesForFact(fact.a, fact.b);
+  if (!SPECIES_FACTS.has(id)) SPECIES_FACTS.set(id, []);
+  SPECIES_FACTS.get(id).push(fact.id);
+  fileUnder(id, fact.id);
+}
+
+/**
+ * The times of one species — deliberately still *only* times. The `species:<id>` milestone
+ * is built on this and has already been paid out in saves in the wild; widening it to mean
+ * "times and sums" would quietly un-earn a milestone a child has already been given.
+ */
+export const timesOfSpecies = (speciesId) => CLOCK_TIMES.get(speciesId) ?? [];
+
+/** And the sums of one species, which the addition milestone is built on instead. */
+export const factsOfSpecies = (speciesId) => SPECIES_FACTS.get(speciesId) ?? [];
+
+/** Every item of a species across both subjects, in the order trait indices are handed out. */
+export const itemsOfSpecies = (speciesId) => SPECIES_ITEMS.get(speciesId) ?? [];
+
+/** A pet's position among the others of its species, by the id it is filed under. */
+export const traitIndexOfKey = (speciesId, itemId) =>
+  Math.max(0, itemsOfSpecies(speciesId).indexOf(itemId));
+
+/**
+ * Everything the drawing layer needs about an item, whatever subject it came from: the id it
+ * is filed under, its species, and its position among its own kind. Appearance, name and
+ * habitat are all derived from these three and from nothing else, which is what lets a sum
+ * own a pet without any of them knowing what a sum is.
+ */
+export function portraitOf(item) {
+  const key = keyOf(item);
+  const species = speciesOf(item);
+  return { key, species, index: traitIndexOfKey(species, key) };
+}
 
 /**
  * A pet's position among the others of its own species — its trait index. Unique within
@@ -199,11 +268,11 @@ export const timesOfSpecies = (speciesId) => SPECIES_TIMES.get(speciesId) ?? [];
  * all vary along it, so they vary together.
  */
 export const traitIndexFor = (h, m) =>
-  Math.max(0, timesOfSpecies(speciesFor(h, m)).indexOf(timeId(h, m)));
+  traitIndexOfKey(speciesFor(h, m), timeId(h, m));
 
 /** The look of a pet as its item currently stands, at whichever form it has earned. */
 export const appearanceOf = (item) =>
-  appearanceFor(item.h, item.m, formFor(item.feeds ?? 0) || 1);
+  appearanceFrom(portraitOf(item), formFor(item.feeds ?? 0) || 1);
 
 /**
  * The complete look of the pet that keeps a given time: its species, plus the individual
@@ -213,9 +282,7 @@ export const appearanceOf = (item) =>
  * through them — means consecutive times land far apart in the space, so 1:00 and 2:00
  * differ by a whole accessory rather than by a freckle.
  */
-export function appearanceFor(h, m, form = 1) {
-  const species = speciesFor(h, m);
-  const index = traitIndexFor(h, m);
+export function appearanceFrom({ species, index }, form = 1) {
   const list = validLoudFor(species);
   return {
     ...speciesAppearance(species, form),
@@ -223,6 +290,10 @@ export function appearanceFor(h, m, form = 1) {
     markings: MARKING_IDS[index % MARKING_IDS.length],
   };
 }
+
+/** The clock's way in, unchanged: the look of the pet that keeps a given time. */
+export const appearanceFor = (h, m, form = 1) =>
+  appearanceFrom({ species: speciesFor(h, m), index: traitIndexFor(h, m) }, form);
 
 /* ---------------------------------------------------------------- drawing */
 

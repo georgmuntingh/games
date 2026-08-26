@@ -11,8 +11,21 @@
 //   Phase 2, graduated — SM-2 with day intervals, for the long-term retention that
 //   actually makes the skill stick.
 
-import { timeId } from './clock.js';
-import { LAST_TIER, tierOfMinute, unlockedTier, unseenItems } from './curriculum.js';
+import { tierOfMinute } from './curriculum.js';
+import {
+  ALL_TIERS_MAX,
+  DEFAULT_PRACTICE,
+  DEFAULT_SUBJECT,
+  SUBJECT_IDS,
+  SUBJECTS,
+  floorOf,
+  isEnabled,
+  isResting,
+  practiceOf,
+  refreshTiers,
+  tiersOf,
+  unseenItems,
+} from './subjects/index.js';
 
 export const LEARNING_STEPS = [1, 3, 8]; // in questions answered, not minutes
 export const RELEARN_DELAY = 2; // a missed time returns as the question after next
@@ -57,11 +70,23 @@ export const DAY_MS = 86400000;
 
 const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
 
-export function createItem({ h, m, species, reviewClock = 0 }) {
+export function createItem({
+  subject = DEFAULT_SUBJECT,
+  tier,
+  species,
+  reviewClock = 0,
+  // Whatever identifies the item within its subject — {h, m} for a time, {a, b} for a sum.
+  // Spread onto the record rather than nested, so `item.h` still reads the way every call
+  // site and every saved zoo already expects.
+  id: _ignoredId,
+  ...payload
+}) {
   return {
-    h,
-    m,
-    tier: tierOfMinute(m) ?? 0,
+    subject,
+    ...payload,
+    // A subject supplies its own tier; the fallback is for saves and tests written when the
+    // clock was the only thing this game taught.
+    tier: tier ?? tierOfMinute(payload.m) ?? 0,
     species,
     name: null,
     phase: 'learning',
@@ -91,10 +116,11 @@ export function createItem({ h, m, species, reviewClock = 0 }) {
  * self-grade. Speed and hand-waggling (direction reversals during the drag) stand in for
  * confidence: a confident answer goes straight to the right spot and stops.
  */
-export function qualityOf({ correct, ms = 0, reversals = 0 }) {
+export function qualityOf({ correct, ms = 0, reversals = 0, pace = 1 }) {
   if (!correct) return 0;
-  if (ms > 20000 || reversals >= 2) return 3;
-  if (ms > 8000 || reversals >= 1) return 4;
+  const slow = Math.max(1, pace);
+  if (ms > 20000 * slow || reversals >= 2) return 3;
+  if (ms > 8000 * slow || reversals >= 1) return 4;
   return 5;
 }
 
@@ -111,8 +137,8 @@ export const nextInterval = (reps, intervalDays, ease) => {
  * Record one answer. Returns the replacement item plus the events the UI should
  * celebrate — hatching in particular is just graduation wearing a costume.
  */
-export function review(item, { correct, ms = 0, reversals = 0, reviewClock, now }) {
-  const quality = qualityOf({ correct, ms, reversals });
+export function review(item, { correct, ms = 0, reversals = 0, pace = 1, reviewClock, now }) {
+  const quality = qualityOf({ correct, ms, reversals, pace });
   const next = { ...item, seen: item.seen + 1, lastMs: ms };
   const events = {
     quality,
@@ -183,56 +209,138 @@ export const isHungry = (item, now) => item.phase === 'graduated' && item.dueAt 
 
 export const learningCount = (items) => Object.values(items).filter(isLearning).length;
 
-/** Pets asking to be fed right now — the zoo badge and the "anything to do?" check. */
-export const hungryCount = (items, now) =>
-  Object.values(items).filter((item) => isHungry(item, now)).length;
+/**
+ * Pets asking to be fed right now — the zoo badge and the "anything to do?" check. A pet
+ * whose subject or tier a grown-up has switched off is resting, and a resting pet is never
+ * hungry: nagging a child about questions the game will not ask is the worst of both.
+ */
+export const hungryCount = (items, now, practice = DEFAULT_PRACTICE) =>
+  Object.values(items).filter((item) => isHungry(item, now) && !isResting(item, practice)).length;
+
+/* ------------------------------------------------------------------- resting */
+
+/**
+ * Put to sleep whatever the grown-up has just switched off, and wake whatever they have
+ * switched back on. Pure: state in, new state out.
+ *
+ * Waking is the part that matters. A pet's schedule is frozen while it sleeps and resumes
+ * where it stopped, so a subject switched off for a month comes back with the same handful
+ * due that were due when it went away — not with forty starving pets, which is what a child
+ * would meet if the clock simply ran on without them.
+ *
+ * Two clocks have to be frozen, not one. Graduated pets are scheduled in days (`dueAt`), but
+ * a pet still being learned is scheduled in *questions answered* (`dueStep`) against a review
+ * clock that keeps advancing while the other subject is played. Freeze only the timestamps
+ * and a learning pet still comes back overdue having been asked nothing at all.
+ */
+export function applyPractice(state, practice, now) {
+  const items = {};
+  let changed = false;
+  for (const [id, item] of Object.entries(state.items ?? {})) {
+    const resting = isResting(item, practice);
+    const asleep = Number.isFinite(item.restedAt);
+
+    if (resting && !asleep) {
+      items[id] = { ...item, restedAt: now, restedStep: state.reviewClock ?? 0 };
+      changed = true;
+    } else if (!resting && asleep) {
+      const slept = Math.max(0, now - item.restedAt);
+      const steps = Math.max(0, (state.reviewClock ?? 0) - (item.restedStep ?? 0));
+      const woken = { ...item };
+      delete woken.restedAt;
+      delete woken.restedStep;
+      if (woken.dueAt > 0) woken.dueAt += slept;
+      if (Number.isFinite(woken.dueStep)) woken.dueStep += steps;
+      items[id] = woken;
+      changed = true;
+    } else {
+      items[id] = item;
+    }
+  }
+  return changed ? { ...state, practice, items } : { ...state, practice };
+}
 
 const byKey = (fn) => (a, b) => fn(a[1]) - fn(b[1]);
 
 /**
- * Choose the next time to ask about. First match wins:
- *   1. a learning time that is due — longest overdue first
- *   2. a hungry pet — longest hungry first
- *   3. a brand-new time, but only while fewer than MAX_LEARNING are in flight
- *   4. the pet closest to hungry, so a session never runs dry
- * The time just answered is never returned twice in a row unless it is the only one
- * there is.
+ * Within one priority band, prefer the subject the child was *not* just asked about. Bands
+ * only ever contain items that are already due, so this cannot postpone anything that is
+ * owed — it just stops a session turning into ten clock faces in a row once a second subject
+ * exists. With one subject registered it is inert.
  */
-export function nextItem(state, { now, exclude = null } = {}) {
+const alternating = (lastSubject) => {
+  const same = ([, item]) => ((item.subject ?? DEFAULT_SUBJECT) === lastSubject ? 1 : 0);
+  return (urgency) => (a, b) => same(a) - same(b) || urgency(a[1]) - urgency(b[1]);
+};
+
+/**
+ * Choose the next item to ask about, across every subject at once. First match wins:
+ *   1. a learning item that is due — longest overdue first
+ *   2. a hungry pet — longest hungry first
+ *   3. brand-new material, but only while fewer than MAX_LEARNING are in flight
+ *   4. the pet closest to hungry, so a session never runs dry
+ * The item just answered is never returned twice in a row unless it is the only one there is.
+ */
+export function nextItem(state, { now, exclude = null, lastSubject = null } = {}) {
   const step = state.reviewClock + 1;
-  const entries = Object.entries(state.items).filter(([id]) => id !== exclude);
+  const tiers = tiersOf(state);
+  const chosen = practiceOf(state);
+  // Resting items are out of every band, not just out of the new material: switching a
+  // subject off has to stop the pets it already hatched coming round too, or a child bored
+  // by clocks keeps meeting their clock pets.
+  const entries = Object.entries(state.items).filter(
+    ([id, item]) => id !== exclude && !isResting(item, chosen)
+  );
+  const order = alternating(lastSubject);
 
   const dueLearning = entries
     .filter(([, item]) => isLearning(item) && item.dueStep !== null && item.dueStep <= step)
-    .sort(byKey((item) => item.dueStep));
+    .sort(order((item) => item.dueStep));
   if (dueLearning.length) return dueLearning[0][0];
 
   const hungry = entries
     .filter(([, item]) => isHungry(item, now))
-    .sort(byKey((item) => item.dueAt));
+    .sort(order((item) => item.dueAt));
   if (hungry.length) return hungry[0][0];
 
-  if (learningCount(state.items) < MAX_LEARNING) {
-    const fresh = unseenItems(state.items, state.tier)[0];
+  // Counted over what is actually being practised: pets asleep in a switched-off subject
+  // must not use up the handful of slots the child is allowed to be learning at once.
+  const learning = entries.filter(([, item]) => isLearning(item)).length;
+  if (learning < MAX_LEARNING) {
+    const fresh = unseenItems(state.items, tiers, chosen)[0];
     if (fresh) return fresh.id;
   }
 
   const graduated = entries
     .filter(([, item]) => item.phase === 'graduated')
-    .sort(byKey((item) => item.dueAt));
+    .sort(order((item) => item.dueAt));
   if (graduated.length) return graduated[0][0];
 
-  const anyLearning = entries.filter(([, item]) => isLearning(item)).sort(byKey((item) => item.seen));
+  const anyLearning = entries.filter(([, item]) => isLearning(item)).sort(order((item) => item.seen));
   if (anyLearning.length) return anyLearning[0][0];
 
-  // Everything is excluded or nothing exists: fall back to the excluded item, then to
-  // the very first unseen time in the curriculum.
-  if (exclude && state.items[exclude]) return exclude;
-  return unseenItems(state.items, LAST_TIER)[0]?.id ?? timeId(1, 0);
+  // Everything is excluded or nothing exists: fall back to the excluded item — but only if
+  // it is still something we practise — and then to the first thing any switched-on subject
+  // teaches. Ignoring the choices here would quietly reintroduce exactly what was switched
+  // off, at the one moment nobody is watching for it.
+  const back = exclude ? state.items[exclude] : null;
+  if (back && !isResting(back, chosen)) return exclude;
+  const first = unseenItems(state.items, ALL_TIERS_MAX, chosen)[0];
+  if (first) return first.id;
+  const open = SUBJECT_IDS.find((id) => isEnabled(chosen, id)) ?? DEFAULT_SUBJECT;
+  const floor = floorOf(chosen, open);
+  return (SUBJECTS[open].tierItems(floor)[0] ?? SUBJECTS[open].ALL_ITEMS[0]).id;
 }
 
-/** Recompute the unlocked tier after an answer; returns the new tier and whether it moved. */
-export function refreshTier(state) {
-  const tier = Math.max(state.tier, unlockedTier(state.items));
-  return { tier, unlocked: tier > state.tier };
+export { refreshTiers };
+
+/**
+ * The single-subject view of `refreshTiers`, kept because the shop's unlocks and the
+ * grown-ups panel's tier list are both about the clock specifically.
+ */
+export function refreshTier(state, subject = DEFAULT_SUBJECT) {
+  const { tiers } = refreshTiers(state);
+  const before = tiersOf(state)[subject] ?? 0;
+  const tier = tiers[subject] ?? 0;
+  return { tier, unlocked: tier > before };
 }

@@ -39,6 +39,8 @@ import {
   MAX_INTERVAL_DAYS,
   MAX_LEARNING,
   nextInterval,
+  applyPractice,
+  hungryCount,
   nextItem,
   qualityOf,
   refreshTier,
@@ -77,9 +79,37 @@ import {
   migrateItems,
   STORAGE_KEY,
   touchDay,
+  upgrade,
   VERSION,
   write,
 } from '../store.js';
+import { FEATURE_COUNT, featuresOf, FEATURE_NAMES, holesOf } from '../ink/features.js';
+import { logits, parameterCount } from '../ink/model.js';
+import { centreOfMass, rasterize, SIZE as INK_SIZE, toAscii } from '../ink/raster.js';
+import { mirror, recognize, UNSURE_BELOW } from '../ink/recognize.js';
+import { CAPACITY, recall, remember, sanitize as sanitizeMemory } from '../ink/memory.js';
+import { bounds as inkBounds, dedupe, hasInk, resample } from '../ink/strokes.js';
+import { CASES } from './ink-fixtures.js';
+import * as addSubject from '../subjects/addition.js';
+import * as clockSubject from '../subjects/clock.js';
+import { fillDuration, fillPlan, FRAME, tenFrameSvg } from '../tenframe.js';
+import {
+  interleave,
+  refreshTiers,
+  SUBJECT_IDS,
+  subjectIdOf,
+  tiersOf,
+  totalItemCount,
+  unseenItems as unseenAcrossSubjects,
+  DEFAULT_PRACTICE,
+  enabledItemCount,
+  enabledSubjects,
+  floorOf,
+  isResting,
+  practiceOf,
+  unlockedTier as unlockedTierOf,
+  tierMastery as tierMasteryOf,
+} from '../subjects/index.js';
 import {
   applyImport,
   cleanItems,
@@ -109,6 +139,11 @@ import {
   petSvg,
   speciesAppearance,
   speciesFor,
+  speciesForFact,
+  factsOfSpecies,
+  itemsOfSpecies,
+  portraitOf,
+  SPECIES_IDS,
   SPECIES,
   timesOfSpecies,
   TRAIT_STRIDE,
@@ -979,7 +1014,7 @@ test('a fresh state has no items, no tier progress and no session', () => {
   const s = freshState(1000);
   assertEqual(s.version, VERSION);
   assertEqual(Object.keys(s.items).length, 0);
-  assertEqual(s.tier, 0);
+  assertEqual(s.tiers.clock, 0);
   assertEqual(s.reviewClock, 0);
   assert(!isRunning(s.session));
 });
@@ -1714,7 +1749,7 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
+  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
 });
 
@@ -1760,7 +1795,7 @@ function playedState(now = 1000) {
     cracks: 2,
   };
   state.reviewClock = 12;
-  state.tier = 2;
+  state.tiers = { ...state.tiers, clock: 2 };
   state.stats = { totalAnswered: 40, totalCorrect: 31, streak: 2, bestStreak: 9, daysPlayed: ['2026-08-20'] };
   return state;
 }
@@ -1777,7 +1812,8 @@ test('an exported payload carries the pets, the schedule clock, the tier and the
   assertEqual(payload.app, TRANSFER_APP);
   assertEqual(payload.format, TRANSFER_FORMAT);
   assertEqual(payload.reviewClock, 12);
-  assertEqual(payload.tier, 2);
+  assertEqual(payload.tiers.clock, 2);
+  assertEqual(payload.tier, 2, 'the old scalar travels too, for a device still on one subject');
   assertEqual(payload.stats.bestStreak, 9);
   assertEqual(payload.items['4:15'].feeds, 4);
 });
@@ -1793,7 +1829,7 @@ test('progress survives the round trip through a file', () => {
   const json = payloadToJson(exportPayload(from, 2000));
   const landed = applyImport(receivingState(), parseTransfer(json), 5000);
   assertEqual(landed.reviewClock, 12);
-  assertEqual(landed.tier, 2);
+  assertEqual(landed.tiers.clock, 2);
   assertEqual(landed.stats.totalAnswered, 40);
   assertEqual(Object.keys(landed.items).length, 2);
   assertEqual(landed.items['4:15'].feeds, 4);
@@ -2984,6 +3020,918 @@ test('a hand-edited file cannot import a fortune or a piece this build cannot dr
     '4:15': { h: 4, m: 15, feeds: 1, cracks: 2, decor: ['house', 'trebuchet'], hatchedAt: 1 },
   });
   assertEqual(smuggled['4:15'].decor.join(), 'house');
+});
+
+
+/* ------------------------------------------------------------------ subjects */
+
+describe('subjects — one zoo, more than one thing to learn');
+
+test('an id is claimed by exactly the subject that owns it', () => {
+  assertEqual(subjectIdOf('4:15'), 'clock');
+  assertEqual(subjectIdOf('12:55'), 'clock');
+  assertEqual(subjectIdOf('add:3+5'), 'add');
+  assertEqual(subjectIdOf('add:5+3'), null, 'and only in its canonical spelling');
+  assertEqual(subjectIdOf('chem:H2O'), null, 'a subject this build lacks claims nothing');
+  assertEqual(subjectIdOf('nonsense'), null);
+  assertEqual(subjectIdOf(undefined), null, 'and a missing id does not throw');
+});
+
+test('the clock refuses ids that merely look like times', () => {
+  assert(clockSubject.owns('9:05'), '9:05 is a time');
+  assert(!clockSubject.owns('13:00'), 'there is no thirteen on this face');
+  assert(!clockSubject.owns('0:30'), 'nor a zero');
+  assert(!clockSubject.owns('4:5'), 'nor an unpadded minute');
+  assert(!clockSubject.owns('add:4:15'), 'and a prefix is not a time');
+});
+
+test('a tier map is read from either the new shape or the old scalar', () => {
+  assertEqual(tiersOf({ tiers: { clock: 3 } }).clock, 3, 'the current shape');
+  assertEqual(tiersOf({ tier: 2 }).clock, 2, 'a save written before subjects existed');
+  assertEqual(tiersOf({}).clock, 0, 'and a state carrying neither');
+  assertEqual(tiersOf(null).clock, 0, 'and no state at all');
+});
+
+test('a hand-edited tier cannot unlock material by being absurd', () => {
+  assertEqual(tiersOf({ tiers: { clock: -5 } }).clock, 0, 'negative is floored');
+  assertEqual(tiersOf({ tiers: { clock: 1.7 } }).clock, 1, 'fractional is truncated');
+  assertEqual(tiersOf({ tiers: { clock: 'lots' } }).clock, 0, 'and nonsense is nothing');
+  assertEqual(tiersOf({ tiers: { chemistry: 9 } }).clock, 0, 'a subject we lack is ignored');
+});
+
+test('new material is interleaved between subjects, not concatenated', () => {
+  assertEqual(interleave([['a', 'b', 'c'], [1, 2]]).join(), 'a,1,b,2,c');
+  assertEqual(interleave([[], [1, 2]]).join(), '1,2', 'a subject with nothing left drops out');
+  assertEqual(interleave([]).length, 0);
+});
+
+test('unseen material stops at the tier a subject has unlocked', () => {
+  const heads = unseenAcrossSubjects({}, { clock: 0, add: 0 });
+  assert(heads.length > 0, 'a fresh zoo has everything to learn');
+  assert(heads.every((entry) => entry.tier === 0), 'and nothing above the unlocked tier');
+  assert(heads.some((entry) => entry.subject === 'clock'), 'the clock is in there');
+  assert(heads.some((entry) => entry.subject === 'add'), 'and so is adding');
+  assertEqual(heads[0].subject, 'clock', 'a fresh zoo meets the clock first');
+  assertEqual(heads[1].subject, 'add', 'and then a sum, rather than every clock face first');
+});
+
+test('a seen item is never offered as new again', () => {
+  const first = unseenAcrossSubjects({}, { clock: 0 })[0];
+  const after = unseenAcrossSubjects({ [first.id]: { phase: 'learning' } }, { clock: 0 });
+  assert(!after.some((entry) => entry.id === first.id), 'it came back around');
+});
+
+test('the zoo counts every subject it teaches', () => {
+  assertEqual(totalItemCount(), 144 + 66, 'the hardcoded 144 is gone, not merely moved');
+  assertEqual(SUBJECT_IDS.join(), 'clock,add', 'and both subjects are counted');
+});
+
+test('a tier opens for one subject without opening another', () => {
+  const items = {};
+  for (const entry of unseenAcrossSubjects({}, { clock: 0, add: 0 })) {
+    // Only the clock's first tier is finished; the sums are left untouched.
+    if (entry.subject === 'clock') items[entry.id] = { subject: 'clock', phase: 'graduated' };
+  }
+  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0, add: 0 } });
+  assertEqual(tiers.clock, 1, 'finishing tier 0 opens tier 1');
+  assertEqual(tiers.add, 0, 'and adding has not moved an inch');
+  assertEqual(unlocked.join(), 'clock', 'and only the subject that moved is named');
+});
+
+test('a tier already earned is never taken back', () => {
+  const { tiers, unlocked } = refreshTiers({ items: {}, tiers: { clock: 3 } });
+  assertEqual(tiers.clock, 3, 'an empty zoo does not demote a save');
+  assertEqual(unlocked.length, 0, 'and standing still is not an unlock');
+});
+
+/* ------------------------------------------------- saves across a schema change */
+
+describe('saves — upgraded, never discarded');
+
+/** A save exactly as the single-subject build wrote it. */
+const v1Save = () => ({
+  version: 1,
+  createdAt: 100,
+  lastPlayedAt: 200,
+  reviewClock: 42,
+  tier: 2,
+  coins: 37,
+  zooDecor: [],
+  milestones: ['mastery:0'],
+  coinsGrantedAt: 1,
+  milestonesGrantedAt: 1,
+  settings: { sound: false, language: 'en', playMinutes: 7, showDigital: true },
+  session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
+  stats: { totalAnswered: 90, totalCorrect: 70, streak: 4, bestStreak: 9, daysPlayed: [] },
+  items: {
+    '4:15': { h: 4, m: 15, species: 'fizz', phase: 'graduated', feeds: 5, cracks: 2, decor: [], hatchedAt: 123 },
+    '1:00': { h: 1, m: 0, species: 'mochi', phase: 'learning', reps: 0, correctStreak: 3, hatchedAt: null },
+  },
+});
+
+const savedAs = (blob) => {
+  const storage = fakeStorage();
+  storage.setItem(STORAGE_KEY, JSON.stringify(blob));
+  return storage;
+};
+
+test('a save written before subjects existed keeps its whole zoo', () => {
+  const back = load(9999, savedAs(v1Save()));
+  assertEqual(Object.keys(back.items).length, 2, 'the pets are still there');
+  assertEqual(back.items['4:15'].feeds, 5, 'and so is what they had earned');
+  assertEqual(back.reviewClock, 42);
+  assertEqual(back.coins, 37);
+  assertEqual(back.version, VERSION, 'and it comes back at the current version');
+});
+
+test('the clock tier a v1 save had earned survives as a per-subject tier', () => {
+  const back = load(0, savedAs(v1Save()));
+  assertEqual(back.tiers.clock, 2, 'the scalar became the clock');
+  assertEqual(back.tier, undefined, 'and the scalar itself is gone');
+});
+
+test('every pet in an upgraded save learns which subject it belongs to', () => {
+  const back = load(0, savedAs(v1Save()));
+  assertEqual(back.items['4:15'].subject, 'clock');
+  assertEqual(back.items['1:00'].subject, 'clock');
+});
+
+test('a save from a future build is refused rather than half-read', () => {
+  const back = load(0, savedAs({ ...v1Save(), version: VERSION + 1 }));
+  assertEqual(back.reviewClock, 0, 'it started fresh instead of guessing');
+});
+
+test('a save with no version at all is not trusted', () => {
+  const { version, ...unversioned } = v1Save();
+  assertEqual(load(0, savedAs(unversioned)).reviewClock, 0);
+});
+
+test('upgrading is idempotent — a current save passes through untouched', () => {
+  const current = { ...freshState(0), reviewClock: 7 };
+  assertEqual(upgrade(current), current, 'it was needlessly rebuilt');
+});
+
+test('an item whose subject this build does not know is dropped, not carried', () => {
+  const save = v1Save();
+  save.items['chem:H2O'] = { phase: 'learning', hatchedAt: null };
+  const back = load(0, savedAs(save));
+  assertEqual(Object.keys(back.items).sort().join(), '1:00,4:15', 'the pet we cannot draw is gone');
+});
+
+test('a file carrying an unknown subject loses only that item', () => {
+  const kept = cleanItems({
+    '4:15': { h: 4, m: 15, hatchedAt: 1 },
+    'add:3+5': { a: 3, b: 5, hatchedAt: 1 },
+    'chem:H2O': { hatchedAt: 1 },
+  });
+  assertEqual(Object.keys(kept).sort().join(), '4:15,add:3+5', 'the rest of the zoo still lands');
+});
+
+/* --------------------------------------------------- scheduling across subjects */
+
+describe('scheduling — two subjects sharing one session');
+
+test('a new item is stamped with the subject that owns it', () => {
+  const item = createItem({ subject: 'clock', h: 4, m: 15, tier: 2, species: 'fizz' });
+  assertEqual(item.subject, 'clock');
+  assertEqual(item.tier, 2, 'the subject supplied the tier');
+  assertEqual(item.h, 4, 'and the payload still reads off the top level');
+});
+
+test('an item built the old way is still a clock item', () => {
+  const item = createItem({ h: 9, m: 30, species: 'fizz' });
+  assertEqual(item.subject, 'clock', 'the default holds for saves and older call sites');
+  assertEqual(item.tier, 1, 'and the tier is still derived when nobody supplies one');
+});
+
+test('the id an item is filed under is not copied into the item', () => {
+  const item = createItem({ id: '4:15', h: 4, m: 15, species: 'fizz' });
+  assert(!('id' in item), 'two sources of truth for one id');
+});
+
+test('two subjects due at once alternate rather than repeat', () => {
+  // The scheduler only ever reads `item.subject`, so a second subject can be simulated
+  // here before its curriculum exists.
+  const due = (subject, dueStep) => ({ subject, phase: 'learning', dueStep, seen: 0, dueAt: 0 });
+  const state = {
+    reviewClock: 10,
+    tiers: { clock: 0 },
+    items: {
+      '4:15': due('clock', 1),
+      '9:30': due('clock', 2),
+      'add:3+5': due('add', 3),
+    },
+  };
+  assertEqual(
+    nextItem(state, { now: 0, lastSubject: 'clock' }),
+    'add:3+5',
+    'after a clock question, the sum wins even though it is less overdue'
+  );
+  assertEqual(
+    nextItem(state, { now: 0, lastSubject: 'add' }),
+    '4:15',
+    'and after a sum, the most overdue clock face comes back'
+  );
+});
+
+test('alternating never overrides urgency within one subject', () => {
+  const due = (subject, dueStep) => ({ subject, phase: 'learning', dueStep, seen: 0, dueAt: 0 });
+  const state = {
+    reviewClock: 10,
+    tiers: { clock: 0 },
+    items: { '4:15': due('clock', 5), '9:30': due('clock', 1) },
+  };
+  assertEqual(
+    nextItem(state, { now: 0, lastSubject: 'clock' }),
+    '9:30',
+    'with nothing to alternate to, the longest overdue still wins'
+  );
+});
+
+
+/* ------------------------------------------------------------------- adding */
+
+describe('adding — the deck');
+
+test('every unordered pair up to ten and ten, and nothing twice', () => {
+  assertEqual(addSubject.ALL_ITEMS.length, 66);
+  const ids = addSubject.ALL_ITEMS.map((fact) => fact.id);
+  assertEqual(new Set(ids).size, 66, 'a fact appears in two tiers');
+});
+
+test('the tiers partition the deck, so a tier can actually be finished', () => {
+  const sizes = addSubject.TIERS.map((tier) => addSubject.tierItems(tier.id).length);
+  assertEqual(sizes.reduce((a, b) => a + b, 0), addSubject.ALL_ITEMS.length);
+  assert(sizes.every((n) => n > 0), 'an empty tier can never be mastered');
+});
+
+test('3 + 5 and 5 + 3 are one fact, spelled the smaller way round', () => {
+  assertEqual(addSubject.idOf({ a: 5, b: 3 }), 'add:3+5');
+  assertEqual(addSubject.idOf({ a: 3, b: 5 }), 'add:3+5');
+  assert(addSubject.owns('add:3+5'), 'the canonical spelling is the fact');
+  assert(!addSubject.owns('add:5+3'), 'and the other spelling is not a second pet');
+});
+
+test('ids outside the deck are refused', () => {
+  assert(!addSubject.owns('add:11+1'), 'eleven is not an addend here');
+  assert(!addSubject.owns('add:3+'), 'nor is half an id');
+  assert(!addSubject.owns('4:15'), 'nor a time');
+  assertEqual(addSubject.parse('nonsense'), null);
+});
+
+test('each tier is a strategy, not a size', () => {
+  const shown = (tier) => addSubject.tierItems(tier).map((f) => `${f.a}+${f.b}`).join(' ');
+  assert(addSubject.tierItems(0).every((f) => f.a <= 1), 'tier 0 is adding nothing and adding one');
+  assert(addSubject.tierItems(1).every((f) => f.a + f.b <= 10), 'tier 1 stays inside one ten-frame');
+  assertEqual(shown(2), '6+6 7+7 8+8 9+9 10+10', 'tier 2 is the doubles past ten');
+  assert(addSubject.tierItems(3).every((f) => f.b === 10), 'tier 3 is adding ten');
+  assert(
+    addSubject.tierItems(4).every((f) => f.a + f.b > 10 && f.a !== f.b && f.b !== 10),
+    'and tier 4 is what is left, which is everything that has to bridge ten'
+  );
+});
+
+test('facts are taught easiest first', () => {
+  const sums = addSubject.tierItems(1).map((f) => f.a + f.b);
+  assertEqual(sums.join(), [...sums].sort((a, b) => a - b).join(), 'a tier jumps about');
+});
+
+describe('adding — naming the mistake');
+
+const verdict = (a, b, answer) => addSubject.grade({ a, b }, answer).verdict;
+
+test('the right answer is the right answer', () => {
+  assertEqual(verdict(7, 8, 15), 'correct');
+  assertEqual(verdict(0, 0, 0), 'correct', 'and zero is an answer, not an absence');
+});
+
+test('a miscount by one is told apart from a misunderstanding', () => {
+  assertEqual(verdict(7, 8, 14), 'offByOne');
+  assertEqual(verdict(7, 8, 16), 'offByOne');
+  assert(addSubject.grade({ a: 7, b: 8 }, 14).nearMiss, 'and it earns the softer opening');
+});
+
+test('digits the right way round but in the wrong order', () => {
+  assertEqual(verdict(7, 8, 51), 'transposed');
+  assert(addSubject.grade({ a: 7, b: 8 }, 51).nearMiss);
+  assertEqual(verdict(3, 5, 8), 'correct', 'a single-digit answer cannot be transposed');
+});
+
+test('giving back one of the numbers, or the difference', () => {
+  assertEqual(verdict(3, 5, 5), 'gaveAddend');
+  assertEqual(verdict(3, 5, 3), 'gaveAddend');
+  assertEqual(verdict(9, 4, 5), 'gaveDifference', 'they subtracted');
+  assertEqual(verdict(7, 8, 99), 'wrong');
+});
+
+test('an unanswered question is never scored as a wrong one', () => {
+  // Number(null) and Number('') are both 0, so this is the trap worth a test of its own.
+  for (const empty of [null, undefined, '', 'x', -1]) {
+    assertEqual(verdict(7, 8, empty), 'blank', `${JSON.stringify(empty)} became an answer`);
+    assertEqual(addSubject.grade({ a: 7, b: 8 }, empty).correct, false);
+  }
+});
+
+describe('adding — how wide the answer box is');
+
+test('the strip never changes width, whatever the fact is', () => {
+  // A strip that narrowed for small sums would say "this one is under ten" before the child
+  // had added anything.
+  const widths = new Set(addSubject.ALL_ITEMS.map(() => addSubject.answerWidth()));
+  assertEqual(widths.size, 1, 'the width of the answer is a clue');
+  assertEqual(addSubject.answerWidth(), 2);
+});
+
+test('every answer in the deck fits in the strip', () => {
+  // The first tier contains 0 + 10 — "sums to ten" includes ten — so a one-box strip would
+  // not merely leak, it would make a fact impossible to answer at all.
+  for (const fact of addSubject.ALL_ITEMS) {
+    assert(
+      addSubject.answerDigits(fact) <= addSubject.answerWidth(),
+      `${fact.id} cannot be answered in ${addSubject.answerWidth()} boxes`
+    );
+  }
+  assertEqual(addSubject.answerDigits({ a: 0, b: 10 }), 2, 'the fact that forced this');
+  assertEqual(addSubject.tierOf({ a: 0, b: 10 }), 0, 'and it really is in the first tier');
+});
+
+describe('the ten-frame');
+
+test('seven and eight fills the first ten, then spills', () => {
+  const plan = fillPlan(7, 8);
+  assertEqual(plan.total, 15);
+  assertEqual(plan.bridge, 3, 'three of the eight finish the ten');
+  assertEqual(plan.rest, 5, 'and five are left over');
+  assertEqual(plan.frames, 2);
+  assertEqual(plan.cells.filter((c) => c.frame === 0).length, FRAME);
+  assertEqual(plan.cells.filter((c) => c.bridges).length, 3, 'and those three are marked');
+});
+
+test('the two addends stay tellable apart', () => {
+  const plan = fillPlan(7, 8);
+  assertEqual(plan.cells.filter((c) => c.from === 'a').length, 7);
+  assertEqual(plan.cells.filter((c) => c.from === 'b').length, 8);
+});
+
+test('a sum that stays under ten bridges nothing', () => {
+  const plan = fillPlan(3, 5);
+  assertEqual(plan.frames, 1);
+  assertEqual(plan.cells.filter((c) => c.bridges).length, 0, 'nothing was completed');
+});
+
+test('the corners hold', () => {
+  assertEqual(fillPlan(0, 0).total, 0);
+  assertEqual(fillPlan(0, 0).frames, 1, 'there is always a frame to look at');
+  assertEqual(fillPlan(10, 10).total, 20);
+  assertEqual(fillPlan(10, 10).frames, 2);
+  assertEqual(fillPlan(10, 10).bridge, 0, 'the first ten was already full');
+});
+
+test('every counter lands in a real cell', () => {
+  for (const fact of addSubject.ALL_ITEMS) {
+    for (const cell of fillPlan(fact.a, fact.b).cells) {
+      assert(cell.row >= 0 && cell.row < 2, `row out of range for ${fact.id}`);
+      assert(cell.col >= 0 && cell.col < 5, `column out of range for ${fact.id}`);
+    }
+  }
+});
+
+test('the picture waits exactly as long as it takes to draw', () => {
+  assert(fillDuration(10, 10) > fillDuration(1, 1), 'a bigger sum takes longer');
+  assert(tenFrameSvg(7, 8).includes('tf-bridge'), 'the bridging counters reach the markup');
+});
+
+describe('adding — pets, homes and milestones');
+
+test('a fact hatches a pet of its own', () => {
+  const portrait = portraitOf({ subject: 'add', a: 7, b: 8 });
+  assertEqual(portrait.key, 'add:7+8');
+  assertEqual(portrait.species, speciesForFact(7, 8));
+  assert(portrait.index >= 0);
+});
+
+test('learning to add did not repaint the zoo', () => {
+  // Trait indices decide appearance and name, and the clock's were handed out first.
+  assertEqual(traitIndexFor(4, 15), timesOfSpecies(speciesFor(4, 15)).indexOf('4:15'));
+  assertEqual(petName({ subject: 'clock', h: 4, m: 15 }, 'nb'), defaultName(4, 15, 'nb'));
+});
+
+test('no two pets of one species share a name', () => {
+  for (const species of SPECIES_IDS) {
+    const names = itemsOfSpecies(species).map((id) => {
+      const fact = addSubject.parse(id);
+      return fact
+        ? petName({ subject: 'add', a: fact.a, b: fact.b }, 'nb')
+        : petName({ subject: 'clock', ...parseTimeId(id) }, 'nb');
+    });
+    assertEqual(new Set(names).size, names.length, `${species} has a repeated name`);
+  }
+});
+
+test('the clock species milestone still means only clock pets', () => {
+  assert(
+    timesOfSpecies('mochi').every((id) => !id.startsWith('add:')),
+    'an already-earned milestone quietly grew a new requirement'
+  );
+  assert(factsOfSpecies('mochi').every((id) => id.startsWith('add:')));
+});
+
+test('finishing an addition tier pays, without repricing the clock', () => {
+  const items = {};
+  for (const fact of addSubject.tierItems(0)) {
+    items[fact.id] = { subject: 'add', phase: 'graduated', hatchedAt: 1 };
+  }
+  const reached = milestonesReached(items, { daysPlayed: [] });
+  assert(reached.includes('mastery:add:0'), 'the addition tier went unrewarded');
+  assert(!reached.includes('mastery:0'), 'and it must not claim the clock’s milestone');
+});
+
+describe('adding — the pace it is answered at');
+
+test('writing a number is allowed to be slower than swinging two hands', () => {
+  // 12 seconds is a hesitant clock answer but an ordinary one on a keypad.
+  assertEqual(qualityOf({ correct: true, ms: 12000 }), 4, 'unchanged for the clock');
+  assertEqual(qualityOf({ correct: true, ms: 12000, pace: addSubject.paceScale }), 5);
+  assertEqual(qualityOf({ correct: true, ms: 40000, pace: addSubject.paceScale }), 3, 'but slow is still slow');
+});
+
+test('starting the answer over counts the same as waggling a hand', () => {
+  assertEqual(qualityOf({ correct: true, ms: 500, reversals: 2, pace: 4 }), 3, 'pace never excuses hesitation');
+});
+
+
+/* --------------------------------------------------------------------- ink */
+
+const P = (...points) => points.map(([x, y]) => ({ x, y }));
+
+// Plain, textbook shapes in a 100x100 pad. They are not children's handwriting and no
+// number taken from them should be read as if they were — what they establish is that the
+// pipeline is wired end to end, which is a different and much smaller claim.
+const GLYPHS = {
+  0: [P([50, 12], [74, 28], [80, 50], [74, 72], [50, 88], [26, 72], [20, 50], [26, 28], [50, 12])],
+  1: [P([34, 26], [50, 12], [50, 88])],
+  2: [P([24, 30], [38, 14], [62, 14], [76, 30], [70, 48], [26, 86], [78, 86])],
+  3: [P([26, 18], [62, 12], [76, 28], [60, 48], [76, 66], [62, 86], [28, 82])],
+  4: [P([62, 12], [22, 60], [80, 60]), P([62, 36], [62, 88])],
+  5: [P([74, 14], [32, 14], [28, 44], [52, 40], [74, 52], [70, 76], [44, 88], [24, 80])],
+  6: [P([68, 14], [40, 30], [26, 58], [34, 80], [58, 88], [74, 72], [68, 52], [44, 48], [28, 60])],
+  7: [P([22, 14], [78, 14], [46, 88])],
+  8: [P([50, 12], [70, 24], [52, 46], [74, 64], [56, 86], [32, 80], [28, 60], [48, 46], [28, 32], [50, 12])],
+  9: [P([64, 50], [40, 54], [28, 38], [38, 18], [62, 12], [72, 30], [70, 58], [56, 84], [34, 90])],
+};
+
+const backwards = (strokes) => strokes.map((s) => s.map((p) => ({ x: 100 - p.x, y: p.y })));
+const inkRows = (image) => {
+  let rows = 0;
+  for (let y = 0; y < INK_SIZE; y += 1) {
+    for (let x = 0; x < INK_SIZE; x += 1) {
+      if (image[y * INK_SIZE + x] > 0.01) { rows += 1; break; }
+    }
+  }
+  return rows;
+};
+
+describe('ink — stroke maths');
+
+test('points are spaced evenly however fast the hand moved', () => {
+  const even = resample(P([0, 0], [10, 0]), 2);
+  assertEqual(even.map((p) => p.x).join(), '0,2,4,6,8,10');
+  // The same line captured at a different sampling rate must resample the same way.
+  const jittery = resample(P([0, 0], [1, 0], [1.2, 0], [7, 0], [10, 0]), 2);
+  assertEqual(jittery.map((p) => Math.round(p.x)).join(), '0,2,4,6,8,10');
+});
+
+test('a finger held still is not a line, but a deliberate dot is a dot', () => {
+  assertEqual(dedupe(P([0, 0], [0, 0], [0, 0], [1, 0])).length, 2);
+  assertEqual(resample(P([5, 5]), 2).length, 1, 'a dot must survive');
+});
+
+test('a stray tap is refused rather than guessed at', () => {
+  assert(!hasInk([P([5, 5])], 0.06, 100), 'a speck became a digit');
+  assert(!hasInk([], 0.06, 100));
+  assert(hasInk(GLYPHS[7], 0.06, 100), 'and a real digit is not refused');
+});
+
+test('bounds cover every stroke, and an empty drawing does not throw', () => {
+  const box = inkBounds(GLYPHS[4]);
+  assert(box.width > 0 && box.height > 0);
+  assertEqual(inkBounds([]).width, 0);
+});
+
+describe('ink — the rasteriser');
+
+test('the ink fills MNIST’s twenty pixels, stroke width included', () => {
+  // Round caps put half a stroke past each end; if that is not taken off the scale, every
+  // digit comes out a stroke wider than the ones the model was trained on.
+  assertEqual(inkRows(rasterize([P([50, 10], [50, 90])])), 20);
+  assertEqual(inkRows(rasterize(GLYPHS[0])), 20);
+});
+
+test('the digit is placed by centre of mass, as MNIST places it', () => {
+  for (const strokes of [GLYPHS[1], GLYPHS[7], GLYPHS[4]]) {
+    const com = centreOfMass(rasterize(strokes));
+    assertClose(com.x, (INK_SIZE - 1) / 2, 0.01, 'horizontally off centre');
+    assertClose(com.y, (INK_SIZE - 1) / 2, 0.01, 'vertically off centre');
+  }
+});
+
+test('how big the child wrote, and where, reaches nothing', () => {
+  const same = (a, b) => {
+    let worst = 0;
+    for (let i = 0; i < a.length; i += 1) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+    return worst;
+  };
+  const base = rasterize(GLYPHS[2]);
+  const huge = rasterize(GLYPHS[2].map((s) => s.map((p) => ({ x: p.x * 9, y: p.y * 9 }))));
+  const moved = rasterize(GLYPHS[2].map((s) => s.map((p) => ({ x: p.x + 137, y: p.y - 61 }))));
+  assertEqual(same(base, huge), 0, 'a bigger drawing rasterised differently');
+  assertEqual(same(base, moved), 0, 'a drawing in the corner rasterised differently');
+});
+
+test('a blank drawing gives a blank image rather than an exception', () => {
+  const empty = rasterize([]);
+  assertEqual(empty.length, INK_SIZE * INK_SIZE);
+  assertEqual(Math.max(...empty), 0);
+  assertEqual(centreOfMass(empty), null);
+});
+
+test('the picture can be looked at', () => {
+  assert(toAscii(rasterize(GLYPHS[1])).split('\n').length === INK_SIZE);
+});
+
+describe('ink — the classifier');
+
+test('the JavaScript forward pass agrees with the one that trained it', () => {
+  // The fixtures come from the same quantised weights the browser loads, so anything left
+  // is float32 rounding. A transposed axis or an off-by-one pad would show up here as a
+  // number instead of as "recognition feels a bit worse".
+  let worst = 0;
+  for (const item of CASES) {
+    const mine = logits(Float32Array.from(item.pixels));
+    for (let i = 0; i < mine.length; i += 1) {
+      worst = Math.max(worst, Math.abs(mine[i] - item.logits[i]));
+    }
+  }
+  assert(worst < 1e-3, `the two forward passes have diverged: ${worst}`);
+});
+
+test('and picks the same digit on every fixture', () => {
+  for (const item of CASES) {
+    const mine = Array.from(logits(Float32Array.from(item.pixels)));
+    const want = item.logits.indexOf(Math.max(...item.logits));
+    assertEqual(mine.indexOf(Math.max(...mine)), want, `fixture for ${item.label}`);
+  }
+});
+
+test('the weights are small enough to inline', () => {
+  assert(parameterCount() < 60000, `${parameterCount()} parameters is more than planned`);
+});
+
+describe('ink — structure');
+
+test('enclosed loops are found, and counted right', () => {
+  assertEqual(holesOf(rasterize(GLYPHS[1])).count, 0, 'a 1 has no hole');
+  assertEqual(holesOf(rasterize(GLYPHS[7])).count, 0, 'nor a 7');
+  assertEqual(holesOf(rasterize(GLYPHS[0])).count, 1, 'a 0 has one');
+  assertEqual(holesOf(rasterize(GLYPHS[8])).count, 2, 'an 8 has two');
+});
+
+test('the feature vector is the length everything else expects', () => {
+  assertEqual(FEATURE_NAMES.length, FEATURE_COUNT);
+  assertEqual(featuresOf(GLYPHS[3], rasterize(GLYPHS[3])).length, FEATURE_COUNT);
+  assertEqual(featuresOf([], rasterize([])).length, FEATURE_COUNT, 'even for nothing at all');
+});
+
+test('a 1 and a 7 differ where the tiebreak looks', () => {
+  const at = (name) => FEATURE_NAMES.indexOf(name);
+  const one = featuresOf(GLYPHS[1], rasterize(GLYPHS[1]));
+  const seven = featuresOf(GLYPHS[7], rasterize(GLYPHS[7]));
+  assert(seven[at('aspect')] > one[at('aspect')], 'a 7 is wider than a 1');
+  assert(seven[at('crossCentre')] > one[at('crossCentre')], 'a 7’s bar is crossed twice');
+});
+
+describe('ink — this child’s handwriting');
+
+test('a correction is remembered, and the oldest fall off the end', () => {
+  const vector = (seed) => Float32Array.from({ length: FEATURE_COUNT }, (_, i) => ((i * seed) % 7) / 7);
+  let memory = [];
+  for (let i = 0; i < CAPACITY + 20; i += 1) memory = remember(memory, vector(i + 1), i % 10);
+  assert(memory.length <= CAPACITY, 'the memory grew without bound');
+});
+
+test('one stubborn digit cannot crowd out the other nine', () => {
+  const vector = Float32Array.from({ length: FEATURE_COUNT }, () => 0.5);
+  let memory = [];
+  for (let i = 0; i < CAPACITY; i += 1) memory = remember(memory, vector, 7);
+  assert(memory.length <= Math.ceil(CAPACITY / 3), 'sevens filled the whole memory');
+});
+
+test('a hand-edited memory cannot throw', () => {
+  assertEqual(sanitizeMemory([{ d: 99, f: [] }, null, 'x', { d: 3, f: [1, 2] }, undefined]).length, 0);
+  assertEqual(sanitizeMemory('not a list').length, 0);
+  assertEqual(sanitizeMemory(undefined).length, 0);
+});
+
+test('an empty memory has no opinion at all', () => {
+  const vector = Float32Array.from({ length: FEATURE_COUNT }, () => 0.5);
+  assertEqual(recall([], vector).strength, 0, 'it voted with nothing to go on');
+});
+
+test('the nearest corrections are the ones that vote', () => {
+  const vector = (seed) => Float32Array.from({ length: FEATURE_COUNT }, (_, i) => ((i * seed) % 7) / 7);
+  let memory = [];
+  for (const digit of [1, 2, 3, 4, 5, 6]) memory = remember(memory, vector(digit + 1), digit);
+  const voted = recall(memory, vector(4));
+  assertEqual(voted.votes.indexOf(Math.max(...voted.votes)), 3, 'it reached for the wrong neighbour');
+  assert(voted.strength > 0);
+});
+
+describe('ink — reading a digit');
+
+test('nothing on the pad reads as nothing, not as a one', () => {
+  const blank = recognize([], { pad: 100 });
+  assertEqual(blank.digit, null);
+  assertEqual(blank.reason, 'blank');
+  assertEqual(recognize([P([50, 50])], { pad: 100 }).digit, null, 'a stray tap became a digit');
+});
+
+test('every textbook digit is read as itself', () => {
+  // Establishes that strokes, rasteriser, model and fusion are joined up correctly. It says
+  // nothing about a six-year-old's handwriting — that is what the corpus on tests/ink.html
+  // is for, and until somebody has written into it that number is unknown.
+  for (const [digit, strokes] of Object.entries(GLYPHS)) {
+    assertEqual(String(recognize(strokes, { pad: 100 }).digit), digit, `read ${digit} wrong`);
+  }
+});
+
+test('a backwards digit is still that digit', () => {
+  // Reversing 3, 5, 7 and 9 is ordinary at this age and must never cost a child the sum.
+  for (const [digit, strokes] of Object.entries(GLYPHS)) {
+    const read = recognize(backwards(strokes), { pad: 100 });
+    assertEqual(String(read.digit), digit, `a backwards ${digit} was misread`);
+  }
+});
+
+test('and the game knows it was backwards — where that means anything', () => {
+  for (const digit of [1, 2, 3, 4, 5, 6, 7, 9]) {
+    assert(recognize(backwards(GLYPHS[digit]), { pad: 100 }).mirrored, `${digit} was not flagged`);
+  }
+  // 0 and 8 are their own mirror image, so there is nothing to nudge anybody about.
+  for (const digit of [0, 8]) {
+    assert(!recognize(GLYPHS[digit], { pad: 100 }).mirrored, `${digit} was flagged for nothing`);
+  }
+});
+
+test('an upright digit is never called backwards', () => {
+  for (const [digit, strokes] of Object.entries(GLYPHS)) {
+    assert(!recognize(strokes, { pad: 100 }).mirrored, `upright ${digit} was flagged`);
+  }
+});
+
+test('a reading always carries enough to show it back and to learn from it', () => {
+  const read = recognize(GLYPHS[6], { pad: 100 });
+  assert(read.confidence > 0 && read.confidence <= 1, 'confidence out of range');
+  assertEqual(read.image.length, INK_SIZE * INK_SIZE);
+  assertEqual(read.features.length, FEATURE_COUNT);
+  assert(read.unsure === read.confidence < UNSURE_BELOW, 'unsure disagrees with confidence');
+  if (read.unsure) assert(read.alternative !== null, 'unsure but nothing offered instead');
+});
+
+test('mirroring an image twice changes nothing', () => {
+  const image = rasterize(GLYPHS[7]);
+  const back = mirror(mirror(image));
+  let worst = 0;
+  for (let i = 0; i < image.length; i += 1) worst = Math.max(worst, Math.abs(image[i] - back[i]));
+  assertEqual(worst, 0);
+});
+
+test('the child’s own corrections reach the reading', () => {
+  const strokes = GLYPHS[3];
+  const features = featuresOf(strokes, rasterize(strokes));
+  let memory = [];
+  for (let i = 0; i < 10; i += 1) memory = remember(memory, features, 8);
+  const read = recognize(strokes, { memory, pad: 100 });
+  assert(read.detail.memoryStrength > 0, 'the memory was not consulted');
+});
+
+
+describe('handwriting — what the save keeps of it');
+
+test('a fresh zoo has learned nothing about anybody’s handwriting yet', () => {
+  const fresh = freshState(0);
+  assertEqual(fresh.ink.length, 0);
+  assertEqual(fresh.settings.mirrorNudge, false, 'the nudge starts off');
+  assertEqual(fresh.settings.answerMode, 'auto');
+});
+
+test('corrections survive a reload', () => {
+  const storage = fakeStorage();
+  const features = Array.from({ length: FEATURE_COUNT }, (_, i) => i / FEATURE_COUNT);
+  const state = { ...freshState(0), ink: remember([], Float32Array.from(features), 4) };
+  write(state, storage);
+  const back = load(0, storage);
+  assertEqual(back.ink.length, 1);
+  assertEqual(back.ink[0].d, 4, 'it forgot which digit it was told');
+});
+
+test('a corrupt memory is dropped rather than thrown at the child', () => {
+  const storage = fakeStorage();
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ ...freshState(0), ink: [{ d: 99, f: [] }, 'rubbish', null, { d: 2 }] })
+  );
+  assertEqual(load(0, storage).ink.length, 0, 'nonsense reached the recogniser');
+});
+
+test('a save written before handwriting existed simply has none', () => {
+  const storage = fakeStorage();
+  const { ink, ...older } = freshState(0);
+  storage.setItem(STORAGE_KEY, JSON.stringify(older));
+  assertEqual(load(0, storage).ink.length, 0);
+});
+
+test('one child’s handwriting does not travel to another child’s device', () => {
+  // It is learned from *this* hand; carrying it across would make the reading worse, and it
+  // costs nothing to learn again.
+  const features = Float32Array.from({ length: FEATURE_COUNT }, () => 0.5);
+  const state = { ...playedState(), ink: remember([], features, 7) };
+  const payload = exportPayload(state, 1000);
+  assert(!('ink' in payload), 'the handwriting memory travelled');
+  const landed = applyImport(receivingState(), parseTransfer(payloadToJson(payload)), 5000);
+  assertEqual(landed.ink.length, 0, 'and it must not arrive on the far side either');
+});
+
+
+/* --------------------------------------------------------- what to practise */
+
+describe('practice — choosing what the game asks about');
+
+const practiceWith = (clock, add) => practiceOf({ practice: { clock, add } });
+
+test('a save that predates any of this practises everything', () => {
+  const chosen = practiceOf({});
+  assertEqual(chosen.clock.on, true);
+  assertEqual(chosen.add.on, true);
+  assertEqual(chosen.clock.floor, 0);
+  assertEqual(practiceOf(undefined).add.floor, 0, 'and no state at all does not throw');
+});
+
+test('a hand-edited floor cannot reach past the ladder', () => {
+  assertEqual(practiceWith({ floor: 99 }, {}).clock.floor, LAST_TIER);
+  assertEqual(practiceWith({ floor: -4 }, {}).clock.floor, 0);
+  assertEqual(practiceWith({ floor: 'lots' }, {}).clock.floor, 0);
+  assertEqual(practiceWith({ floor: 2.7 }, {}).clock.floor, 2, 'fractional is truncated');
+});
+
+test('there is always something left to practise', () => {
+  // Switching off the last subject would leave the game with no question to ask at all.
+  const nothing = practiceWith({ on: false }, { on: false });
+  assertEqual(enabledSubjects(nothing).length, 1, 'the game was left with nothing to ask');
+  assertEqual(nothing.clock.on, true);
+});
+
+test('resting is decided by the choices, not stored on the pet', () => {
+  const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
+  assert(isResting({ subject: 'clock', tier: 3 }, chosen), 'a switched-off subject rests');
+  assert(isResting({ subject: 'add', tier: 1 }, chosen), 'and so does a tier below the floor');
+  assert(!isResting({ subject: 'add', tier: 2 }, chosen), 'the floor itself is practised');
+  assert(!isResting({ subject: 'add', tier: 4 }, chosen), 'and everything above it');
+});
+
+test('an item from a subject this build does not know is left alone', () => {
+  assert(!isResting({ subject: 'chemistry', tier: 0 }, DEFAULT_PRACTICE));
+});
+
+test('the zoo counts towards what is switched on', () => {
+  assertEqual(enabledItemCount(DEFAULT_PRACTICE), totalItemCount());
+  const chosen = practiceWith({ on: false }, { on: true, floor: 2 });
+  // A target that includes what the game has been told not to ask is a target nobody can reach.
+  assertEqual(enabledItemCount(chosen), 30, 'only the addition tiers from 2 up');
+});
+
+test('nothing skipped is ever introduced', () => {
+  const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
+  const fresh = unseenAcrossSubjects({}, { clock: 3, add: 4 }, chosen);
+  assert(fresh.length > 0);
+  assert(fresh.every((entry) => entry.subject === 'add'), 'a switched-off subject was taught');
+  assert(fresh.every((entry) => entry.tier >= 2), 'a skipped tier was taught');
+});
+
+describe('practice — the ladder walks past a skipped rung');
+
+test('the unlocked tier starts at the floor', () => {
+  // A tier nobody is asked about can never reach the 80% bar, so a ladder starting at zero
+  // would stall the whole subject forever.
+  assertEqual(unlockedTierOf({}, 'add', 2), 2, 'an empty zoo still opens the floor');
+  assertEqual(unlockedTierOf({}, 'add', 0), 0);
+});
+
+test('but mastery keeps telling the truth, so nobody is paid for skipping', () => {
+  // wallet.js awards mastery:<tier> on tierMastery >= 1. If a skipped tier reported itself
+  // mastered, a child would be handed forty coins for work they never did.
+  assertEqual(tierMasteryOf({}, 'add', 0), 0, 'a skipped tier claimed to be mastered');
+  const reached = milestonesReached({}, { daysPlayed: [] });
+  assert(!reached.includes('mastery:add:0'), 'a skipped tier was paid for');
+  assert(!reached.includes('mastery:0'));
+});
+
+describe('practice — pets that are resting');
+
+const restingState = (extra = {}) => ({
+  reviewClock: 0,
+  tiers: { clock: 3, add: 4 },
+  practice: practiceWith({ on: false, floor: 0 }, { on: true, floor: 0 }),
+  items: {},
+  ...extra,
+});
+
+test('a resting pet is never chosen, whichever queue it would have been in', () => {
+  const clockItem = (over) => ({ subject: 'clock', tier: 0, seen: 0, dueStep: null, dueAt: 0, ...over });
+  for (const [what, item] of [
+    ['due for learning', clockItem({ phase: 'learning', dueStep: 1 })],
+    ['hungry', clockItem({ phase: 'graduated', dueAt: 0 })],
+    ['merely graduated', clockItem({ phase: 'graduated', dueAt: 9e15 })],
+  ]) {
+    const picked = nextItem(restingState({ items: { '1:00': item } }), { now: 1000 });
+    assertEqual(subjectIdOf(picked), 'add', `a resting pet was asked about while ${what}`);
+  }
+});
+
+test('a resting pet never asks to be fed', () => {
+  const items = { '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: 0 } };
+  assertEqual(hungryCount(items, 1000), 1, 'it is hungry when it is being practised');
+  assertEqual(hungryCount(items, 1000, restingState().practice), 0, 'and not when it is resting');
+});
+
+test('the last-resort fallback does not smuggle back what was switched off', () => {
+  // Everything excluded and nothing left: the one moment nobody is watching for it.
+  const state = restingState({ items: { '1:00': { subject: 'clock', tier: 0, phase: 'learning', dueStep: 99, dueAt: 0, seen: 0 } } });
+  assertEqual(subjectIdOf(nextItem(state, { now: 1000, exclude: '1:00' })), 'add');
+});
+
+describe('practice — the schedule is frozen, not left running');
+
+test('a pet due in two days is still due in two days after a month asleep', () => {
+  // This is the whole point. Letting the clock run while a subject is off means coming back
+  // to forty starving pets, which is a punishment for a grown-up changing a setting.
+  const start = 1_000_000_000;
+  const before = {
+    reviewClock: 10,
+    practice: DEFAULT_PRACTICE,
+    items: {
+      '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: start + 2 * DAY_MS, dueStep: null },
+      '2:00': { subject: 'clock', tier: 0, phase: 'learning', dueAt: 0, dueStep: 12 },
+    },
+  };
+  const off = practiceWith({ on: false }, { on: true });
+  const asleep = applyPractice(before, off, start);
+  assertEqual(asleep.items['1:00'].restedAt, start, 'it was not stamped');
+  assertEqual(asleep.items['2:00'].restedStep, 10);
+
+  // A month passes, and forty questions of the other subject are answered.
+  const later = start + 30 * DAY_MS;
+  const awake = applyPractice({ ...asleep, reviewClock: 50 }, DEFAULT_PRACTICE, later);
+  assertEqual(awake.items['1:00'].dueAt - later, 2 * DAY_MS, 'the days ran on while it slept');
+  // The review clock counts questions, not days, and it keeps advancing while the *other*
+  // subject is played — so freezing only the timestamps is not enough.
+  assertEqual(awake.items['2:00'].dueStep - 50, 2, 'the questions ran on while it slept');
+});
+
+test('waking clears the stamps, so a second sleep starts fresh', () => {
+  const off = practiceWith({ on: false }, { on: true });
+  const state = { reviewClock: 0, items: { '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: 500, dueStep: null } } };
+  const awake = applyPractice(applyPractice(state, off, 100), DEFAULT_PRACTICE, 900);
+  assert(!('restedAt' in awake.items['1:00']), 'the stamp was left behind');
+  assert(!('restedStep' in awake.items['1:00']), 'and so was the step');
+  assertEqual(awake.items['1:00'].dueAt, 500 + 800, 'it should have slept for eight hundred');
+});
+
+test('a pet that was already resting is not re-stamped', () => {
+  const off = practiceWith({ on: false }, { on: true });
+  const state = { reviewClock: 0, items: { '1:00': { subject: 'clock', tier: 0, phase: 'graduated', dueAt: 500 } } };
+  const once = applyPractice(state, off, 100);
+  const twice = applyPractice({ ...once, reviewClock: 40 }, off, 5000);
+  assertEqual(twice.items['1:00'].restedAt, 100, 'the sleep restarted, losing a month of freeze');
+});
+
+test('raising the floor puts the pets below it to sleep too', () => {
+  // Consistent with switching a subject off: anything no longer asked stops going hungry.
+  const state = {
+    reviewClock: 0,
+    items: { 'add:0+0': { subject: 'add', tier: 0, phase: 'graduated', dueAt: 0, hatchedAt: 1 } },
+  };
+  const raised = applyPractice(state, practiceWith({}, { floor: 2 }), 1000);
+  assertEqual(raised.items['add:0+0'].restedAt, 1000);
+  assertEqual(hungryCount(raised.items, 2000, raised.practice), 0, 'a skipped pet still nagged');
+});
+
+test('the choices survive a reload, clamped', () => {
+  const storage = fakeStorage();
+  write({ ...freshState(0), practice: { clock: { on: false, floor: 9 }, add: { on: true, floor: 1 } } }, storage);
+  const back = load(0, storage);
+  assertEqual(back.practice.clock.on, false);
+  assertEqual(back.practice.clock.floor, LAST_TIER, 'a floor past the ladder was kept');
+  assertEqual(back.practice.add.floor, 1);
 });
 
 const out = document.getElementById('out');

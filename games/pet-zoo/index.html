@@ -43,12 +43,13 @@
             <p id="prompt-line" class="prompt-line" data-i18n="prompt.booting">Vekker dyrehagen…</p>
             <p class="prompt-time">
               <span id="prompt-digital" class="digital">--:--</span>
+              <span id="prompt-sum" class="sum" hidden></span>
               <span id="prompt-spoken" class="spoken"></span>
             </p>
           </div>
         </div>
 
-        <div class="clock-wrap">
+        <div id="answer-clock" class="clock-wrap">
           <svg
             id="clock"
             viewBox="0 0 400 400"
@@ -56,6 +57,35 @@
             data-i18n-aria-label="clock.aria"
             aria-label="Dra viserne for å stille klokka"
           ></svg>
+        </div>
+
+        <div id="answer-sum" class="sum-wrap" hidden>
+          <div id="tenframe-host" class="tenframe-host" hidden></div>
+
+          <div id="answer-write" class="write-wrap" hidden>
+            <div id="write-boxes" class="write-boxes"></div>
+            <div id="write-picker" class="write-picker" hidden>
+              <p id="write-picker-title" class="write-picker-title" data-i18n="answer.fixTitle">
+                Hvilket tall var det?
+              </p>
+              <div id="write-picker-keys" class="write-picker-keys"></div>
+            </div>
+            <div class="write-tools">
+              <button id="write-undo" type="button" class="write-tool" data-i18n="answer.undo">
+                Angre
+              </button>
+              <button id="write-clear" type="button" class="write-tool" data-i18n="answer.clear">
+                Tøm
+              </button>
+            </div>
+          </div>
+          <div
+            id="keypad"
+            class="keypad"
+            role="group"
+            data-i18n-aria-label="answer.keypad"
+            aria-label="Talltaster"
+          ></div>
         </div>
 
         <p id="feedback" class="feedback" aria-live="polite"></p>
@@ -232,6 +262,25 @@
         </div>
 
         <div class="setting">
+          <label class="setting-label" for="answer-mode" data-i18n="settings.answerMode">
+            Svarer med
+          </label>
+          <select id="answer-mode" class="setting-select"></select>
+        </div>
+
+        <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="mirror-nudge" data-i18n="settings.mirrorNudge">
+              Øv på hvilken vei tallene vender
+            </label>
+            <input id="mirror-nudge" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.mirrorNudgeHelp">
+            Av til å begynne med.
+          </p>
+        </div>
+
+        <div class="setting">
           <div class="setting-head">
             <label class="setting-label" for="play-minutes" data-i18n="settings.playTime">
               Spilletid
@@ -288,7 +337,13 @@
       <div class="overlay-card grownups">
         <h2 data-i18n="grownups.title">Framgang</h2>
         <dl id="grownups-stats" class="stats"></dl>
+
+        <h3 class="grownups-sub" data-i18n="grownups.practise">Hva som øves på</h3>
+        <p class="setting-help" data-i18n="grownups.practiseHelp">
+          Skru av det de ikke trenger akkurat nå, eller hopp over trinnene de allerede kan.
+        </p>
         <div id="grownups-tiers" class="tier-bars"></div>
+        <p id="grownups-note" class="grownups-note" aria-live="polite" hidden></p>
         <p class="fine-print" data-i18n="grownups.fine">
           Klokkeslettene planlegges med en gjentakelsesalgoritme: hvert av dem kommer
           tilbake akkurat når det holder på å bli glemt. Alt lagres bare i denne

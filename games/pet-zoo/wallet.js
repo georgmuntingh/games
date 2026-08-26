@@ -22,8 +22,10 @@
 // difference between those two lists is what is owed. That is what makes paying twice
 // impossible without the scheduler having to remember anything.
 
-import { TIERS, tierMastery } from './curriculum.js';
-import { SPECIES_IDS, timesOfSpecies } from './pets.js';
+import { factsOfSpecies, SPECIES_IDS, timesOfSpecies } from './pets.js';
+import * as addition from './subjects/addition.js';
+import { tierMastery } from './subjects/index.js';
+import { TIERS } from './curriculum.js';
 import { formFor } from './srs.js';
 
 /**
@@ -124,22 +126,32 @@ export function streakDays(days) {
  * Every milestone the save currently satisfies, as ids. Pure, and derived entirely from state
  * that was already being stored — no counter anywhere had to be added to support this.
  *
- * Ids are `mastery:<tier>`, `week:<n>` (the nth full week of a streak) and `species:<id>`.
+ * Ids are `mastery:<tier>`, `week:<n>` (the nth full week of a streak) and `species:<id>` for
+ * the clock, and `mastery:add:<tier>` / `species:add:<id>` for adding.
+ *
+ * The clock's ids are left exactly as they were rather than being renamed to match. They have
+ * already been earned and paid out in saves in the wild, and `settleMilestones` pays for any
+ * id it has not seen before — so renaming `mastery:0` to `mastery:clock:0` would hand every
+ * existing player their whole history over again.
  */
 export function milestonesReached(items, stats) {
   const out = [];
   const zoo = items ?? {};
 
   for (const tier of TIERS) {
-    if (tierMastery(zoo, tier.id) >= 1) out.push(`mastery:${tier.id}`);
+    if (tierMastery(zoo, 'clock', tier.id) >= 1) out.push(`mastery:${tier.id}`);
+  }
+  for (const tier of addition.TIERS) {
+    if (tierMastery(zoo, addition.id, tier.id) >= 1) out.push(`mastery:add:${tier.id}`);
   }
 
   const weeks = Math.floor(streakDays(stats?.daysPlayed) / STREAK_WEEK_DAYS);
   for (let week = 1; week <= weeks; week += 1) out.push(`week:${week}`);
 
+  const collected = (ids) => ids.length > 0 && ids.every((id) => zoo[id]?.hatchedAt);
   for (const species of SPECIES_IDS) {
-    const times = timesOfSpecies(species);
-    if (times.length && times.every((id) => zoo[id]?.hatchedAt)) out.push(`species:${species}`);
+    if (collected(timesOfSpecies(species))) out.push(`species:${species}`);
+    if (collected(factsOfSpecies(species))) out.push(`species:add:${species}`);
   }
 
   return out;

@@ -228,6 +228,328 @@ main {
   color: var(--pz-accent);
 }
 
+/* --------------------------------------------------------------- adding up */
+
+/* `display` on these beats the `hidden` attribute's UA rule, so each one has to say again
+   that hidden means hidden. Without this the sum panel sits under every clock face. */
+#prompt-sum[hidden],
+#answer-sum[hidden],
+.keypad[hidden] {
+  display: none;
+}
+
+
+/* The equation takes the same slot in the prompt card that a time does, so the two
+   subjects read as one game rather than two bolted together. */
+.sum {
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--pz-accent);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sum .op {
+  color: var(--pz-ink-soft);
+  font-weight: 600;
+  font-style: normal;
+}
+
+/* One slot per digit of the answer. How many there are is decided by the tier, never by
+   the answer, so the boxes cannot give away whether the sum passes ten. */
+.sum .slot {
+  display: inline-block;
+  min-width: 1.05em;
+  padding: 0 0.06em;
+  text-align: center;
+  border-bottom: 3px solid var(--pz-line);
+  color: var(--pz-ink);
+  font-weight: 800;
+}
+
+.sum .slot.is-next {
+  border-bottom-color: var(--pz-accent);
+}
+
+.sum .slot.is-empty::after {
+  content: '\00a0';
+}
+
+.sum-wrap {
+  margin: 0.85rem auto 0.4rem;
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.key {
+  min-height: 56px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--pz-ink);
+  background: var(--pz-card);
+  border: 2px solid var(--pz-line);
+  border-radius: 14px;
+  box-shadow: var(--pz-shadow);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.key:active {
+  background: var(--pz-accent-soft);
+  transform: scale(0.96);
+}
+
+.key[disabled] {
+  opacity: 0.4;
+}
+
+.key.key-clear {
+  font-size: 1rem;
+  color: var(--pz-ink-soft);
+}
+
+/* ------------------------------------------------------------- writing it */
+
+#answer-write[hidden],
+.write-picker[hidden] {
+  display: none;
+}
+
+.write-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* One box per digit of the answer — never one per digit of *this* answer, which would say
+   how big it is. A single-digit answer can go in either box; both are read left to right
+   and the empty one is simply skipped. */
+.write-boxes {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+}
+
+.write-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.write-pad {
+  width: clamp(104px, 33vw, 140px);
+  aspect-ratio: 1;
+  border: 2px dashed var(--pz-line);
+  border-radius: 14px;
+  background: var(--pz-card);
+  touch-action: none;
+  position: relative;
+}
+
+.write-pad.has-ink {
+  border-style: solid;
+  border-color: var(--pz-accent-soft);
+}
+
+/* The faint guide only shows while the box is empty, so it never sits under the child's
+   own writing. */
+.write-pad::after {
+  content: '';
+  position: absolute;
+  inset: 22% 30%;
+  border-bottom: 2px dotted var(--pz-line);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.write-pad.has-ink::after {
+  display: none;
+}
+
+.ink-pad {
+  display: block;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.write-read {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  min-height: 34px;
+}
+
+/* Tapping what it read is how a misreading gets put right — always available, not only
+   when the game happens to be unsure. */
+.read-chip,
+.read-alt {
+  border: 1px solid var(--pz-line);
+  border-radius: 999px;
+  background: var(--pz-card);
+  color: var(--pz-ink);
+  font: inherit;
+  padding: 0.15rem 0.6rem;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 32px;
+}
+
+.read-chip {
+  font-weight: 800;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.read-chip.is-unsure {
+  border-style: dashed;
+  color: var(--pz-ink-soft);
+}
+
+.read-alt {
+  font-size: 0.85rem;
+  color: var(--pz-ink-soft);
+  background: var(--pz-accent-soft);
+  border-color: transparent;
+}
+
+.read-chip:active,
+.read-alt:active {
+  background: var(--pz-accent-soft);
+  transform: scale(0.96);
+}
+
+.write-picker {
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+}
+
+.write-picker-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--pz-ink-soft);
+}
+
+.write-picker-keys {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+}
+
+.write-picker-keys button {
+  min-height: 46px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 2px solid var(--pz-line);
+  border-radius: 12px;
+  background: var(--pz-card);
+  color: var(--pz-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.write-picker-keys button:active {
+  background: var(--pz-accent-soft);
+}
+
+.write-tools {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.write-tool {
+  border: 1px solid var(--pz-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--pz-ink-soft);
+  font: inherit;
+  padding: 0.35rem 0.9rem;
+  min-height: 40px;
+}
+
+/* The optional "which way round" hint, shown only when a grown-up has asked for it. */
+.mirror-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--pz-ink-soft);
+  text-align: left;
+}
+
+.mirror-hint b {
+  font-size: 1.8rem;
+  color: var(--pz-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- ten-frame */
+
+.tenframe-host {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tenframe {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.tf-frame {
+  fill: none;
+  stroke: var(--pz-line);
+  stroke-width: 1.5;
+}
+
+.tf-cell {
+  fill: var(--pz-card-2);
+}
+
+.tf-dot {
+  fill: var(--pz-accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tf-drop 0.32s ease-out backwards;
+  animation-delay: var(--tf-delay, 0s);
+}
+
+/* The second addend arrives in its own colour, so "seven, and then eight more" is visible
+   rather than something the caption has to claim. */
+.tf-from-b {
+  fill: var(--pz-warm);
+}
+
+/* And the ones that finish the first ten are the whole lesson, so they are the ones that
+   look like an answer. */
+.tf-bridge {
+  fill: var(--pz-good);
+}
+
+@keyframes tf-drop {
+  from { opacity: 0; transform: translateY(-8px) scale(0.5); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ------------------------------------------------------------------- clock */
 
 .clock-wrap {
@@ -478,6 +800,12 @@ main {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A pet that keeps a sum wears the sum, where one that keeps a time wears a clock face. */
+.collar-sum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .pen-time {
@@ -1040,6 +1368,90 @@ body.in-habitat .zoo-bar {
 
 .tier-row.locked {
   opacity: 0.5;
+}
+
+/* ------------------------------------------------------- what to practise */
+
+.grownups-sub {
+  font-size: 0.95rem;
+  margin: 1.1rem 0 0.2rem;
+}
+
+.practice-subject + .practice-subject {
+  margin-top: 0.9rem;
+}
+
+.practice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.practice-name {
+  font-weight: 700;
+}
+
+.practice-subject.is-off .tier-row {
+  opacity: 0.4;
+}
+
+/* A skipped rung stays visible with its real mastery on it: the point is to be able to see
+   what was skipped and why it looked skippable. */
+.tier-row.is-skipped .tier-head > span:first-child {
+  text-decoration: line-through;
+  color: var(--pz-ink-soft);
+}
+
+.tier-row .tier-head {
+  align-items: baseline;
+}
+
+.tier-note {
+  font-size: 0.78rem;
+  color: var(--pz-ink-soft);
+}
+
+.tier-skip {
+  border: 1px solid var(--pz-line);
+  border-radius: 999px;
+  background: var(--pz-card);
+  color: var(--pz-ink-soft);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.1rem 0.6rem;
+  min-height: 30px;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tier-skip:active {
+  background: var(--pz-accent-soft);
+}
+
+.tier-skip[disabled] {
+  opacity: 0.4;
+}
+
+.grownups-note {
+  font-size: 0.82rem;
+  color: var(--pz-warn);
+  margin: 0.4rem 0 0;
+}
+
+.grownups-note[hidden] {
+  display: none;
+}
+
+/* A pet nobody is being asked about. Deliberately not the nap's sleeping face — that means
+   "back in two minutes", and this means "not just now". */
+.pen.is-resting {
+  opacity: 0.45;
+}
+
+.pen.is-resting .pen-flag {
+  opacity: 1;
 }
 
 .fine-print {
@@ -1647,6 +2059,10 @@ body.in-habitat .zoo-bar {
 /* Decoration off, instruction on: the correction still animates (slowly) because it is
    teaching, but nothing else moves for its own sake. */
 @media (prefers-reduced-motion: reduce) {
+  .tf-dot {
+    animation: none;
+  }
+
   .sky::after,
   .hand,
   .big-btn {

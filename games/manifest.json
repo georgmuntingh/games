@@ -57,8 +57,8 @@
     {
       "id": "pet-zoo",
       "title": "Pet Zoo",
-      "description": "Hatch and feed a zoo of very cute creatures by dragging the hands of a real clock. It quietly learns which times you find hard and brings them back.",
-      "tags": ["learning", "kids", "clock", "solo"]
+      "description": "Hatch and feed a zoo of very cute creatures by reading a real clock and adding numbers up. It quietly learns which ones you find hard and brings them back.",
+      "tags": ["learning", "kids", "clock", "maths", "solo"]
     }
   ]
 }

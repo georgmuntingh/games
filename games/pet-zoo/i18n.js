@@ -55,6 +55,29 @@ const NB_MINUTES = {
   55: { text: 'fem på {h}', next: true },
 };
 
+// Counting words, which are not the clock's words: Norwegian says "klokka ett" for the hour
+// but "én pluss to" when counting, so HOUR_WORDS could not simply be extended.
+const NUMBER_WORDS = {
+  en: ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen',
+    'nineteen', 'twenty'],
+  nb: ['null', 'én', 'to', 'tre', 'fire', 'fem', 'seks', 'sju', 'åtte', 'ni', 'ti',
+    'elleve', 'tolv', 'tretten', 'fjorten', 'femten', 'seksten', 'sytten', 'atten',
+    'nitten', 'tjue'],
+};
+
+/** A number spelled out: "fifteen" / "femten". Falls back to the digits past twenty. */
+export function numberWord(lang, n) {
+  const list = NUMBER_WORDS[lang] ?? NUMBER_WORDS[DEFAULT_LANGUAGE];
+  return list[n] ?? String(n);
+}
+
+/** A sum as a person would say it: "seven plus eight" / "sju pluss åtte". */
+export const spokenSum = (lang, a, b) =>
+  lang === 'en'
+    ? `${numberWord('en', a)} plus ${numberWord('en', b)}`
+    : `${numberWord('nb', a)} pluss ${numberWord('nb', b)}`;
+
 const wrap = (h) => ((h - 1 + 12) % 12) + 1; // keeps hours in 1..12, never 0 or 13
 
 /** The hour spelled out: "four" / "fire". */
@@ -182,6 +205,16 @@ const STRINGS = {
       'After a few minutes the pets get sleepy and the game stops. You can still wander the zoo while they nap.',
     'howto.6': 'Grown-ups: press and hold the title for progress.',
 
+    'grownups.practise': 'What to practise',
+    'grownups.practiseHelp':
+      'Switch off anything they do not need just now, or skip the rungs they have already got. Pets from anything switched off go and rest — they keep everything they have earned, they stop getting hungry, and they carry on exactly where they left off if you switch it back on.',
+    'grownups.skip': 'Skip this',
+    'grownups.practiseThis': 'Practise this',
+    'grownups.skipped': 'skipped',
+    'grownups.lastSubject': 'There has to be something left to practise.',
+    'subject.clock': 'The clock',
+    'subject.add': 'Adding up',
+    'zoo.resting': '{name} is resting',
     'grownups.title': 'Progress',
     'grownups.answered': 'Times answered',
     'grownups.accuracy': 'Correct first try',
@@ -279,6 +312,48 @@ const STRINGS = {
     'shop.fountain': 'Fountain',
     'shop.statue': 'Statue',
 
+    'prompt.sumEgg': 'A chilly egg! Warm it up:',
+    'prompt.sumEgg1': 'The egg is stirring! Keep going:',
+    'prompt.sumEgg2': 'It is cracking open! One more:',
+    'prompt.sumForgot': '{name} forgot their snack. It is:',
+    'prompt.sumHungry': '{name} is hungry! Their snack is:',
+    'prompt.sumSnack': '{name} fancies a snack:',
+    'teach.sumOffByOne': 'Just one out — count once more.',
+    'teach.sumTransposed': 'The right digits, the other way round.',
+    'teach.sumGaveAddend': 'That is one of the numbers on its own.',
+    'teach.sumGaveDifference': 'That is taking them apart, not putting them together.',
+    'teach.sumPlain': '{a} and {b} makes {sum}.',
+    'teach.sumMakeTen': '{a} and {bridge} makes ten, then {rest} more — {sum}.',
+    'tier.add.0.name': 'Counting on',
+    'tier.add.0.blurb': 'Adding nothing, and adding one.',
+    'tier.add.1.name': 'Sums to ten',
+    'tier.add.1.blurb': 'Everything that fits in one ten-frame.',
+    'tier.add.2.name': 'Doubles',
+    'tier.add.2.blurb': 'Two of the same, past ten.',
+    'tier.add.3.name': 'Adding ten',
+    'tier.add.3.blurb': 'The answer is already in the question.',
+    'tier.add.4.name': 'Over the ten',
+    'tier.add.4.blurb': 'Make ten first, then add the rest.',
+    'answer.aria': 'Your answer',
+    'answer.empty': 'nothing yet',
+    'answer.keypad': 'Number buttons',
+    'answer.digit': 'Put down {n}',
+    'answer.clear': 'Clear',
+    'settings.answerMode': 'Answering',
+    'settings.answerAuto': 'Automatic',
+    'settings.answerType': 'Typing',
+    'settings.answerTap': 'Buttons',
+    'answer.writeHere': 'Write here',
+    'answer.reads': 'reads {n}',
+    'answer.orThis': 'or {n}?',
+    'answer.fixTitle': 'Which number was it?',
+    'answer.fixHint': 'Tap what it reads to put it right.',
+    'answer.mirrored': 'You wrote it the other way round. It usually goes like this:',
+    'answer.undo': 'Undo',
+    'settings.answerWrite': 'Writing',
+    'settings.mirrorNudge': 'Practise which way numbers face',
+    'settings.mirrorNudgeHelp':
+      'Off to begin with. A backwards number always counts — writing 3 and 5 the other way round is ordinary at this age. With this on, the game also shows which way they usually go.',
     'tier.0.name': 'O’clock',
     'tier.0.blurb': 'The big hand points straight up.',
     'tier.1.name': 'Half past',
@@ -373,6 +448,16 @@ const STRINGS = {
       'Etter noen minutter blir dyrene trøtte, og spillet stopper. Du kan fortsatt gå rundt i dyrehagen mens de sover.',
     'howto.6': 'Voksne: hold inne tittelen for å se framgang.',
 
+    'grownups.practise': 'Hva som øves på',
+    'grownups.practiseHelp':
+      'Skru av det de ikke trenger akkurat nå, eller hopp over trinnene de allerede kan. Dyr fra noe som er skrudd av går og hviler — de beholder alt de har tjent opp, de blir ikke sultne, og de fortsetter nøyaktig der de slapp hvis du skrur det på igjen.',
+    'grownups.skip': 'Hopp over',
+    'grownups.practiseThis': 'Øv på denne',
+    'grownups.skipped': 'hoppet over',
+    'grownups.lastSubject': 'Det må være noe igjen å øve på.',
+    'subject.clock': 'Klokka',
+    'subject.add': 'Pluss',
+    'zoo.resting': '{name} hviler',
     'grownups.title': 'Framgang',
     'grownups.answered': 'Klokkeslett svart på',
     'grownups.accuracy': 'Riktig på første forsøk',
@@ -470,6 +555,48 @@ const STRINGS = {
     'shop.fountain': 'Fontene',
     'shop.statue': 'Statue',
 
+    'prompt.sumEgg': 'Et kaldt egg! Varm det opp:',
+    'prompt.sumEgg1': 'Egget rører på seg! Fortsett:',
+    'prompt.sumEgg2': 'Det slår sprekker! Én til:',
+    'prompt.sumForgot': '{name} har glemt matbiten sin. Den er:',
+    'prompt.sumHungry': '{name} er sulten! Matbiten er:',
+    'prompt.sumSnack': '{name} vil gjerne ha en matbit:',
+    'teach.sumOffByOne': 'Bare én bom — tell en gang til.',
+    'teach.sumTransposed': 'Riktige sifre, men i feil rekkefølge.',
+    'teach.sumGaveAddend': 'Det er bare det ene tallet.',
+    'teach.sumGaveDifference': 'Det er å ta dem fra hverandre, ikke å legge dem sammen.',
+    'teach.sumPlain': '{a} og {b} blir {sum}.',
+    'teach.sumMakeTen': '{a} og {bridge} blir ti, så {rest} til — {sum}.',
+    'tier.add.0.name': 'Telle videre',
+    'tier.add.0.blurb': 'Å legge til ingenting, og å legge til én.',
+    'tier.add.1.name': 'Summer opp til ti',
+    'tier.add.1.blurb': 'Alt som får plass i én tierramme.',
+    'tier.add.2.name': 'Dobler',
+    'tier.add.2.blurb': 'To like, over ti.',
+    'tier.add.3.name': 'Legge til ti',
+    'tier.add.3.blurb': 'Svaret står allerede i oppgaven.',
+    'tier.add.4.name': 'Over tieren',
+    'tier.add.4.blurb': 'Lag ti først, så legger du til resten.',
+    'answer.aria': 'Svaret ditt',
+    'answer.empty': 'ingenting ennå',
+    'answer.keypad': 'Talltaster',
+    'answer.digit': 'Sett inn {n}',
+    'answer.clear': 'Tøm',
+    'settings.answerMode': 'Svarer med',
+    'settings.answerAuto': 'Automatisk',
+    'settings.answerType': 'Tastatur',
+    'settings.answerTap': 'Knapper',
+    'answer.writeHere': 'Skriv her',
+    'answer.reads': 'leser {n}',
+    'answer.orThis': 'eller {n}?',
+    'answer.fixTitle': 'Hvilket tall var det?',
+    'answer.fixHint': 'Trykk på det den leser for å rette det.',
+    'answer.mirrored': 'Du skrev det motsatt vei. Sånn pleier det å se ut:',
+    'answer.undo': 'Angre',
+    'settings.answerWrite': 'Skriving',
+    'settings.mirrorNudge': 'Øv på hvilken vei tallene vender',
+    'settings.mirrorNudgeHelp':
+      'Av til å begynne med. Et speilvendt tall teller alltid — å skrive 3 og 5 motsatt vei er helt vanlig i denne alderen. Er denne på, viser spillet også hvilken vei de vanligvis vender.',
     'tier.0.name': 'Hele timer',
     'tier.0.blurb': 'Den lange viseren peker rett opp.',
     'tier.1.name': 'Halve timer',
@@ -501,6 +628,8 @@ export function translator(lang) {
   const t = (key, params) => fill(table[key] ?? fallback[key] ?? key, params);
   t.lang = STRINGS[lang] ? lang : DEFAULT_LANGUAGE;
   t.spoken = (h, m) => spokenTime(t.lang, h, m);
+  t.spokenSum = (a, b) => spokenSum(t.lang, a, b);
+  t.number = (n) => numberWord(t.lang, n);
   t.hourWord = (h) => hourWord(t.lang, h);
   t.names = NAMES[t.lang] ?? NAMES[DEFAULT_LANGUAGE];
   return t;
