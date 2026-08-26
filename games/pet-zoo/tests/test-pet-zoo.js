@@ -90,7 +90,7 @@ import { mirror, recognize, UNSURE_BELOW } from '../ink/recognize.js';
 import { CAPACITY, recall, remember, sanitize as sanitizeMemory } from '../ink/memory.js';
 import { bounds as inkBounds, dedupe, hasInk, resample } from '../ink/strokes.js';
 import { CASES } from './ink-fixtures.js';
-import * as addSubject from '../subjects/addition.js';
+import * as addSubject from '../subjects/math/index.js';
 import * as clockSubject from '../subjects/clock.js';
 import { fillDuration, fillPlan, FRAME, tenFrameSvg } from '../tenframe.js';
 import {
@@ -1749,7 +1749,7 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
+  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], covered: [], hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
 });
 
@@ -3030,7 +3030,7 @@ describe('subjects — one zoo, more than one thing to learn');
 test('an id is claimed by exactly the subject that owns it', () => {
   assertEqual(subjectIdOf('4:15'), 'clock');
   assertEqual(subjectIdOf('12:55'), 'clock');
-  assertEqual(subjectIdOf('add:3+5'), 'add');
+  assertEqual(subjectIdOf('add:3+5'), 'math');
   assertEqual(subjectIdOf('add:5+3'), null, 'and only in its canonical spelling');
   assertEqual(subjectIdOf('chem:H2O'), null, 'a subject this build lacks claims nothing');
   assertEqual(subjectIdOf('nonsense'), null);
@@ -3066,13 +3066,13 @@ test('new material is interleaved between subjects, not concatenated', () => {
 });
 
 test('unseen material stops at the tier a subject has unlocked', () => {
-  const heads = unseenAcrossSubjects({}, { clock: 0, add: 0 });
+  const heads = unseenAcrossSubjects({}, { clock: 0, math: 0 });
   assert(heads.length > 0, 'a fresh zoo has everything to learn');
   assert(heads.every((entry) => entry.tier === 0), 'and nothing above the unlocked tier');
   assert(heads.some((entry) => entry.subject === 'clock'), 'the clock is in there');
-  assert(heads.some((entry) => entry.subject === 'add'), 'and so is adding');
+  assert(heads.some((entry) => entry.subject === 'math'), 'and so is adding');
   assertEqual(heads[0].subject, 'clock', 'a fresh zoo meets the clock first');
-  assertEqual(heads[1].subject, 'add', 'and then a sum, rather than every clock face first');
+  assertEqual(heads[1].subject, 'math', 'and then a sum, rather than every clock face first');
 });
 
 test('a seen item is never offered as new again', () => {
@@ -3082,19 +3082,23 @@ test('a seen item is never offered as new again', () => {
 });
 
 test('the zoo counts every subject it teaches', () => {
-  assertEqual(totalItemCount(), 144 + 66, 'the hardcoded 144 is gone, not merely moved');
-  assertEqual(SUBJECT_IDS.join(), 'clock,add', 'and both subjects are counted');
+  assertEqual(
+    totalItemCount(),
+    144 + addSubject.ALL_ITEMS.length,
+    'the hardcoded 144 is gone, not merely moved'
+  );
+  assertEqual(SUBJECT_IDS.join(), 'clock,math', 'and both subjects are counted');
 });
 
 test('a tier opens for one subject without opening another', () => {
   const items = {};
-  for (const entry of unseenAcrossSubjects({}, { clock: 0, add: 0 })) {
+  for (const entry of unseenAcrossSubjects({}, { clock: 0, math: 0 })) {
     // Only the clock's first tier is finished; the sums are left untouched.
     if (entry.subject === 'clock') items[entry.id] = { subject: 'clock', phase: 'graduated' };
   }
-  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0, add: 0 } });
+  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0, math: 0 } });
   assertEqual(tiers.clock, 1, 'finishing tier 0 opens tier 1');
-  assertEqual(tiers.add, 0, 'and adding has not moved an inch');
+  assertEqual(tiers.math, 0, 'and maths has not moved an inch');
   assertEqual(unlocked.join(), 'clock', 'and only the subject that moved is named');
 });
 
@@ -3219,7 +3223,7 @@ test('two subjects due at once alternate rather than repeat', () => {
     items: {
       '4:15': due('clock', 1),
       '9:30': due('clock', 2),
-      'add:3+5': due('add', 3),
+      'add:3+5': due('math', 3),
     },
   };
   assertEqual(
@@ -3228,7 +3232,7 @@ test('two subjects due at once alternate rather than repeat', () => {
     'after a clock question, the sum wins even though it is less overdue'
   );
   assertEqual(
-    nextItem(state, { now: 0, lastSubject: 'add' }),
+    nextItem(state, { now: 0, lastSubject: 'math' }),
     '4:15',
     'and after a sum, the most overdue clock face comes back'
   );
@@ -3254,9 +3258,10 @@ test('alternating never overrides urgency within one subject', () => {
 describe('adding — the deck');
 
 test('every unordered pair up to ten and ten, and nothing twice', () => {
-  assertEqual(addSubject.ALL_ITEMS.length, 66);
-  const ids = addSubject.ALL_ITEMS.map((fact) => fact.id);
-  assertEqual(new Set(ids).size, 66, 'a fact appears in two tiers');
+  const sums = addSubject.ALL_ITEMS.filter((entry) => entry.op === '+' && entry.tier <= 4);
+  assertEqual(sums.length, 66);
+  const ids = addSubject.ALL_ITEMS.map((entry) => entry.id);
+  assertEqual(new Set(ids).size, ids.length, 'an item appears in two tiers');
 });
 
 test('the tiers partition the deck, so a tier can actually be finished', () => {
@@ -3337,22 +3342,27 @@ describe('adding — how wide the answer box is');
 test('the strip never changes width, whatever the fact is', () => {
   // A strip that narrowed for small sums would say "this one is under ten" before the child
   // had added anything.
-  const widths = new Set(addSubject.ALL_ITEMS.map(() => addSubject.answerWidth()));
+  // One width per item, and the same one for every fact: a strip that narrowed would say the
+  // answer is small before the child had worked it out.
+  const widths = new Set(
+    addSubject.ALL_ITEMS.filter((entry) => !entry.skill).map((entry) => addSubject.answerWidth(entry))
+  );
   assertEqual(widths.size, 1, 'the width of the answer is a clue');
-  assertEqual(addSubject.answerWidth(), 2);
+  assertEqual(addSubject.answerWidth({ op: '+', a: 3, b: 5 }), 2);
 });
 
 test('every answer in the deck fits in the strip', () => {
   // The first tier contains 0 + 10 — "sums to ten" includes ten — so a one-box strip would
   // not merely leak, it would make a fact impossible to answer at all.
-  for (const fact of addSubject.ALL_ITEMS) {
+  for (const entry of addSubject.ALL_ITEMS) {
+    if (entry.skill) continue; // a skill's numbers are made up; it gets its own sweep below
     assert(
-      addSubject.answerDigits(fact) <= addSubject.answerWidth(),
-      `${fact.id} cannot be answered in ${addSubject.answerWidth()} boxes`
+      addSubject.answerDigits(entry) <= addSubject.answerWidth(entry),
+      `${entry.id} cannot be answered in ${addSubject.answerWidth(entry)} boxes`
     );
   }
-  assertEqual(addSubject.answerDigits({ a: 0, b: 10 }), 2, 'the fact that forced this');
-  assertEqual(addSubject.tierOf({ a: 0, b: 10 }), 0, 'and it really is in the first tier');
+  assertEqual(addSubject.answerDigits({ op: '+', a: 0, b: 10 }), 2, 'the fact that forced this');
+  assertEqual(addSubject.tierOf({ op: '+', a: 0, b: 10 }), 0, 'and it really is in the first tier');
 });
 
 describe('the ten-frame');
@@ -3404,7 +3414,7 @@ test('the picture waits exactly as long as it takes to draw', () => {
 describe('adding — pets, homes and milestones');
 
 test('a fact hatches a pet of its own', () => {
-  const portrait = portraitOf({ subject: 'add', a: 7, b: 8 });
+  const portrait = portraitOf({ subject: 'math', a: 7, b: 8 });
   assertEqual(portrait.key, 'add:7+8');
   assertEqual(portrait.species, speciesForFact(7, 8));
   assert(portrait.index >= 0);
@@ -3419,9 +3429,9 @@ test('learning to add did not repaint the zoo', () => {
 test('no two pets of one species share a name', () => {
   for (const species of SPECIES_IDS) {
     const names = itemsOfSpecies(species).map((id) => {
-      const fact = addSubject.parse(id);
-      return fact
-        ? petName({ subject: 'add', a: fact.a, b: fact.b }, 'nb')
+      const payload = addSubject.parse(id);
+      return payload
+        ? petName({ subject: 'math', ...payload }, 'nb')
         : petName({ subject: 'clock', ...parseTimeId(id) }, 'nb');
     });
     assertEqual(new Set(names).size, names.length, `${species} has a repeated name`);
@@ -3439,10 +3449,10 @@ test('the clock species milestone still means only clock pets', () => {
 test('finishing an addition tier pays, without repricing the clock', () => {
   const items = {};
   for (const fact of addSubject.tierItems(0)) {
-    items[fact.id] = { subject: 'add', phase: 'graduated', hatchedAt: 1 };
+    items[fact.id] = { subject: 'math', phase: 'graduated', hatchedAt: 1 };
   }
   const reached = milestonesReached(items, { daysPlayed: [] });
-  assert(reached.includes('mastery:add:0'), 'the addition tier went unrewarded');
+  assert(reached.includes('mastery:math:0'), 'the addition tier went unrewarded');
   assert(!reached.includes('mastery:0'), 'and it must not claim the clock’s milestone');
 });
 
@@ -3766,14 +3776,14 @@ test('one child’s handwriting does not travel to another child’s device', ()
 
 describe('practice — choosing what the game asks about');
 
-const practiceWith = (clock, add) => practiceOf({ practice: { clock, add } });
+const practiceWith = (clock, math) => practiceOf({ practice: { clock, math } });
 
 test('a save that predates any of this practises everything', () => {
   const chosen = practiceOf({});
   assertEqual(chosen.clock.on, true);
-  assertEqual(chosen.add.on, true);
+  assertEqual(chosen.math.on, true);
   assertEqual(chosen.clock.floor, 0);
-  assertEqual(practiceOf(undefined).add.floor, 0, 'and no state at all does not throw');
+  assertEqual(practiceOf(undefined).math.floor, 0, 'and no state at all does not throw');
 });
 
 test('a hand-edited floor cannot reach past the ladder', () => {
@@ -3793,9 +3803,9 @@ test('there is always something left to practise', () => {
 test('resting is decided by the choices, not stored on the pet', () => {
   const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
   assert(isResting({ subject: 'clock', tier: 3 }, chosen), 'a switched-off subject rests');
-  assert(isResting({ subject: 'add', tier: 1 }, chosen), 'and so does a tier below the floor');
-  assert(!isResting({ subject: 'add', tier: 2 }, chosen), 'the floor itself is practised');
-  assert(!isResting({ subject: 'add', tier: 4 }, chosen), 'and everything above it');
+  assert(isResting({ subject: 'math', tier: 1 }, chosen), 'and so does a tier below the floor');
+  assert(!isResting({ subject: 'math', tier: 2 }, chosen), 'the floor itself is practised');
+  assert(!isResting({ subject: 'math', tier: 4 }, chosen), 'and everything above it');
 });
 
 test('an item from a subject this build does not know is left alone', () => {
@@ -3806,14 +3816,15 @@ test('the zoo counts towards what is switched on', () => {
   assertEqual(enabledItemCount(DEFAULT_PRACTICE), totalItemCount());
   const chosen = practiceWith({ on: false }, { on: true, floor: 2 });
   // A target that includes what the game has been told not to ask is a target nobody can reach.
-  assertEqual(enabledItemCount(chosen), 30, 'only the addition tiers from 2 up');
+  const fromTwoUp = addSubject.ALL_ITEMS.filter((entry) => entry.tier >= 2).length;
+  assertEqual(enabledItemCount(chosen), fromTwoUp, 'only the maths tiers from 2 up');
 });
 
 test('nothing skipped is ever introduced', () => {
   const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
-  const fresh = unseenAcrossSubjects({}, { clock: 3, add: 4 }, chosen);
+  const fresh = unseenAcrossSubjects({}, { clock: 3, math: 4 }, chosen);
   assert(fresh.length > 0);
-  assert(fresh.every((entry) => entry.subject === 'add'), 'a switched-off subject was taught');
+  assert(fresh.every((entry) => entry.subject === 'math'), 'a switched-off subject was taught');
   assert(fresh.every((entry) => entry.tier >= 2), 'a skipped tier was taught');
 });
 
@@ -3822,16 +3833,16 @@ describe('practice — the ladder walks past a skipped rung');
 test('the unlocked tier starts at the floor', () => {
   // A tier nobody is asked about can never reach the 80% bar, so a ladder starting at zero
   // would stall the whole subject forever.
-  assertEqual(unlockedTierOf({}, 'add', 2), 2, 'an empty zoo still opens the floor');
-  assertEqual(unlockedTierOf({}, 'add', 0), 0);
+  assertEqual(unlockedTierOf({}, 'math', 2), 2, 'an empty zoo still opens the floor');
+  assertEqual(unlockedTierOf({}, 'math', 0), 0);
 });
 
 test('but mastery keeps telling the truth, so nobody is paid for skipping', () => {
   // wallet.js awards mastery:<tier> on tierMastery >= 1. If a skipped tier reported itself
   // mastered, a child would be handed forty coins for work they never did.
-  assertEqual(tierMasteryOf({}, 'add', 0), 0, 'a skipped tier claimed to be mastered');
+  assertEqual(tierMasteryOf({}, 'math', 0), 0, 'a skipped tier claimed to be mastered');
   const reached = milestonesReached({}, { daysPlayed: [] });
-  assert(!reached.includes('mastery:add:0'), 'a skipped tier was paid for');
+  assert(!reached.includes('mastery:math:0'), 'a skipped tier was paid for');
   assert(!reached.includes('mastery:0'));
 });
 
@@ -3839,7 +3850,7 @@ describe('practice — pets that are resting');
 
 const restingState = (extra = {}) => ({
   reviewClock: 0,
-  tiers: { clock: 3, add: 4 },
+  tiers: { clock: 3, math: 4 },
   practice: practiceWith({ on: false, floor: 0 }, { on: true, floor: 0 }),
   items: {},
   ...extra,
@@ -3853,7 +3864,7 @@ test('a resting pet is never chosen, whichever queue it would have been in', () 
     ['merely graduated', clockItem({ phase: 'graduated', dueAt: 9e15 })],
   ]) {
     const picked = nextItem(restingState({ items: { '1:00': item } }), { now: 1000 });
-    assertEqual(subjectIdOf(picked), 'add', `a resting pet was asked about while ${what}`);
+    assertEqual(subjectIdOf(picked), 'math', `a resting pet was asked about while ${what}`);
   }
 });
 
@@ -3866,7 +3877,7 @@ test('a resting pet never asks to be fed', () => {
 test('the last-resort fallback does not smuggle back what was switched off', () => {
   // Everything excluded and nothing left: the one moment nobody is watching for it.
   const state = restingState({ items: { '1:00': { subject: 'clock', tier: 0, phase: 'learning', dueStep: 99, dueAt: 0, seen: 0 } } });
-  assertEqual(subjectIdOf(nextItem(state, { now: 1000, exclude: '1:00' })), 'add');
+  assertEqual(subjectIdOf(nextItem(state, { now: 1000, exclude: '1:00' })), 'math');
 });
 
 describe('practice — the schedule is frozen, not left running');
@@ -3918,7 +3929,7 @@ test('raising the floor puts the pets below it to sleep too', () => {
   // Consistent with switching a subject off: anything no longer asked stops going hungry.
   const state = {
     reviewClock: 0,
-    items: { 'add:0+0': { subject: 'add', tier: 0, phase: 'graduated', dueAt: 0, hatchedAt: 1 } },
+    items: { 'add:0+0': { subject: 'math', tier: 0, phase: 'graduated', dueAt: 0, hatchedAt: 1 } },
   };
   const raised = applyPractice(state, practiceWith({}, { floor: 2 }), 1000);
   assertEqual(raised.items['add:0+0'].restedAt, 1000);
@@ -3927,11 +3938,11 @@ test('raising the floor puts the pets below it to sleep too', () => {
 
 test('the choices survive a reload, clamped', () => {
   const storage = fakeStorage();
-  write({ ...freshState(0), practice: { clock: { on: false, floor: 9 }, add: { on: true, floor: 1 } } }, storage);
+  write({ ...freshState(0), practice: { clock: { on: false, floor: 9 }, math: { on: true, floor: 1 } } }, storage);
   const back = load(0, storage);
   assertEqual(back.practice.clock.on, false);
   assertEqual(back.practice.clock.floor, LAST_TIER, 'a floor past the ladder was kept');
-  assertEqual(back.practice.add.floor, 1);
+  assertEqual(back.practice.math.floor, 1);
 });
 
 const out = document.getElementById('out');

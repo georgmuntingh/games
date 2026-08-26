@@ -14,7 +14,7 @@
 
 import { sanitizeZoo } from './shop.js';
 import { subjectOf, tiersOf } from './subjects/index.js';
-import { cleanMilestones, dayStamp, freshState, migrateItems, VERSION } from './store.js';
+import { cleanMilestones, dayStamp, freshState, migrateItems, upgrade, VERSION } from './store.js';
 import { normalize as normalizeCoins } from './wallet.js';
 
 export const TRANSFER_APP = 'pet-zoo';
@@ -166,6 +166,10 @@ export const petCount = (items) =>
  */
 export function applyImport(state, payload, now) {
   const base = freshState(now);
+  // Through the same upgrade a local save goes through, and for the same reason: a file
+  // written before the maths subject was renamed files its progress and its paid milestones
+  // under `add`, and reading it as-is would drop the progress and then pay for it again.
+  const carried = upgrade(payload) ?? payload;
   return {
     ...base,
     createdAt: payload.createdAt ?? base.createdAt,
@@ -173,15 +177,15 @@ export function applyImport(state, payload, now) {
     reviewClock: Number.isFinite(payload.reviewClock) ? payload.reviewClock : 0,
     // Reads either shape: a file from a single-subject build carries one `tier`, a current
     // one carries a tier per subject.
-    tiers: tiersOf(payload),
+    tiers: tiersOf(carried),
     // A balance from a build that predates the shop, or from a hand-edited file, arrives as
     // nothing rather than as a fortune. What each pet owns rides along on the items.
     coins: normalizeCoins(payload.coins),
     zooDecor: sanitizeZoo(payload.zooDecor),
-    milestones: cleanMilestones(payload.milestones),
+    milestones: cleanMilestones(carried.milestones),
     // A save that lists its milestones has had them read on the device it came from; one that
     // does not is from a build that predates them, and is left for the latch at boot.
-    milestonesGrantedAt: Array.isArray(payload.milestones) ? now : 0,
+    milestonesGrantedAt: Array.isArray(carried.milestones) ? now : 0,
     // A save that carries a balance was already paid its back pay on the device it came
     // from; one from a build that predates the shop has not been, and is left for the grant
     // at boot to pick up — otherwise moving an old zoo across would quietly cost the child

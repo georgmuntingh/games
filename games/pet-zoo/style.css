@@ -345,6 +345,16 @@ main {
   display: flex;
   gap: 0.7rem;
   justify-content: center;
+  /* Without this the flex row stretches every pad to the tallest one and `aspect-ratio: 1`
+     below never gets a say, so three or four pads come out as tall rectangles. */
+  align-items: flex-start;
+}
+
+/* Two pads had the width to themselves; three or four have to share it. The row says how many
+   there are and the pad shrinks to suit — four across a narrow phone is tight, but a pad that
+   overflowed the screen would be worse than a small one. */
+.write-boxes {
+  --pads: 2;
 }
 
 .write-box {
@@ -355,7 +365,7 @@ main {
 }
 
 .write-pad {
-  width: clamp(104px, 33vw, 140px);
+  width: clamp(64px, calc((100vw - 3.5rem - (var(--pads, 2) - 1) * 0.7rem) / var(--pads, 2)), 140px);
   aspect-ratio: 1;
   border: 2px dashed var(--pz-line);
   border-radius: 14px;
@@ -386,6 +396,12 @@ main {
 
 .ink-pad {
   display: block;
+  /* Taken out of the flow, because the canvas is sized in pixels from whatever the pad
+     measured last time. In the flow those pixels *become* the pad's height, which overrides
+     the square aspect ratio above the moment the pad changes width — which is exactly what
+     happens when a three- or four-box answer makes the pads narrower. */
+  position: absolute;
+  inset: 0;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
@@ -507,6 +523,7 @@ main {
 .tenframe-host {
   width: 100%;
   overflow-x: auto;
+  text-align: center;
 }
 
 .tenframe {
@@ -545,8 +562,150 @@ main {
   fill: var(--pz-good);
 }
 
+/* Taking away: the counter is already on the board, and then it is not. It fades and shrinks
+   rather than vanishing, so the child can see *which* ones went. */
+.tf-gone {
+  animation: tf-drop 0.32s ease-out backwards, tf-lift 0.3s ease-in forwards;
+  animation-delay: 0s, var(--tf-delay, 0s);
+}
+
 @keyframes tf-drop {
   from { opacity: 0; transform: translateY(-8px) scale(0.5); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes tf-lift {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0.12; transform: translateY(-9px) scale(0.55); }
+}
+
+/* --------------------------------------------------------------- columns */
+
+/* The stacked sum: one grid column per place, so the carry box, the two numbers and the
+   answer box for a place all sit in the same vertical line. Everything else about a column
+   sum is that alignment, so it is the grid that enforces it rather than any padding. */
+.colwalk {
+  display: inline-grid;
+  grid-template-columns: auto repeat(var(--cw-cols, 2), 1.15em);
+  gap: 0.05rem 0.32rem;
+  /* Fixed rather than relative, because this is drawn in two quite different places — inside
+     the question, where the surrounding type is large, and inside the correction, where it is
+     not — and a column sum that changed size between them would read as two different things. */
+  font-size: 1.75rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--pz-accent);
+  text-align: center;
+}
+
+.cw-row {
+  display: contents;
+}
+
+/* Every row starts in the second grid column; only the operator row uses the first, which is
+   what keeps the operator outside the places rather than in one of them. `*` rather than
+   `.cw-cell`, because the answer row's boxes are the caller's markup and this module has no
+   business dictating what class they carry — only which column they land in. */
+.cw-row:not(.cw-bottom) > *:first-child {
+  grid-column: 2;
+}
+
+.cw-cell {
+  min-width: 1.15em;
+  padding: 0 0.05em;
+  line-height: 1.15;
+}
+
+.cw-op {
+  grid-column: 1;
+  color: var(--pz-ink-soft);
+  font-weight: 600;
+}
+
+.cw-rule {
+  grid-column: 1 / -1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--pz-line);
+  margin: 0.1rem 0 0.05rem;
+}
+
+/* The carry row is small and quiet: it is working-out, not part of the sum. */
+.cw-carries .cw-cell,
+.cw-carrybox {
+  font-size: 0.5em;
+  color: var(--pz-warm);
+  min-height: 1.3em;
+}
+
+.cw-carrybox {
+  border: 1.5px dashed var(--pz-line);
+  border-radius: 6px;
+  background: transparent;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cw-carrybox.is-on {
+  border-style: solid;
+  border-color: var(--pz-warm);
+}
+
+/* The answer boxes, drawn like the inline strip's so the two feel like one game. */
+.cw-answer .slot {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  border-bottom: 3px solid var(--pz-line);
+  color: var(--pz-ink);
+}
+
+.cw-answer .slot.is-next {
+  border-bottom-color: var(--pz-accent);
+}
+
+.cw-answer .slot.is-empty::after {
+  content: '\00a0';
+}
+
+/* The walkthrough. Each column lights, its digit lands, and the carry lifts into the box
+   above the column it is going into — which is the one thing about carrying that is worth
+   showing rather than saying. */
+.colwalk.is-walking .cw-lit {
+  animation: cw-light 0.5s ease-out backwards;
+  animation-delay: var(--cw-delay, 0s);
+}
+
+.colwalk.is-walking .cw-lands {
+  animation: cw-land 0.4s ease-out backwards;
+  animation-delay: var(--cw-delay, 0s);
+}
+
+.cw-mark {
+  display: inline-block;
+  color: var(--pz-warm);
+}
+
+.colwalk.is-walking .cw-mark {
+  animation: cw-carry 0.45s ease-out backwards;
+  animation-delay: var(--cw-delay, 0s);
+}
+
+@keyframes cw-light {
+  from { color: var(--pz-ink-soft); }
+  40%  { color: var(--pz-good); }
+  to   { color: var(--pz-accent); }
+}
+
+@keyframes cw-land {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes cw-carry {
+  from { opacity: 0; transform: translateY(14px) scale(0.7); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -1377,6 +1536,41 @@ body.in-habitat .zoo-bar {
   margin: 1.1rem 0 0.2rem;
 }
 
+/* Nineteen rungs is more than anybody can read as a list, so maths folds them into groups.
+   Presentation only: there is still one switch and one floor for the whole subject. */
+.tier-group {
+  margin: 0.35rem 0 0.15rem;
+}
+
+.tier-group > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ui-muted, #6b7280);
+  list-style-position: outside;
+}
+
+.tier-group > summary::-webkit-details-marker {
+  color: var(--ui-muted, #6b7280);
+}
+
+.tier-group .group-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.tier-group .tier-row {
+  margin-left: 0.6rem;
+}
+
 .practice-subject + .practice-subject {
   margin-top: 0.9rem;
 }
@@ -2060,6 +2254,19 @@ body.in-habitat .zoo-bar {
    teaching, but nothing else moves for its own sake. */
 @media (prefers-reduced-motion: reduce) {
   .tf-dot {
+    animation: none;
+  }
+
+  /* The counters that were taken away still have to look taken away, so this one keeps its
+     end state rather than being switched off entirely. */
+  .tf-gone {
+    animation: none;
+    opacity: 0.12;
+  }
+
+  .colwalk.is-walking .cw-lit,
+  .colwalk.is-walking .cw-lands,
+  .colwalk.is-walking .cw-mark {
     animation: none;
   }
 

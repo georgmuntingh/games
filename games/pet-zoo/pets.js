@@ -8,7 +8,7 @@
 
 import { pointOnFace, timeId } from './clock.js';
 import { ALL_ITEMS, TIERS } from './curriculum.js';
-import * as addition from './subjects/addition.js';
+import * as math from './subjects/math/index.js';
 import { SUBJECTS } from './subjects/index.js';
 import { DEFAULT_LANGUAGE, NAMES } from './i18n.js';
 import {
@@ -91,14 +91,22 @@ export function speciesFor(h, m) {
 }
 
 /**
- * The same idea for a sum. Adding has five tiers to the clock's four, so the pools are
- * cycled rather than indexed — every tier still opens a distinct corner of the zoo, and a
+ * The same idea for a maths item. Maths has nineteen tiers to the clock's four, so the pools
+ * are cycled rather than indexed — every tier still opens a distinct corner of the zoo, and a
  * child working through both subjects meets the same sixteen creatures either way.
+ *
+ * Note what this must never become: a function of anything but the item's id and tier. A pet's
+ * species, name, colours and habitat all hang off this, so a change of mind here would rename
+ * and recolour a zoo somebody already owns.
  */
-export function speciesForFact(a, b) {
-  const pool = TIER_SPECIES[addition.tierOf({ a, b }) % TIER_SPECIES.length];
-  return pool[hash(addition.idOf({ a, b })) % pool.length];
+export function speciesForMath(payload) {
+  const pool = TIER_SPECIES[math.tierOf(payload) % TIER_SPECIES.length];
+  return pool[hash(math.idOf(payload)) % pool.length];
 }
+
+/** The addition-fact spelling of it, kept because that is how the tests and the unlock screen
+ *  ask about a sum. */
+export const speciesForFact = (a, b) => speciesForMath({ op: '+', a, b });
 
 /** The id an item is filed under, rebuilt from the item itself. */
 export const keyOf = (item) =>
@@ -106,7 +114,7 @@ export const keyOf = (item) =>
 
 /** Which creature an item hatches, whichever subject it belongs to. */
 export const speciesOf = (item) =>
-  item?.subject === addition.id ? speciesForFact(item.a, item.b) : speciesFor(item.h, item.m);
+  item?.subject === math.id ? speciesForMath(item) : speciesFor(item.h, item.m);
 
 /**
  * The name a pet is born with. Deterministic per time *and* per language: switching the
@@ -224,12 +232,22 @@ for (const item of [...ALL_ITEMS].sort((a, b) => a.h - b.h || a.m - b.m)) {
   fileUnder(id, item.id);
 }
 
+// The sums, then everything maths learned to teach afterwards. Appended in curriculum order
+// and never inserted into: a trait index is a position in this list, so a fact that moved
+// would come back a different colour with a different name.
 const SPECIES_FACTS = new Map();
-for (const fact of addition.ALL_ITEMS) {
-  const id = speciesForFact(fact.a, fact.b);
-  if (!SPECIES_FACTS.has(id)) SPECIES_FACTS.set(id, []);
-  SPECIES_FACTS.get(id).push(fact.id);
-  fileUnder(id, fact.id);
+for (const item of math.ALL_ITEMS) {
+  const id = speciesForMath(item);
+  // Only the sixty-six addition facts are filed as "facts". The `species:add:<id>` milestone
+  // is built on that list and has already been paid out in saves in the wild; widening it to
+  // mean "and every difference, and every method" would push a milestone a child was two
+  // answers away from earning back over the horizon. Same reasoning as the clock's, one level
+  // down — see `timesOfSpecies`.
+  if (item.op === '+' && item.tier <= 4) {
+    if (!SPECIES_FACTS.has(id)) SPECIES_FACTS.set(id, []);
+    SPECIES_FACTS.get(id).push(item.id);
+  }
+  fileUnder(id, item.id);
 }
 
 /**
