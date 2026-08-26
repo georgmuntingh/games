@@ -5,6 +5,7 @@
 // Everything derivable — a pet's mood, how many are hungry, tier progress — is computed
 // at render time from `items`, never stored, so there is exactly one source of truth.
 
+import { DEFAULT_WALK_SPEED, isWalkSpeed } from './column.js';
 import { DEFAULT_LANGUAGE } from './i18n.js';
 import { PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
@@ -63,6 +64,15 @@ export function freshState(now) {
       // this only decides whether the game also shows, gently, which way round it usually
       // goes. Some children find that useful and some find it one more thing to get wrong.
       mirrorNudge: false,
+      // How slowly a wrong column sum is walked through, column by column. Named rather than
+      // numbered — see column.js. What is right here is a fact about one child, not about
+      // the game: a child meeting carrying for the first time needs to watch it happen, and
+      // the same child six months later does not.
+      walkSpeed: DEFAULT_WALK_SPEED,
+      // And whether to skip the walk entirely and simply show the finished sum. Off by
+      // default: the working is the whole of what a wrong answer is for, and a child who is
+      // shown only the answer has been told they were wrong and taught nothing.
+      walkInstant: false,
     },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
     // What this child's handwriting looks like, learned from the corrections they make.
@@ -125,7 +135,14 @@ export function load(now, storage = safeStorage()) {
       // Ids only, so an unknown one from a future build is simply worth nothing rather than
       // being a number this build has to make sense of.
       milestones: cleanMilestones(save.milestones),
-      settings: { ...freshState(now).settings, ...save.settings },
+      settings: {
+        ...freshState(now).settings,
+        ...save.settings,
+        // Clamped like the tiers and the practice floor: a speed this build has never heard
+        // of must not be able to leave a child watching a walkthrough that never finishes.
+        walkSpeed: isWalkSpeed(save.settings?.walkSpeed) ? save.settings.walkSpeed : DEFAULT_WALK_SPEED,
+        walkInstant: Boolean(save.settings?.walkInstant),
+      },
       items: migrateItems(save.items),
       ink: sanitizeInk(save.ink),
     };

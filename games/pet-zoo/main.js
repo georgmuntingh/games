@@ -39,7 +39,16 @@ import {
   tierMastery,
 } from './subjects/index.js';
 import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
-import { columnWalkHtml, stackedMarkup, walkDuration } from './column.js';
+import {
+  columnWalkHtml,
+  DEFAULT_WALK_SPEED,
+  stackedMarkup,
+  stepFor,
+  walkDuration,
+  walkWidth,
+  walkSpeedAt,
+  walkSpeedIndex,
+} from './column.js';
 import { remember } from './ink/memory.js';
 import { createInkPad } from './ink/pad.js';
 import { recognize } from './ink/recognize.js';
@@ -198,6 +207,9 @@ const el = {
   showDigital: $('show-digital'),
   playMinutes: $('play-minutes'),
   playMinutesValue: $('play-minutes-value'),
+  walkSpeed: $('walk-speed'),
+  walkSpeedValue: $('walk-speed-value'),
+  walkInstant: $('walk-instant'),
   exportFile: $('export-file'),
   exportCode: $('export-code'),
   importFile: $('import-file'),
@@ -1409,11 +1421,18 @@ async function correctSum(target, result) {
   if (current.layout === 'column') {
     // The column's counterpart to the clock's ghost hands: it does not say the answer, it does
     // the work — the ones column, then the carry lifting into the box above the tens.
+    //
+    // How fast is a grown-up's decision, because it is a fact about one child rather than
+    // about the game. `walkInstant` skips the working altogether and lands on the finished
+    // sum — the same still frame reduced motion gets, which is why the two share a path.
+    const instant = still || Boolean(state.settings.walkInstant);
+    const step = stepFor(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
     el.tenframeHost.innerHTML = columnWalkHtml(question, {
-      step: still ? 0 : 0.55,
+      step: instant ? 0 : step,
       title: t.spokenQuestion(question),
     });
-    await wait(still ? 900 : walkDuration(question));
+    // A still frame still needs long enough to be read, and a longer sum needs longer.
+    await wait(instant ? 1200 + walkWidth(question) * 300 : walkDuration(question, step));
   } else {
     const { op = '+', a, b } = question;
     el.tenframeHost.innerHTML = tenFrameSvg(a, b, {
@@ -2373,6 +2392,8 @@ function applyLanguage() {
 
   applySound(); // its label is a string too
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
+  // Filled in by hand rather than from `data-i18n`, so it has to be redrawn by hand too.
+  renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
   buildAnswerModeOptions();
   buildKeypad(); // its digits carry spoken labels, which are strings like any other
   for (const slot of writeSlots) {
@@ -2425,6 +2446,8 @@ function openSettings() {
   el.mirrorNudge.checked = Boolean(state.settings.mirrorNudge);
   el.answerMode.value = state.settings.answerMode ?? 'auto';
   el.playMinutes.value = String(limits.minutes);
+  renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+  el.walkInstant.checked = Boolean(state.settings.walkInstant);
   setTransferStatus('');
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
   el.settings.hidden = false;
@@ -2468,6 +2491,40 @@ el.playMinutes.addEventListener('input', () => {
   el.playMinutesValue.textContent = t('settings.playTimeValue', {
     n: session.limitsFor(el.playMinutes.value).minutes,
   });
+});
+
+/**
+ * The walkthrough's pace, shown by name and by what it actually costs. A grown-up choosing
+ * this is deciding how long their child sits looking at a sum they got wrong, so the seconds
+ * are worth saying out loud rather than leaving them to be discovered.
+ */
+function renderWalkSpeed(id) {
+  el.walkSpeed.value = String(walkSpeedIndex(id));
+  el.walkSpeedValue.textContent = t('settings.walkSpeedValue', {
+    name: t(`settings.walkSpeed.${id}`),
+    // Two columns is the commonest column sum there is, so it is the honest one to quote.
+    seconds: (walkDuration({ op: '+', a: 47, b: 38 }, stepFor(id)) / 1000).toFixed(1),
+  });
+  // Nothing to set the pace of if the working is switched off entirely.
+  el.walkSpeed.disabled = Boolean(state.settings.walkInstant);
+}
+
+// Live label while dragging; the setting lands on `change`, like the play-time slider above.
+el.walkSpeed.addEventListener('input', () => {
+  renderWalkSpeed(walkSpeedAt(el.walkSpeed.value));
+});
+
+el.walkSpeed.addEventListener('change', () => {
+  state.settings.walkSpeed = walkSpeedAt(el.walkSpeed.value);
+  renderWalkSpeed(state.settings.walkSpeed);
+  save();
+});
+
+el.walkInstant.addEventListener('change', () => {
+  state.settings.walkInstant = el.walkInstant.checked;
+  save();
+  // The pace slider means nothing while the working is skipped, so it says so.
+  renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
 });
 
 el.playMinutes.addEventListener('change', () => {

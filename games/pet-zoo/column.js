@@ -17,6 +17,53 @@ import { addSteps, answerOf, columnCount, columnsOf, digitsOf, subSteps } from '
 
 export { addSteps, answerOf, columnCount, columnsOf, subSteps };
 
+/* ------------------------------------------------------------------- pacing */
+
+// How long the walkthrough dwells on each column, in seconds.
+//
+// The first version ran at just over half a second a column, which is about how long it takes
+// to *recognise* that something moved and nowhere near long enough to follow what. A child
+// working out why their carry went astray has to read the column, see the digit land, and
+// watch the one lift into the box above it — three things, in order, each of which they are
+// meeting for the first time. So the middle of this table is more than twice that, and the
+// slow end is nearly five times it.
+//
+// Named rather than numbered, because "1.8 seconds a column" is not a thing a grown-up has an
+// opinion about, and "calm" is.
+export const WALK_SPEEDS = [
+  { id: 'verySlow', step: 2.6 },
+  { id: 'slow', step: 1.9 },
+  { id: 'steady', step: 1.4 },
+  { id: 'brisk', step: 1.0 },
+  { id: 'quick', step: 0.7 },
+];
+
+// Deliberately not the middle of the table. The first version of this ran at half a second a
+// column and a child could not follow it, and the two failures are not symmetric: too slow
+// costs a few seconds and is one drag of a labelled slider away from being fixed, while too
+// fast teaches nothing and nobody notices it happening.
+export const DEFAULT_WALK_SPEED = 'slow';
+
+export const isWalkSpeed = (id) => WALK_SPEEDS.some((speed) => speed.id === id);
+
+/** Seconds per column for a named speed. An id this build does not know falls back to the
+ *  default rather than to nothing, so a hand-edited save cannot stop the walkthrough. */
+export const stepFor = (id) =>
+  (WALK_SPEEDS.find((speed) => speed.id === id) ?? WALK_SPEEDS.find((speed) => speed.id === DEFAULT_WALK_SPEED)).step;
+
+/** Where a named speed sits on the slider, counting from the slow end. */
+export const walkSpeedIndex = (id) => {
+  const at = WALK_SPEEDS.findIndex((speed) => speed.id === id);
+  return at === -1 ? WALK_SPEEDS.findIndex((speed) => speed.id === DEFAULT_WALK_SPEED) : at;
+};
+
+/** And back again, for a slider that has been dragged somewhere. */
+export const walkSpeedAt = (index) => {
+  const n = Number(index);
+  if (!Number.isFinite(n)) return DEFAULT_WALK_SPEED;
+  return WALK_SPEEDS[Math.max(0, Math.min(Math.round(n), WALK_SPEEDS.length - 1))].id;
+};
+
 /** How many boxes the walkthrough draws: enough for the answer, and never fewer than the
  *  question's own columns. */
 export const walkWidth = ({ op, a, b }) =>
@@ -72,7 +119,7 @@ const padTo = (list, len) => {
  * The walkthrough. `step` is how long each column waits behind the one before it, in seconds;
  * pass 0 for a still frame that needs no motion at all.
  */
-export function columnWalkHtml(question, { step = 0.55, title = '' } = {}) {
+export function columnWalkHtml(question, { step = stepFor(DEFAULT_WALK_SPEED), title = '' } = {}) {
   const { op, a, b } = question;
   const cols = walkWidth(question);
   const steps = walkSteps(question);
@@ -115,6 +162,11 @@ export function columnWalkHtml(question, { step = 0.55, title = '' } = {}) {
     </div>`;
 }
 
-/** How long the whole walk takes, so a caller can wait exactly that long and no longer. */
-export const walkDuration = (question, step = 0.55) =>
+/**
+ * How long the whole walk takes, so a caller can wait exactly that long and no longer. The
+ * 1.2 covers the last column's own sub-steps — its digit lands seven tenths of a step after
+ * the column lights up — and the half second on the end is a beat to look at the finished sum
+ * before the pet comes back.
+ */
+export const walkDuration = (question, step = stepFor(DEFAULT_WALK_SPEED)) =>
   ((walkWidth(question) + 1.2) * step + 0.5) * 1000;

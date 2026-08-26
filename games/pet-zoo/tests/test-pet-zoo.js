@@ -95,7 +95,18 @@ import * as mathFacts from '../subjects/math/facts.js';
 import * as mathSkills from '../subjects/math/skills.js';
 import * as mathColumns from '../subjects/math/columns.js';
 import { ALL_VERDICTS } from '../subjects/math/grade.js';
-import { columnWalkHtml, walkSteps, walkWidth } from '../column.js';
+import {
+  columnWalkHtml,
+  DEFAULT_WALK_SPEED,
+  isWalkSpeed,
+  stepFor,
+  walkDuration,
+  WALK_SPEEDS,
+  walkSpeedAt,
+  walkSpeedIndex,
+  walkSteps,
+  walkWidth,
+} from '../column.js';
 import * as clockSubject from '../subjects/clock.js';
 import { fillDuration, fillPlan, FRAME, takeAwayPlan, tenFrameSvg } from '../tenframe.js';
 import {
@@ -3825,6 +3836,102 @@ test('the walkthrough draws every column and never leaks past them', () => {
     const cols = walkWidth({ op, a, b });
     // Four rows of `cols` cells each: the carries, the two numbers and the answer.
     assertEqual(cells.length, cols * 4, `${a}${op}${b} drew the wrong number of cells`);
+  }
+});
+
+
+describe('maths — how fast the working goes');
+
+test('the speeds run slow to fast, and the default is one of them', () => {
+  const steps = WALK_SPEEDS.map((speed) => speed.step);
+  assertEqual(
+    steps.join(),
+    [...steps].sort((a, b) => b - a).join(),
+    'the slider would run backwards'
+  );
+  assertEqual(new Set(WALK_SPEEDS.map((s) => s.id)).size, WALK_SPEEDS.length, 'a speed is named twice');
+  assert(isWalkSpeed(DEFAULT_WALK_SPEED), 'the default is not a speed this build has');
+});
+
+test('the default is markedly slower than the pace nobody could follow', () => {
+  // The first version of the walkthrough ran at 0.55s a column, and a child could not keep
+  // up with it. This is the guard on that: if anyone ever tunes the default back towards it,
+  // the complaint comes back with it.
+  assert(
+    stepFor(DEFAULT_WALK_SPEED) >= 1.5,
+    `the default is back down to ${stepFor(DEFAULT_WALK_SPEED)}s a column`
+  );
+});
+
+test('an unknown speed falls back rather than stopping the working', () => {
+  assertEqual(stepFor('nonsense'), stepFor(DEFAULT_WALK_SPEED));
+  assertEqual(stepFor(undefined), stepFor(DEFAULT_WALK_SPEED));
+  assert(!isWalkSpeed('nonsense'));
+});
+
+test('the slider maps to a speed and back, and cannot be dragged off the end', () => {
+  for (const speed of WALK_SPEEDS) {
+    assertEqual(walkSpeedAt(walkSpeedIndex(speed.id)), speed.id, `${speed.id} did not round-trip`);
+  }
+  assertEqual(walkSpeedAt(-3), WALK_SPEEDS[0].id, 'past the slow end');
+  assertEqual(walkSpeedAt(99), WALK_SPEEDS[WALK_SPEEDS.length - 1].id, 'past the fast end');
+  assertEqual(walkSpeedAt('lots'), DEFAULT_WALK_SPEED, 'and nonsense lands on the default');
+  assertEqual(walkSpeedIndex('nonsense'), walkSpeedIndex(DEFAULT_WALK_SPEED));
+});
+
+test('a slower speed really does take longer, and a longer sum longer still', () => {
+  const sum = { op: '+', a: 47, b: 38 };
+  const times = WALK_SPEEDS.map((speed) => walkDuration(sum, speed.step));
+  assertEqual(
+    times.join(),
+    [...times].sort((a, b) => b - a).join(),
+    'the speeds do not actually change how long it takes'
+  );
+  assert(
+    walkDuration({ op: '-', a: 503, b: 178 }, stepFor(DEFAULT_WALK_SPEED)) >
+      walkDuration(sum, stepFor(DEFAULT_WALK_SPEED)),
+    'three columns finished no later than two'
+  );
+  // Long enough to follow: at the default a two-column sum is on screen for seconds, not
+  // for the blink it used to be.
+  assert(walkDuration(sum, stepFor(DEFAULT_WALK_SPEED)) > 4000, 'still too quick to follow');
+});
+
+test('the grown-up starts with the working shown, not skipped', () => {
+  // Being told you were wrong and not why is the one outcome the whole correction exists to
+  // avoid, so skipping it has to be something a grown-up chooses on purpose.
+  const settings = freshState(0).settings;
+  assertEqual(settings.walkInstant, false);
+  assertEqual(settings.walkSpeed, DEFAULT_WALK_SPEED);
+});
+
+test('a hand-edited speed cannot leave a child watching a walk that never ends', () => {
+  const storage = fakeStorage();
+  write({ ...freshState(0), settings: { ...freshState(0).settings, walkSpeed: 'glacial', walkInstant: 'yes' } }, storage);
+  const back = load(0, storage);
+  assertEqual(back.settings.walkSpeed, DEFAULT_WALK_SPEED, 'an unknown speed was trusted');
+  assertEqual(back.settings.walkInstant, true, 'and a truthy value is read as the switch being on');
+});
+
+test('a save written before either setting existed picks both up', () => {
+  const storage = fakeStorage();
+  const { walkSpeed, walkInstant, ...older } = freshState(0).settings;
+  write({ ...freshState(0), settings: older }, storage);
+  const back = load(0, storage);
+  assertEqual(back.settings.walkSpeed, DEFAULT_WALK_SPEED);
+  assertEqual(back.settings.walkInstant, false);
+});
+
+test('every speed has a name a grown-up can read, in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    const t = translator(lang);
+    for (const speed of WALK_SPEEDS) {
+      const key = `settings.walkSpeed.${speed.id}`;
+      assert(t(key) !== key, `${lang} has no name for ${speed.id}`);
+    }
+    for (const key of ['settings.walkSpeed', 'settings.walkSpeedHelp', 'settings.walkInstant', 'settings.walkInstantHelp']) {
+      assert(t(key) !== key, `${lang} is missing ${key}`);
+    }
   }
 });
 
