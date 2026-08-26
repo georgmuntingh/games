@@ -23,7 +23,7 @@
 // impossible without the scheduler having to remember anything.
 
 import { factsOfSpecies, SPECIES_IDS, timesOfSpecies } from './pets.js';
-import * as addition from './subjects/addition.js';
+import * as math from './subjects/math/index.js';
 import { tierMastery } from './subjects/index.js';
 import { TIERS } from './curriculum.js';
 import { formFor } from './srs.js';
@@ -127,7 +127,13 @@ export function streakDays(days) {
  * that was already being stored — no counter anywhere had to be added to support this.
  *
  * Ids are `mastery:<tier>`, `week:<n>` (the nth full week of a streak) and `species:<id>` for
- * the clock, and `mastery:add:<tier>` / `species:add:<id>` for adding.
+ * the clock, and `mastery:math:<tier>` / `species:add:<id>` for maths.
+ *
+ * The maths ids used to read `mastery:add:<tier>`, from when the subject was called adding.
+ * `store.js` rewrites them on load, once, so a child who has already been paid for finishing
+ * "sums to ten" is not paid for it a second time under the new spelling. The `species:add:`
+ * ids are *not* renamed: they still mean exactly the sixty-six addition facts they always
+ * meant, and pets.js keeps that family frozen at sixty-six for the same reason.
  *
  * The clock's ids are left exactly as they were rather than being renamed to match. They have
  * already been earned and paid out in saves in the wild, and `settleMilestones` pays for any
@@ -141,8 +147,8 @@ export function milestonesReached(items, stats) {
   for (const tier of TIERS) {
     if (tierMastery(zoo, 'clock', tier.id) >= 1) out.push(`mastery:${tier.id}`);
   }
-  for (const tier of addition.TIERS) {
-    if (tierMastery(zoo, addition.id, tier.id) >= 1) out.push(`mastery:add:${tier.id}`);
+  for (const tier of math.TIERS) {
+    if (tierMastery(zoo, math.id, tier.id) >= 1) out.push(`mastery:math:${tier.id}`);
   }
 
   const weeks = Math.floor(streakDays(stats?.daysPlayed) / STREAK_WEEK_DAYS);

@@ -8,13 +8,17 @@
 
 import { pointOnFace, timeId } from './clock.js';
 import { ALL_ITEMS, TIERS } from './curriculum.js';
-import * as addition from './subjects/addition.js';
+import * as math from './subjects/math/index.js';
 import { SUBJECTS } from './subjects/index.js';
 import { DEFAULT_LANGUAGE, NAMES } from './i18n.js';
 import {
   ACCESSORIES,
   ANATOMY,
   BODIES,
+  EGG_PATTERNS,
+  EGG_SHAPES,
+  EGG_SIZES,
+  EGG_TINTS,
   BROW_MOOD,
   BROWS,
   EYE_X,
@@ -91,14 +95,22 @@ export function speciesFor(h, m) {
 }
 
 /**
- * The same idea for a sum. Adding has five tiers to the clock's four, so the pools are
- * cycled rather than indexed — every tier still opens a distinct corner of the zoo, and a
+ * The same idea for a maths item. Maths has nineteen tiers to the clock's four, so the pools
+ * are cycled rather than indexed — every tier still opens a distinct corner of the zoo, and a
  * child working through both subjects meets the same sixteen creatures either way.
+ *
+ * Note what this must never become: a function of anything but the item's id and tier. A pet's
+ * species, name, colours and habitat all hang off this, so a change of mind here would rename
+ * and recolour a zoo somebody already owns.
  */
-export function speciesForFact(a, b) {
-  const pool = TIER_SPECIES[addition.tierOf({ a, b }) % TIER_SPECIES.length];
-  return pool[hash(addition.idOf({ a, b })) % pool.length];
+export function speciesForMath(payload) {
+  const pool = TIER_SPECIES[math.tierOf(payload) % TIER_SPECIES.length];
+  return pool[hash(math.idOf(payload)) % pool.length];
 }
+
+/** The addition-fact spelling of it, kept because that is how the tests and the unlock screen
+ *  ask about a sum. */
+export const speciesForFact = (a, b) => speciesForMath({ op: '+', a, b });
 
 /** The id an item is filed under, rebuilt from the item itself. */
 export const keyOf = (item) =>
@@ -106,7 +118,7 @@ export const keyOf = (item) =>
 
 /** Which creature an item hatches, whichever subject it belongs to. */
 export const speciesOf = (item) =>
-  item?.subject === addition.id ? speciesForFact(item.a, item.b) : speciesFor(item.h, item.m);
+  item?.subject === math.id ? speciesForMath(item) : speciesFor(item.h, item.m);
 
 /**
  * The name a pet is born with. Deterministic per time *and* per language: switching the
@@ -224,12 +236,22 @@ for (const item of [...ALL_ITEMS].sort((a, b) => a.h - b.h || a.m - b.m)) {
   fileUnder(id, item.id);
 }
 
+// The sums, then everything maths learned to teach afterwards. Appended in curriculum order
+// and never inserted into: a trait index is a position in this list, so a fact that moved
+// would come back a different colour with a different name.
 const SPECIES_FACTS = new Map();
-for (const fact of addition.ALL_ITEMS) {
-  const id = speciesForFact(fact.a, fact.b);
-  if (!SPECIES_FACTS.has(id)) SPECIES_FACTS.set(id, []);
-  SPECIES_FACTS.get(id).push(fact.id);
-  fileUnder(id, fact.id);
+for (const item of math.ALL_ITEMS) {
+  const id = speciesForMath(item);
+  // Only the sixty-six addition facts are filed as "facts". The `species:add:<id>` milestone
+  // is built on that list and has already been paid out in saves in the wild; widening it to
+  // mean "and every difference, and every method" would push a milestone a child was two
+  // answers away from earning back over the horizon. Same reasoning as the clock's, one level
+  // down — see `timesOfSpecies`.
+  if (item.op === '+' && item.tier <= 4) {
+    if (!SPECIES_FACTS.has(id)) SPECIES_FACTS.set(id, []);
+    SPECIES_FACTS.get(id).push(item.id);
+  }
+  fileUnder(id, item.id);
 }
 
 /**
@@ -393,12 +415,139 @@ const EGG_CRACKS = [
 
 export const EGG_CRACK_MAX = EGG_CRACKS.length;
 
+// The shell, and the same shell described as numbers so marks can be placed on it without
+// guessing. Top and bottom of the outline, its widest point, and how wide it is there.
+const EGG_SHELL =
+  'M50 12 C68 12 80 40 80 58 C80 78 66 90 50 90 C34 90 20 78 20 58 C20 40 32 12 50 12 Z';
+const EGG_TOP = 12;
+const EGG_BOTTOM = 90;
+const EGG_WAIST = 58;
+const EGG_HALF = 30;
+const EGG_MID_X = 50;
+const EGG_MID_Y = (EGG_TOP + EGG_BOTTOM) / 2;
+
+/**
+ * How wide the shell is at a given height — two half-ellipses meeting at the waist, which is
+ * a hair inside the drawn curve everywhere. Deliberately conservative: a mark placed against
+ * this can never poke out through the side of the egg, which is the one thing that would make
+ * the whole idea look broken.
+ */
+export function shellHalfWidth(y) {
+  if (y <= EGG_TOP || y >= EGG_BOTTOM) return 0;
+  const span = y <= EGG_WAIST ? EGG_WAIST - EGG_TOP : EGG_BOTTOM - EGG_WAIST;
+  const off = Math.abs(y - EGG_WAIST) / span;
+  return EGG_HALF * Math.sqrt(Math.max(0, 1 - off * off));
+}
+
+/** A point on the shell at height `y`, `across` of the way from the middle to the edge. */
+function shellPoint(y, across, margin = 0) {
+  const room = Math.max(0, shellHalfWidth(y) - margin);
+  return { x: EGG_MID_X + across * room, y };
+}
+
+// Marks are laid out from these as *data* rather than as markup, so a pattern is a short list
+// of "how far down, how far across, how big" — and so the one thing that would make the whole
+// idea look broken, a speckle hanging off the side of the egg, can be tested for directly
+// instead of by looking at it.
+const down = (fraction) => EGG_TOP + (EGG_BOTTOM - EGG_TOP) * fraction;
+
+const dot = (fraction, across, r) => {
+  const y = down(fraction);
+  const p = shellPoint(y, across, r + 2);
+  return { kind: 'dot', x: p.x, y, r };
+};
+
+// A stripe across the shell: an ellipse as wide as the shell is at its narrowest over the
+// stripe's own height, so the ends stay tucked inside the curve.
+const stripe = (fraction, ry) => {
+  const y = down(fraction);
+  const rx = Math.min(shellHalfWidth(y - ry), shellHalfWidth(y + ry)) - 1.5;
+  return rx <= 2 ? null : { kind: 'stripe', x: EGG_MID_X, y, rx, ry };
+};
+
+const markSvg = (m) =>
+  m.kind === 'dot'
+    ? `<circle cx="${m.x.toFixed(1)}" cy="${m.y.toFixed(1)}" r="${m.r}" />`
+    : `<ellipse cx="${m.x}" cy="${m.y.toFixed(1)}" rx="${m.rx.toFixed(1)}" ry="${m.ry}" />`;
+
+/** What is drawn on the shell, for each of the patterns pet-parts.js names. */
+const EGG_MARKS = {
+  plain: () => [],
+  spots: () => [dot(0.28, 0.35, 5), dot(0.44, -0.55, 6), dot(0.62, 0.62, 5.5), dot(0.78, -0.3, 4.5)],
+  freckles: () => [
+    dot(0.2, -0.4, 2.4), dot(0.28, 0.5, 2.8), dot(0.36, -0.15, 2.2), dot(0.44, 0.7, 2.6),
+    dot(0.5, -0.65, 2.4), dot(0.58, 0.2, 2.8), dot(0.64, -0.45, 2.2), dot(0.72, 0.55, 2.6),
+    dot(0.8, -0.2, 2.4), dot(0.86, 0.3, 2.2),
+  ],
+  dapple: () => [dot(0.3, -0.35, 9), dot(0.55, 0.45, 10.5), dot(0.8, -0.25, 8)],
+  band: () => [stripe(0.52, 6), dot(0.24, 0.3, 3.5), dot(0.82, -0.3, 3.5)],
+  rings: () => [stripe(0.38, 3), stripe(0.62, 3.5), stripe(0.83, 2.5)],
+  crown: () => [dot(0.18, 0, 4), dot(0.26, -0.5, 3.5), dot(0.26, 0.5, 3.5), dot(0.36, -0.2, 3), dot(0.36, 0.25, 3)],
+  scatter: () => [
+    dot(0.32, 0.6, 4), dot(0.4, -0.6, 3), dot(0.52, 0.15, 6.5),
+    dot(0.66, -0.55, 4.5), dot(0.74, 0.5, 3), dot(0.86, -0.1, 4),
+  ],
+};
+
+/** What one pattern puts on the shell, as geometry. Exported so a test can check that every
+ *  last speckle of it lands inside the egg. */
+export const eggMarksFor = (pattern) =>
+  ((EGG_MARKS[pattern] ?? EGG_MARKS.plain)()).filter(Boolean);
+
+// Coprime with every list length above, and different from each other, so the four choices
+// move independently — an egg one along from another differs in all of them at once rather
+// than sharing three and changing a speckle. Same trick, and same reason, as TRAIT_STRIDE.
+const EGG_STRIDES = { size: 7, shape: 11, pattern: 13, tint: 17, glint: 5, facing: 19 };
+
+const eggPick = (list, index, stride) => list[(((index * stride) % list.length) + list.length) % list.length];
+
+/**
+ * Everything about one egg's look, from the same trait index its pet's colours and name come
+ * from. Pure, and stable for as long as the egg exists — an egg that changed shape between
+ * two glances would be a different egg, and the child is waiting on *this* one.
+ */
+export function eggLookFrom({ species, index = 0 } = {}) {
+  const id = species in SPECIES ? species : 'mochi';
+  // The species is folded in so that two species do not run through the same sizes in the
+  // same order, which would be visible in a zoo where the pets arrive tier by tier.
+  const n = Math.abs(Math.round(index)) + (hash(`egg${id}`) % 97);
+  const shape = eggPick(EGG_SHAPES, n, EGG_STRIDES.shape);
+  const size = eggPick(EGG_SIZES, n, EGG_STRIDES.size);
+  const pattern = eggPick(EGG_PATTERNS, n, EGG_STRIDES.pattern);
+  return {
+    species: id,
+    size,
+    shape: shape.id,
+    sx: shape.sx * size,
+    sy: shape.sy * size,
+    pattern,
+    tint: eggPick(EGG_TINTS, n, EGG_STRIDES.tint),
+    // A wet-looking highlight, on a bit more than half of them. On every egg it would stop
+    // being something to notice — except on an unmarked shell, which without it has nothing
+    // on it at all and reads as an egg the artist forgot rather than a plain one.
+    glint: pattern === 'plain' || (n * EGG_STRIDES.glint) % 3 !== 0,
+    // Which side the belly patch sits on, so the light does not come from the same place on
+    // every egg in the zoo.
+    facing: (n * EGG_STRIDES.facing) % 2 === 0 ? 1 : -1,
+  };
+}
+
+/** The egg a time arrives as, given either a species id or a pet's portrait. */
+const asEggLook = (value) =>
+  typeof value === 'string' ? eggLookFrom({ species: value }) : eggLookFrom(value ?? {});
+
 /**
  * The egg a time arrives as. Speckled in its pet's colours, so the reveal is a payoff, and broken
  * in as many places as the child has earned — the shell is the progress bar.
+ *
+ * The whole egg — shell, marks and cracks alike — sits inside one scaled group, which is what
+ * lets an egg be small or tall without its cracks sliding off it. The group is nested inside
+ * `.pet-inner` rather than replacing it, because that is what the rocking, the knock and the
+ * burst are animating, and two transforms on one element would fight.
  */
-export function eggSvg(speciesId, { cracks = 0, className = '', title = 'A chilly egg' } = {}) {
-  const spec = SPECIES[speciesId] ?? SPECIES.mochi;
+export function eggSvg(portrait, { cracks = 0, className = '', title = 'A chilly egg' } = {}) {
+  const look = asEggLook(portrait);
+  const spec = SPECIES[look.species];
   const [body, belly, accent] = spec.palette;
   const level = Math.max(0, Math.min(EGG_CRACK_MAX, Math.round(cracks)));
   // `pathLength="1"` normalises every crack to the same nominal length, so a single CSS rule can
@@ -407,18 +556,26 @@ export function eggSvg(speciesId, { cracks = 0, className = '', title = 'A chill
     { length: level },
     (_, i) => `<path class="egg-crack egg-crack-${i + 1}" pathLength="1" d="${EGG_CRACKS[i]}" />`
   ).join('');
+  const marks = eggMarksFor(look.pattern).map(markSvg).join('');
+  const tint = look.tint.fill === 'belly' ? belly : accent;
+  // Lighter than the shading it replaced, so that marks drawn in the belly colour still read
+  // where they cross it — otherwise a belly-tinted pattern disappears into its own shadow.
+  const patch = `<ellipse cx="${(EGG_MID_X - 9 * look.facing).toFixed(1)}" cy="62" rx="15" ry="18" fill="${belly}" opacity="0.55" />`;
+  const glint = look.glint
+    ? `<ellipse class="egg-glint" cx="${(EGG_MID_X - 13 * look.facing).toFixed(1)}" cy="34" rx="5" ry="7.5"
+        transform="rotate(${-18 * look.facing} ${(EGG_MID_X - 13 * look.facing).toFixed(1)} 34)" />`
+    : '';
   return `
-<svg class="pet egg egg-cracks-${level} ${className}" viewBox="0 0 100 100" role="img" aria-label="${title}" focusable="false">
+<svg class="pet egg egg-cracks-${level} egg-${look.pattern} ${className}" viewBox="0 0 100 100" role="img" aria-label="${title}" focusable="false">
   <title>${title}</title>
   <g class="pet-inner">
-    <path class="egg-shell" fill="${body}"
-      d="M50 12 C68 12 80 40 80 58 C80 78 66 90 50 90 C34 90 20 78 20 58 C20 40 32 12 50 12 Z" />
-    <ellipse cx="41" cy="62" rx="15" ry="18" fill="${belly}" opacity="0.75" />
-    <circle cx="61" cy="40" r="6" fill="${accent}" opacity="0.65" />
-    <circle cx="36" cy="34" r="4.5" fill="${accent}" opacity="0.65" />
-    <circle cx="66" cy="68" r="5" fill="${accent}" opacity="0.5" />
-    <circle cx="44" cy="78" r="3.5" fill="${accent}" opacity="0.5" />
-    ${breaks}
+    <g class="egg-body" transform="translate(${EGG_MID_X} ${EGG_MID_Y}) scale(${look.sx.toFixed(3)} ${look.sy.toFixed(3)}) translate(${-EGG_MID_X} ${-EGG_MID_Y})">
+      <path class="egg-shell" fill="${body}" d="${EGG_SHELL}" />
+      ${patch}
+      <g class="egg-marks" fill="${tint}" opacity="${look.tint.opacity}">${marks}</g>
+      ${glint}
+      ${breaks}
+    </g>
   </g>
 </svg>`;
 }

@@ -23,7 +23,7 @@ import {
   refreshTiers,
   review,
 } from './srs.js';
-import * as addition from './subjects/addition.js';
+import * as math from './subjects/math/index.js';
 import {
   DEFAULT_SUBJECT,
   enabledItemCount,
@@ -39,6 +39,16 @@ import {
   tierMastery,
 } from './subjects/index.js';
 import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
+import {
+  columnWalkHtml,
+  DEFAULT_WALK_SPEED,
+  stackedMarkup,
+  stepFor,
+  walkDuration,
+  walkWidth,
+  walkSpeedAt,
+  walkSpeedIndex,
+} from './column.js';
 import { remember } from './ink/memory.js';
 import { createInkPad } from './ink/pad.js';
 import { recognize } from './ink/recognize.js';
@@ -50,9 +60,11 @@ import {
   moodOf,
   petName,
   petSvg,
+  portraitOf,
   speciesAppearance,
   speciesFor,
   speciesForFact,
+  speciesOf,
   SPECIES,
 } from './pets.js';
 import { formFor } from './srs.js';
@@ -196,6 +208,11 @@ const el = {
   showDigital: $('show-digital'),
   playMinutes: $('play-minutes'),
   playMinutesValue: $('play-minutes-value'),
+  walkSpeed: $('walk-speed'),
+  walkSpeedValue: $('walk-speed-value'),
+  walkInstant: $('walk-instant'),
+  admireSeconds: $('admire-seconds'),
+  admireSecondsValue: $('admire-seconds-value'),
   exportFile: $('export-file'),
   exportCode: $('export-code'),
   importFile: $('import-file'),
@@ -355,6 +372,10 @@ el.clock.addEventListener('pointerdown', (event) => {
   const v = svgVector(event);
   const hand = pickHand({
     ...v,
+    // The lengths the hands are actually drawn at, so the picker measures the face the child
+    // is looking at rather than a default of it.
+    hourLen: HOUR_LEN,
+    minuteLen: MINUTE_LEN,
     hourDeg: hourAngle(dial.h, dial.m),
     minuteDeg: minuteAngle(dial.m),
   });
@@ -441,7 +462,7 @@ function ensureItem(id) {
     subject: subject.id,
     ...payload,
     tier: subject.tierOf(payload),
-    species: speciesFor(payload.h, payload.m),
+    species: speciesOf({ subject: subject.id, ...payload }),
     reviewClock: state.reviewClock,
   });
   return state.items[id];
@@ -451,22 +472,26 @@ function ensureItem(id) {
 // child left half-broken says so the moment it comes back on screen.
 const EGG_PROMPTS = ['prompt.egg', 'prompt.egg1', 'prompt.egg2'];
 // The clock's lines all end by leading into a time — "they eat at…" — which is the wrong
-// sentence in front of an equation, so adding gets its own set rather than a shared one
-// with the ending filed off.
+// sentence in front of an equation, so maths gets its own set rather than a shared one with
+// the ending filed off. And a column sum gets a third set, because "they eat at…" and "what
+// is…" both lead into something written on one line, which a stacked sum is not.
 const SUM_EGG_PROMPTS = ['prompt.sumEgg', 'prompt.sumEgg1', 'prompt.sumEgg2'];
+const COLUMN_EGG_PROMPTS = ['prompt.colEgg', 'prompt.colEgg1', 'prompt.colEgg2'];
 
-const isSum = (item) => (item?.subject ?? DEFAULT_SUBJECT) === addition.id;
+/** An item answered by writing digits rather than by dragging hands. */
+const isSum = (item) => (item?.subject ?? DEFAULT_SUBJECT) === math.id;
 
 function promptFor(item) {
   const sum = isSum(item);
+  const column = sum && current?.layout === 'column';
   if (item.hatchedAt === null) {
-    const prompts = sum ? SUM_EGG_PROMPTS : EGG_PROMPTS;
+    const prompts = column ? COLUMN_EGG_PROMPTS : sum ? SUM_EGG_PROMPTS : EGG_PROMPTS;
     return { line: t(prompts[Math.min(item.cracks ?? 0, prompts.length - 1)]), button: t('button.warm') };
   }
   const name = petName(item, t.lang);
   const state_ =
     item.phase === 'learning' ? 'Forgot' : item.dueAt <= now() ? 'Hungry' : 'Snack';
-  const key = sum ? `prompt.sum${state_}` : `prompt.${state_.toLowerCase()}`;
+  const key = column ? `prompt.col${state_}` : sum ? `prompt.sum${state_}` : `prompt.${state_.toLowerCase()}`;
   return { line: t(key, { name }), button: t('button.feed', { name }) };
 }
 
@@ -494,7 +519,7 @@ function eggTitle(item) {
 function renderPetStage(item, mood) {
   const markup =
     item.hatchedAt === null
-      ? eggSvg(appearanceOf(item).species, { cracks: item.cracks ?? 0, title: eggTitle(item) })
+      ? eggSvg(portraitOf(item), { cracks: item.cracks ?? 0, title: eggTitle(item) })
       : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
   el.petStage.innerHTML = markup;
   const pet = el.petStage.querySelector('.pet');
@@ -509,7 +534,7 @@ function renderPetStage(item, mood) {
  * animations on `.pet-inner` would fight.
  */
 function renderEggStage(item, cracks, { fresh = false } = {}) {
-  el.petStage.innerHTML = eggSvg(appearanceOf(item).species, { cracks, title: eggTitle(item) });
+  el.petStage.innerHTML = eggSvg(portraitOf(item), { cracks, title: eggTitle(item) });
   const pet = el.petStage.querySelector('.pet');
   if (fresh) pet.querySelector(`.egg-crack-${cracks}`)?.classList.add('is-new');
   return pet;
@@ -535,7 +560,7 @@ function renderPrompt(item) {
     el.promptDigital.hidden = true;
     el.promptSum.hidden = false;
     el.promptSpoken.classList.remove('is-lead');
-    el.promptSpoken.textContent = t.spokenSum(current.shown.a, current.shown.b);
+    el.promptSpoken.textContent = t.spokenQuestion(current.shown);
     renderAnswer();
     return;
   }
@@ -583,45 +608,105 @@ function buildKeypad() {
   ].join('');
 }
 
+/* ------------------------------------------------------------- the answer boxes */
+
+// The answer is an array of boxes, leftmost first, because a column sum is answered one
+// column at a time and *where* a digit sits is the whole of what is being taught. A blank box
+// is a blank box, never a zero: `[_, 8, 5]` reads eighty-five, and `[8, _, 5]` reads as an
+// unfinished answer rather than as anything at all.
+//
+// How many boxes there are is decided by the item, never by the question drawn from it — see
+// `math.answerWidth`. A strip that narrowed when the answer got smaller would hand it over.
+
+const emptyBoxes = (width) => new Array(width).fill(null);
+
+/** The answer as the graders want it: digits, in order, with blanks contributing nothing. */
+const answerText = (c) => (c?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
+
+const firstFilled = (digits) => digits.findIndex((d) => d !== null);
+
 /**
- * The answer as it stands, right-aligned in its slots. Right-aligned because that is what a
- * number does: type 1 then 5 and it reads 1, then 15 — never "1_", which a child would read
- * as ten-something. It also means a single-digit answer given in a two-slot strip lands
- * where they would have written it.
+ * Whether there is an answer here to submit. The ones box must be filled and there must be no
+ * hole in the middle: `[8, _, 5]` is a child part way through, not the number 85, and grading
+ * it as 85 would mark them right for something they had not finished saying.
  */
-function renderAnswer() {
-  const value = current?.answer ?? '';
-  const width = current?.width ?? 1;
-  const pad = width - value.length;
-  const slots = [];
-  for (let i = 0; i < width; i += 1) {
-    const filled = i >= pad;
-    const classes = ['slot', filled ? '' : 'is-empty', i === width - 1 && !filled ? 'is-next' : '']
-      .filter(Boolean)
-      .join(' ');
-    slots.push(`<span class="${classes}">${filled ? value[i - pad] : ''}</span>`);
+function isComplete(c) {
+  if (!c?.digits?.length) return false;
+  const first = firstFilled(c.digits);
+  if (first === -1) return false;
+  return c.digits.slice(first).every((d) => d !== null);
+}
+
+/** Which box the next typed digit lands in. */
+function nextBox(c) {
+  if (c.layout === 'column') {
+    // The ones column first, then leftwards — the order the work is actually done in.
+    for (let i = c.digits.length - 1; i >= 0; i -= 1) if (c.digits[i] === null) return i;
+    return -1;
   }
-  const { a, b } = current.shown;
-  el.promptSum.innerHTML = `${a}<i class="op">+</i>${b}<i class="op">=</i>${slots.join('')}`;
-  el.promptSum.setAttribute(
-    'aria-label',
-    `${t.spokenSum(a, b)} = ${value || t('answer.empty')}`
-  );
-  el.submit.disabled = locked || value.length === 0;
+  return c.digits[0] === null ? c.digits.length - 1 : -1;
 }
 
 /**
- * A typed digit, whichever way the child is answering. In writing mode it fills the first
- * empty box rather than being ignored — a grown-up sitting beside a child on a touchscreen
- * laptop will reach for the keyboard, and having it do nothing there would be a small
- * mystery for no reason.
+ * The answer as it stands. Inline questions right-align, because that is what a number does:
+ * type 1 then 5 and it reads 1, then 15 — never "1_", which a child would read as ten-something.
+ * Column questions do not shift at all: the digit written under the ones column stays under the
+ * ones column.
+ */
+function renderAnswer() {
+  const next = writingWanted() ? -1 : nextBox(current);
+  const slots = current.digits.map((digit, i) => {
+    const filled = digit !== null;
+    const classes = ['slot', filled ? '' : 'is-empty', i === next ? 'is-next' : '']
+      .filter(Boolean)
+      .join(' ');
+    return `<span class="${classes}">${filled ? digit : ''}</span>`;
+  });
+
+  const spoken = t.spokenQuestion(current.shown);
+  const said = answerText(current) || t('answer.empty');
+  if (current.layout === 'column') {
+    el.promptSum.innerHTML = stackedMarkup(current.shown, {
+      slots: [...slots].reverse(), // stackedMarkup wants them ones-first
+      carries: carryMarkup(),
+      width: current.width,
+    });
+  } else {
+    const { op, a, b } = current.shown;
+    el.promptSum.innerHTML = `${a}<i class="op">${op === '-' ? '−' : '+'}</i>${b}<i class="op">=</i>${slots.join('')}`;
+  }
+  el.promptSum.setAttribute('aria-label', `${spoken} = ${said}`);
+  el.submit.disabled = locked || !isComplete(current);
+}
+
+/**
+ * The little boxes above the columns. Scratch, and only scratch: nothing reads them, nothing
+ * grades them, and leaving them empty is a perfectly good way to do a column sum. They are
+ * here because writing the carry down is part of how the method is taught, and a child who
+ * has been told to write it needs somewhere to write it.
+ */
+function carryMarkup() {
+  if (current.layout !== 'column') return [];
+  return current.carries.map(
+    (on, i) =>
+      `<button type="button" class="cw-cell cw-carrybox${on ? ' is-on' : ''}" data-carry="${i}"` +
+      ` aria-label="${escape(t(on ? 'answer.carryOn' : 'answer.carryOff'))}">${on ? '1' : ''}</button>`
+  );
+}
+
+/**
+ * A typed digit, whichever way the child is answering. In writing mode it fills the next empty
+ * box rather than being ignored — a grown-up sitting beside a child on a touchscreen laptop
+ * will reach for the keyboard, and having it do nothing there would be a small mystery for no
+ * reason.
  */
 function typeDigit(digit) {
   if (!writingWanted()) {
     pushDigit(digit);
     return;
   }
-  const slot = writeSlots.find((entry) => entry.digit === null);
+  const index = nextBox(current);
+  const slot = index === -1 ? null : writeSlots[index];
   if (!slot) return;
   slot.digit = Number(digit);
   slot.corrected = true;
@@ -632,22 +717,45 @@ function typeDigit(digit) {
 }
 
 function pushDigit(digit) {
-  if (locked || !current || !isSum(current) || current.answer.length >= current.width) return;
-  current.answer += String(digit);
+  if (locked || !current || !isSum(current)) return;
+  const index = nextBox(current);
+  if (index === -1) return;
+  if (current.layout === 'column') {
+    current.digits[index] = Number(digit);
+  } else {
+    // Inline: everything shuffles left and the new digit lands on the right, which is how a
+    // number is written and read.
+    current.digits = [...current.digits.slice(1), Number(digit)];
+  }
   audio.play('tick');
   renderAnswer();
 }
 
 function clearAnswer() {
-  if (locked || !current || !isSum(current) || !current.answer) return;
+  if (locked || !current || !isSum(current)) return;
+  if (!current.digits.some((d) => d !== null) && !current.carries.some(Boolean)) return;
   // Adding's stand-in for waggling the clock hands: starting the answer over is the tell
   // that the child was not sure, and `qualityOf` reads it the same way.
-  current.clears += 1;
-  current.answer = '';
+  if (current.digits.some((d) => d !== null)) current.clears += 1;
+  current.digits = emptyBoxes(current.width);
+  current.carries = current.carries.map(() => false);
   audio.play('grab');
   renderAnswer();
 }
 
+/** Rub out the last box filled, rather than the whole answer. Four hand-written digits is a
+ *  lot to lose over one slip. */
+function backspaceAnswer() {
+  if (locked || !current || !isSum(current)) return;
+  const index =
+    current.layout === 'column'
+      ? firstFilled(current.digits)
+      : current.digits.map((d) => d !== null).lastIndexOf(true);
+  if (index === -1) return;
+  current.digits[index] = null;
+  audio.play('grab');
+  renderAnswer();
+}
 
 /* --------------------------------------------------------- writing a number */
 
@@ -655,19 +763,35 @@ function clearAnswer() {
 // one, because segmenting a scribble into digits is a hard problem nobody needs solved
 // here: give the child a box each and it does not arise.
 //
-// The number of boxes never depends on the answer — see addition.answerWidth — and a
+// The number of boxes never depends on the answer — see math.answerWidth — and a
 // single-digit answer may be written in either box. Both are read left to right and an
 // empty one is skipped, so "8" in the left box is eight, not eighty.
 const writeSlots = [];
 let picking = null;
 let lastDrawn = null;
 
-/** Whatever the boxes currently say, as the answer string the rest of the game uses. */
+/**
+ * Whatever the pads currently say, put into the answer boxes.
+ *
+ * Which pad means which box depends on how the question is written, and getting it wrong is
+ * how a column answer ends up shifted a place. Inline, the pads are read left to right and an
+ * empty one is skipped, so "8" in either box is eight, not eighty. In a column, a pad *is* its
+ * column: an empty one leaves that box empty, because a blank hundreds column is not a zero
+ * and a digit that slid across would be a different number.
+ */
 function syncWrittenAnswer() {
   if (!current) return;
-  current.answer = writeSlots
-    .map((slot) => (slot.digit === null ? '' : String(slot.digit)))
-    .join('');
+  if (current.layout === 'column') {
+    current.digits = writeSlots.map((slot) => slot.digit);
+  } else {
+    const written = writeSlots
+      .map((slot) => (slot.digit === null ? '' : String(slot.digit)))
+      .join('');
+    const boxes = emptyBoxes(current.width);
+    const start = current.width - written.length;
+    for (let i = 0; i < written.length; i += 1) boxes[start + i] = Number(written[i]);
+    current.digits = boxes;
+  }
   renderAnswer();
 }
 
@@ -756,9 +880,13 @@ function buildWriteBoxes(count) {
   for (const slot of writeSlots) slot.pad.destroy();
   writeSlots.length = 0;
   el.writeBoxes.innerHTML = '';
+  // Three or four pads have to share the width two used to have to themselves, so the row says
+  // how many there are and the stylesheet shrinks them to fit.
+  el.writeBoxes.style.setProperty('--pads', String(count));
   for (let i = 0; i < count; i += 1) {
     const box = document.createElement('div');
     box.className = 'write-box';
+    box.dataset.slot = String(i);
     const host = document.createElement('div');
     host.className = 'write-pad';
     host.setAttribute('role', 'application');
@@ -798,7 +926,10 @@ function resetWriting() {
 el.writeBoxes.addEventListener('click', (event) => {
   const button = event.target.closest('button');
   if (!button || locked) return;
-  const slot = writeSlots[[...el.writeBoxes.children].indexOf(button.closest('.write-box'))];
+  // By the box's own index, not by its position among the row's children: the row gains and
+  // loses elements, and a click that landed on the wrong slot would be silent.
+  const box = button.closest('.write-box');
+  const slot = box ? writeSlots[Number(box.dataset.slot)] : null;
   if (!slot) return;
   if (button.dataset.alt !== undefined) correctSlot(slot, Number(button.dataset.alt));
   else if (button.dataset.fix !== undefined) openPicker(slot);
@@ -818,9 +949,21 @@ el.writeUndo.addEventListener('click', () => {
 el.writeClear.addEventListener('click', () => {
   if (locked || !current) return;
   // Starting the whole answer over *is* hesitation, unlike putting a misreading right.
-  if (current.answer) current.clears += 1;
+  if (current.digits.some((d) => d !== null)) current.clears += 1;
+  current.carries = current.carries.map(() => false);
   resetWriting();
   syncWrittenAnswer();
+});
+
+// The carry boxes. Never read, never graded — see `carryMarkup` — so they are handled here,
+// well away from anything that decides whether an answer is right.
+el.promptSum.addEventListener('click', (event) => {
+  const box = event.target.closest('button[data-carry]');
+  if (!box || locked || !current) return;
+  const index = Number(box.dataset.carry);
+  current.carries[index] = !current.carries[index];
+  audio.play('tick');
+  renderAnswer();
 });
 
 // pointerdown rather than click, for the same zero-latency reason the touch controls use it.
@@ -844,17 +987,28 @@ document.addEventListener('keydown', (event) => {
   } else if (event.key === 'Backspace' || event.key === 'Delete') {
     event.preventDefault();
     if (writingWanted()) {
-      if (current.answer) current.clears += 1;
+      if (current.digits.some((d) => d !== null)) current.clears += 1;
       resetWriting();
       syncWrittenAnswer();
     } else {
-      clearAnswer();
+      backspaceAnswer();
     }
-  } else if (event.key === 'Enter' && current.answer) {
+  } else if (event.key === 'Enter' && isComplete(current)) {
     event.preventDefault();
     submit();
   }
 });
+
+/**
+ * Which way round to write a question. Only a plain addition fact may be turned round: `3 + 5`
+ * and `5 + 3` are the same thing to know and meeting both is how commutativity is taught. A
+ * difference is not symmetric, and a column sum is written with the longer number on top,
+ * so both are shown exactly as they came.
+ */
+function shownForm(question) {
+  const swap = question.op === '+' && !question.column && Math.random() < 0.5;
+  return swap ? { ...question, a: question.b, b: question.a } : question;
+}
 
 function askNext() {
   const id = nextItem(state, {
@@ -865,16 +1019,25 @@ function askNext() {
   const item = ensureItem(id);
   lastAskedId = id;
   const sum = isSum(item);
+  // A fact *is* its question; a skill makes one up, from a seed built out of state the save was
+  // keeping anyway — so a reload mid-question, and the retry two questions after a wrong
+  // answer, both come back to the very same numbers the child was last looking at.
+  const question = sum ? math.instanceOf(item) : { h: item.h, m: item.m };
+  const width = sum ? math.answerWidth(item) : 0;
   current = {
     id,
     subject: item.subject ?? DEFAULT_SUBJECT,
-    target: sum ? { a: item.a, b: item.b } : { h: item.h, m: item.m },
-    // Which way round the pair is written is decided fresh each time. The item is the same
-    // fact either way — that is the whole reason there is only one of it — and seeing it
-    // both ways is how commutativity gets taught without a lesson about it.
-    shown: sum && Math.random() < 0.5 ? { a: item.b, b: item.a } : { a: item.a, b: item.b },
-    width: sum ? addition.answerWidth() : 0,
-    answer: '',
+    target: question,
+    // Which way round the pair is written is decided fresh each time — but only for a sum.
+    // The item is the same fact either way, which is the whole reason there is only one of it,
+    // and seeing it both ways is how commutativity gets taught without a lesson about it.
+    // Turning a *difference* round would not be the same question at all.
+    shown: sum ? shownForm(question) : question,
+    layout: sum ? math.layoutOf(question) : 'clock',
+    width,
+    digits: emptyBoxes(width),
+    // One per column plus one for anything that runs off the top. Scratch only.
+    carries: sum ? new Array(width).fill(false) : [],
     clears: 0,
     startedAt: now(),
     reversals: 0,
@@ -913,29 +1076,63 @@ function askNext() {
 
 const cheer = () => t(`cheer.${1 + Math.floor(Math.random() * 5)}`);
 
-const SUM_VERDICTS = {
+// One sentence per wrong idea. A child who added instead of subtracting and a child who
+// miscounted by one have made different mistakes, and being told the same thing teaches
+// neither of them anything.
+const MATH_VERDICTS = {
   offByOne: 'teach.sumOffByOne',
   transposed: 'teach.sumTransposed',
   gaveAddend: 'teach.sumGaveAddend',
   gaveDifference: 'teach.sumGaveDifference',
+  gaveSum: 'teach.subGaveSum',
+  reversed: 'teach.subReversed',
+  gaveOperand: 'teach.subGaveOperand',
+  wroteFullSumInColumn: 'teach.colFullSum',
+  forgotCarry: 'teach.colForgotCarry',
+  carriedWrongColumn: 'teach.colCarryWrongColumn',
+  carriedIntoOwnColumn: 'teach.colCarriedIntoOwnColumn',
+  smallerFromLarger: 'teach.colSmallerFromLarger',
+  forgotBorrow: 'teach.colForgotBorrow',
+  borrowAcrossZero: 'teach.colBorrowAcrossZero',
+  addedInstead: 'teach.colAddedInstead',
+  subtractedInstead: 'teach.colSubtractedInstead',
+  placeValueOff: 'teach.colPlaceValueOff',
 };
 
 /**
- * What the caption says under a wrong sum: the mistake named, where there is a name for it,
- * followed by the fact stated the way the picture is about to show it. Telling a child who
- * subtracted the same sentence as a child who miscounted by one would teach neither.
+ * What the caption says under a wrong answer: the mistake named, where there is a name for it,
+ * followed by the question stated the way the picture is about to show it.
+ *
+ * For a difference the closing sentence names the addition fact it is the flip side of —
+ * "you know 7 + 8 = 15, so 15 − 8 = 7". That is deliberately not a new rule to hold on to but
+ * a reminder of one the child has already mastered, which is the whole reason the subtraction
+ * ladder mirrors the addition one rung for rung.
  */
 function sumTeachLine(result) {
-  const { a, b } = current.shown;
+  const question = current.shown;
+  const named = MATH_VERDICTS[result.verdict];
+  const opening = (result.nearMiss ? t('teach.nearMiss') : '') + (named ? `${t(named)} ` : '');
+  if (current.layout === 'column') {
+    return opening + t(question.op === '-' ? 'teach.colSubPlain' : 'teach.colAddPlain', {
+      a: question.a,
+      b: question.b,
+      total: question.op === '-' ? question.a - question.b : question.a + question.b,
+    });
+  }
+  if (question.op === '-') {
+    const { a, b } = question;
+    const rest = a - b;
+    const params = { a, b, rest, small: Math.min(b, rest), large: Math.max(b, rest) };
+    // The fact family only exists inside the deck the game teaches; past that there is no
+    // partner to point at and the plain sentence is the honest one.
+    const family = a <= 20 && b <= 10 && rest <= 10;
+    return opening + t(family ? 'teach.subFamily' : 'teach.subPlain', params);
+  }
+  const { a, b } = question;
   const plan = fillPlan(a, b);
   const bridged = plan.rest > 0 && plan.a + plan.bridge === 10;
   const params = { a, b, sum: a + b, bridge: plan.bridge, rest: plan.rest };
-  const named = SUM_VERDICTS[result.verdict];
-  return (
-    (result.nearMiss ? t('teach.nearMiss') : '') +
-    (named ? `${t(named)} ` : '') +
-    t(bridged ? 'teach.sumMakeTen' : 'teach.sumPlain', params)
-  );
+  return opening + t(bridged ? 'teach.sumMakeTen' : 'teach.sumPlain', params);
 }
 
 function teachLine(target, result) {
@@ -979,17 +1176,26 @@ async function submit() {
 
   const subject = SUBJECTS[current.subject] ?? SUBJECTS[DEFAULT_SUBJECT];
   const sum = isSum(current);
-  const target = current.target;
-  const answer = sum ? current.answer : { ...dial };
+  // Graded against the form on screen, not the canonical one: a commuted `5 + 3` and the fact
+  // `3 + 5` come to the same number, but a column sum's columns do not line up if it is
+  // turned round, so the question the child actually answered is the one to answer against.
+  const target = current.shown;
+  const answer = sum ? answerText(current) : { ...dial };
   const result = subject.grade(target, answer);
   const ms = now() - current.startedAt;
+  const item = state.items[current.id];
+  // How this item is scheduled, and which of its cases was just asked about. Both empty for
+  // anything whose question never changes, which is every clock face and every fact.
+  const pacing = subject.pacing?.(item) ?? {};
 
   state.reviewClock += 1;
-  const outcome = review(state.items[current.id], {
+  const outcome = review(item, {
+    ...pacing,
+    shape: current.shown?.shape ?? null,
     correct: result.correct,
     ms,
     reversals: sum ? current.clears : current.reversals,
-    pace: subject.paceScale,
+    pace: subject.paceOf?.(item) ?? subject.paceScale,
     reviewClock: state.reviewClock,
     now: now(),
   });
@@ -1064,7 +1270,9 @@ async function celebrate(outcome, paid = 0) {
     el.petStage.querySelector('.pet')?.classList.add('arriving');
     confetti(el.petStage, el.fx, { power: 2.2 });
     el.feedback.textContent = t('evolve.done', { name, label: formLabel(item) });
-    await wait(1800);
+    // The same look a hatch gets, a shade shorter: the pet was already there, and it has
+    // changed rather than arrived.
+    await admire(admireTimes().evolveMs);
     return;
   }
 
@@ -1116,6 +1324,56 @@ const SHELL_DUST = ['#fdf6ec', '#efe3d2', '#e2d3bd'];
  * ever seen to turn into anything. The egg goes in, the smoke happens, and the pet is standing
  * there when it clears.
  */
+/**
+ * A run of pauses the child can cut short by tapping the pet.
+ *
+ * Used twice over a hatch, and deliberately not once: tapping through the shell breaking is
+ * "get on with it", and tapping through the look at the new pet is a different "get on with
+ * it". A child who skipped the build-up has not asked to skip meeting what came out of it, so
+ * the two get separate tokens and the second starts fresh.
+ */
+function skippableBeats(host = el.petStage) {
+  let skipped = false;
+  let resolve = () => {};
+  const done = new Promise((r) => {
+    resolve = r;
+  });
+  const onDown = () => {
+    skipped = true;
+    resolve();
+  };
+  host.addEventListener('pointerdown', onDown);
+  return {
+    /** Wait, unless the child has already asked not to. False once they have. */
+    async beat(ms) {
+      if (skipped) return false;
+      await Promise.race([wait(ms), done]);
+      return !skipped;
+    },
+    get skipped() {
+      return skipped;
+    },
+    release: () => host.removeEventListener('pointerdown', onDown),
+  };
+}
+
+/**
+ * The beat after something new appears. This is the whole of what the long tail of the
+ * schedule is for — a pet that was not there before, or one that has grown — and until now it
+ * was over in half a second, which is not long enough to notice a thing, let alone enjoy it.
+ */
+async function admire(ms) {
+  const beats = skippableBeats();
+  try {
+    await beats.beat(ms);
+  } finally {
+    beats.release();
+  }
+}
+
+/** How long the two celebrations hold, from the grown-up's setting. */
+const admireTimes = () => session.admireFor(state.settings.admireSeconds);
+
 async function hatchShow(item) {
   const name = petName(item, t.lang);
   const palette = SPECIES[appearanceOf(item).species]?.palette ?? [];
@@ -1134,27 +1392,14 @@ async function hatchShow(item) {
     await wait(300);
     arrive();
     el.feedback.textContent = t('hatch.hello', { name });
-    await wait(1200);
+    // The look is a pause, not an animation. A child who wants less motion does not want
+    // less time to see what they have just been given.
+    await admire(admireTimes().hatchMs);
     return;
   }
 
-  let skipped = false;
-  let release = () => {};
-  const skip = new Promise((resolve) => {
-    const onDown = () => {
-      skipped = true;
-      resolve();
-    };
-    el.petStage.addEventListener('pointerdown', onDown);
-    release = () => el.petStage.removeEventListener('pointerdown', onDown);
-  });
-
-  /** A beat a tap can cut short. False once the child has asked to get on with it. */
-  const beat = async (ms) => {
-    if (skipped) return false;
-    await Promise.race([wait(ms), skip]);
-    return !skipped;
-  };
+  const beats = skippableBeats();
+  const beat = (ms) => beats.beat(ms);
 
   try {
     // The build-up: a twitch that grows into something trying to get out.
@@ -1173,7 +1418,7 @@ async function hatchShow(item) {
       }
     }
 
-    if (!skipped) {
+    if (!beats.skipped) {
       // The shell gives, and the cloud takes over.
       el.petStage.querySelector('.pet')?.classList.add('egg-burst');
       audio.play('poof');
@@ -1184,24 +1429,33 @@ async function hatchShow(item) {
       await beat(500);
     }
   } finally {
-    release();
+    beats.release();
   }
 
   arrive();
-  // A held breath before the cheer, so the pet is met before it is celebrated. A child who
-  // skipped still gets that moment — just a shorter one.
-  if (skipped) {
-    await wait(500);
+  // The ending gets its own tap-to-skip, and it starts *here* rather than after the held
+  // breath below. A child jabbing at the screen the instant the pet appears is asking to move
+  // on, and a tap that lands in the gap before the listener exists does nothing, which they
+  // read as the game ignoring them.
+  const ending = skippableBeats();
+  try {
+    // A held breath before the cheer, so the pet is met before it is celebrated. A child who
+    // skipped the shell still gets that moment — just a shorter one.
+    await ending.beat(beats.skipped ? 500 : 700);
     confetti(el.petStage, el.fx, { power: 1.8 });
     el.feedback.textContent = t('hatch.hello', { name });
-    await wait(900);
-    return;
+    // However impatient they are, long enough to read the name of the thing they have just
+    // been given. Only what is left over after that can be tapped away.
+    await wait(NAME_READ_MS);
+    await ending.beat(Math.max(0, admireTimes().hatchMs - NAME_READ_MS));
+  } finally {
+    ending.release();
   }
-  await wait(700);
-  confetti(el.petStage, el.fx, { power: 1.8 });
-  el.feedback.textContent = t('hatch.hello', { name });
-  await wait(500);
 }
+
+// The pet says its name once, and that is the only time it is said. Everything else in the
+// ending can be cut short; this cannot.
+const NAME_READ_MS = 400;
 
 /**
  * The wrong-answer path. No red, no cross, no buzzer: the hands simply walk from where
@@ -1214,16 +1468,35 @@ async function hatchShow(item) {
  * finish the ten, then the five that are left. Nothing is red and nothing is crossed out.
  */
 async function correctSum(target, result) {
-  const { a, b } = current.shown;
+  const question = current.shown;
   el.feedback.textContent = sumTeachLine(result);
   el.feedback.className = 'feedback teach';
   const still = reduceMotion();
   el.tenframeHost.hidden = false;
-  el.tenframeHost.innerHTML = tenFrameSvg(a, b, {
-    step: still ? 0 : 0.07,
-    title: t.spokenSum(a, b),
-  });
-  await wait(still ? 700 : fillDuration(a, b));
+  if (current.layout === 'column') {
+    // The column's counterpart to the clock's ghost hands: it does not say the answer, it does
+    // the work — the ones column, then the carry lifting into the box above the tens.
+    //
+    // How fast is a grown-up's decision, because it is a fact about one child rather than
+    // about the game. `walkInstant` skips the working altogether and lands on the finished
+    // sum — the same still frame reduced motion gets, which is why the two share a path.
+    const instant = still || Boolean(state.settings.walkInstant);
+    const step = stepFor(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+    el.tenframeHost.innerHTML = columnWalkHtml(question, {
+      step: instant ? 0 : step,
+      title: t.spokenQuestion(question),
+    });
+    // A still frame still needs long enough to be read, and a longer sum needs longer.
+    await wait(instant ? 1200 + walkWidth(question) * 300 : walkDuration(question, step));
+  } else {
+    const { op = '+', a, b } = question;
+    el.tenframeHost.innerHTML = tenFrameSvg(a, b, {
+      step: still ? 0 : 0.07,
+      title: t.spokenQuestion(question),
+      op,
+    });
+    await wait(still ? 700 : fillDuration(a, b, 0.07, op));
+  }
   renderPetStage(state.items[current.id], 'content');
   await wait(1700);
 }
@@ -1352,18 +1625,23 @@ function renderZooBadge() {
 // had — an existing zoo must not rearrange itself — and the sums follow in teaching order
 // after them. Sorting sums by `h` and `m`, which they do not have, was comparing NaN and
 // leaving them in whatever order the save happened to list them.
-const SUM_ORDER = new Map(addition.ALL_ITEMS.map((fact, index) => [fact.id, index]));
+const SUM_ORDER = new Map(math.ALL_ITEMS.map((entry, index) => [entry.id, index]));
 const zooRank = (item) =>
   isSum(item)
-    ? 10000 + (SUM_ORDER.get(addition.idOf(item)) ?? 0)
+    ? 10000 + (SUM_ORDER.get(math.idOf(item)) ?? 0)
     : (item.h ?? 0) * 60 + (item.m ?? 0);
 
-/** What a pet wears to say which question it keeps: a clock face, or its sum. */
+/** What a pet wears to say which question it keeps: a clock face, a fact, or the name of the
+ *  method it looks after. */
 function penCollar(item, digits) {
   if (isSum(item)) {
-    // Not hidden behind the digital setting, unlike the clock's: the sum is the question,
-    // and seeing it gives the answer away no more than the pet's name does.
-    return `<span class="collar-sum">${item.a} + ${item.b}</span>`;
+    // Not hidden behind the digital setting, unlike the clock's: the question is the question,
+    // and seeing it gives the answer away no more than the pet's name does. A skill's pet
+    // wears the name of its method instead — there is no one sum to wear.
+    const label = item.skill
+      ? escape(t(`skill.${item.skill}`))
+      : `${item.a} ${item.op === '-' ? '−' : '+'} ${item.b}`;
+    return `<span class="collar-sum">${label}</span>`;
   }
   return `${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}`;
 }
@@ -1386,7 +1664,7 @@ function renderZoo() {
       const isEgg = item.hatchedAt === null;
       const mood = moodOf(item, at, { napping });
       const art = isEgg
-        ? eggSvg(appearanceOf(item).species, { cracks: item.cracks ?? 0, title: eggTitle(item) })
+        ? eggSvg(portraitOf(item), { cracks: item.cracks ?? 0, title: eggTitle(item) })
         : petSvg(appearanceOf(item), { mood, title: escape(petName(item, t.lang)) });
       // Eggs no longer carry progress dots — the broken shell is the progress, and `eggTitle`
       // is what says so to anyone not looking at it.
@@ -1925,10 +2203,10 @@ el.submit.addEventListener('click', submit);
 /* ----------------------------------------------------------------- overlays */
 
 async function showUnlock(subjectId, tier) {
-  const sum = subjectId === addition.id;
-  const key = sum ? `tier.add.${tier}` : `tier.${tier}`;
+  const sum = subjectId === math.id;
+  const key = sum ? `tier.math.${tier}` : `tier.${tier}`;
   const species = (sum
-    ? addition.tierItems(tier).map((fact) => speciesForFact(fact.a, fact.b))
+    ? math.tierItems(tier).map((entry) => speciesOf({ subject: math.id, ...entry }))
     : tierItems(tier).map((time) => speciesFor(time.h, time.m))
   )
     .filter((s, i, all) => all.indexOf(s) === i)
@@ -1980,30 +2258,32 @@ function renderGrownups() {
   /**
    * One block per subject: a switch, then its rungs.
    *
+   * Maths has nineteen of them, which is more than anybody can read as a flat list, so they
+   * are folded into groups — Pluss, Minus, Tiere, Kolonne — with the group the child is
+   * actually working in open and the rest closed. The grouping is presentation and nothing
+   * else: there is still one switch and one floor for the whole subject, because the ladder is
+   * one ladder and a child who has not met subtraction has no business being handed column
+   * subtraction.
+   *
    * The floor moves one rung at a time, and only the two rungs either side of it carry a
    * button — "skip this" on the lowest one still being practised, "practise this" on the
    * highest one skipped. Offering `skip` on every rung would let a tap on tier 4 silently
    * skip tiers 0 to 3 as well, which is not what anybody pressing it would expect.
    */
-  const block = (subjectId, tiers, keyOf) => {
-    const on = isEnabled(practice, subjectId);
-    const floor = floorOf(practice, subjectId);
-    const last = tiers[tiers.length - 1].id;
-    const bars = tiers
-      .map((tier) => {
-        const pct = Math.round(tierMastery(state.items, subjectId, tier.id) * 100);
-        const locked = tier.id > (state.tiers[subjectId] ?? 0);
-        const skipped = tier.id < floor;
-        const button =
-          on && tier.id === floor && tier.id < last
-            ? `<button type="button" class="tier-skip" data-skip="${subjectId}" data-tier="${tier.id}">${escape(t('grownups.skip'))}</button>`
-            : on && tier.id === floor - 1
-              ? `<button type="button" class="tier-skip" data-unskip="${subjectId}" data-tier="${tier.id}">${escape(t('grownups.practiseThis'))}</button>`
-              : '';
-        const right = skipped
-          ? `<span class="tier-note">${escape(t('grownups.skipped'))}</span>`
-          : `<span class="tier-note">${pct}%</span>`;
-        return `
+  const rung = (subjectId, tier, keyOf, { on, floor, last }) => {
+    const pct = Math.round(tierMastery(state.items, subjectId, tier.id) * 100);
+    const locked = tier.id > (state.tiers[subjectId] ?? 0);
+    const skipped = tier.id < floor;
+    const button =
+      on && tier.id === floor && tier.id < last
+        ? `<button type="button" class="tier-skip" data-skip="${subjectId}" data-tier="${tier.id}">${escape(t('grownups.skip'))}</button>`
+        : on && tier.id === floor - 1
+          ? `<button type="button" class="tier-skip" data-unskip="${subjectId}" data-tier="${tier.id}">${escape(t('grownups.practiseThis'))}</button>`
+          : '';
+    const right = skipped
+      ? `<span class="tier-note">${escape(t('grownups.skipped'))}</span>`
+      : `<span class="tier-note">${pct}%</span>`;
+    return `
       <div class="tier-row${locked ? ' locked' : ''}${skipped ? ' is-skipped' : ''}">
         <div class="tier-head">
           <span>${escape(t(keyOf(tier)))}${locked ? ' 🔒' : ''}</span>
@@ -2011,8 +2291,38 @@ function renderGrownups() {
         </div>
         <div class="track"><div class="fill" style="width:${skipped ? 0 : pct}%"></div></div>
       </div>`;
-      })
-      .join('');
+  };
+
+  const block = (subjectId, tiers, keyOf, groups = null) => {
+    const on = isEnabled(practice, subjectId);
+    const floor = floorOf(practice, subjectId);
+    const last = tiers[tiers.length - 1].id;
+    const opts = { on, floor, last };
+    const reached = state.tiers[subjectId] ?? 0;
+    const bars = groups
+      ? groups
+          .map((group) => {
+            const rows = tiers.filter((tier) => group.tiers.includes(tier.id));
+            const done = rows.filter((tier) => tierMastery(state.items, subjectId, tier.id) >= 1).length;
+            // Open the group the child is actually working in — the one holding the highest
+            // rung they have reached — and leave the finished ones folded away. Also the one
+            // holding the floor, because that is where the skip and practise-this buttons are,
+            // and a control folded out of sight is a control nobody finds.
+            const open =
+              group.tiers.includes(Math.min(reached, last)) ||
+              group.tiers.includes(Math.min(floor, last)) ||
+              group.tiers.includes(Math.max(floor - 1, 0));
+            return `
+      <details class="tier-group"${open ? ' open' : ''}>
+        <summary>
+          <span class="group-name">${escape(t(`group.${group.id}`))}</span>
+          <span class="group-count">${done}/${rows.length}</span>
+        </summary>
+        ${rows.map((tier) => rung(subjectId, tier, keyOf, opts)).join('')}
+      </details>`;
+          })
+          .join('')
+      : tiers.map((tier) => rung(subjectId, tier, keyOf, opts)).join('');
     return `
       <div class="practice-subject${on ? '' : ' is-off'}">
         <div class="practice-head">
@@ -2026,7 +2336,7 @@ function renderGrownups() {
 
   el.grownupsTiers.innerHTML =
     block('clock', TIERS, (tier) => `tier.${tier.id}.name`) +
-    block(addition.id, addition.TIERS, (tier) => `tier.add.${tier.id}.name`);
+    block(math.id, math.TIERS, (tier) => `tier.math.${tier.id}.name`, math.GROUPS);
   el.grownups.hidden = false;
 }
 
@@ -2137,6 +2447,9 @@ function applyLanguage() {
 
   applySound(); // its label is a string too
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
+  // Filled in by hand rather than from `data-i18n`, so they have to be redrawn by hand too.
+  renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+  renderAdmire(state.settings.admireSeconds);
   buildAnswerModeOptions();
   buildKeypad(); // its digits carry spoken labels, which are strings like any other
   for (const slot of writeSlots) {
@@ -2189,6 +2502,9 @@ function openSettings() {
   el.mirrorNudge.checked = Boolean(state.settings.mirrorNudge);
   el.answerMode.value = state.settings.answerMode ?? 'auto';
   el.playMinutes.value = String(limits.minutes);
+  renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+  el.walkInstant.checked = Boolean(state.settings.walkInstant);
+  renderAdmire(state.settings.admireSeconds);
   setTransferStatus('');
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
   el.settings.hidden = false;
@@ -2232,6 +2548,60 @@ el.playMinutes.addEventListener('input', () => {
   el.playMinutesValue.textContent = t('settings.playTimeValue', {
     n: session.limitsFor(el.playMinutes.value).minutes,
   });
+});
+
+/** How long a new pet stays on screen, in seconds, shown as seconds. */
+function renderAdmire(seconds) {
+  const times = session.admireFor(seconds);
+  el.admireSeconds.value = String(times.seconds);
+  el.admireSecondsValue.textContent = t('settings.admireValue', {
+    n: times.seconds.toFixed(1),
+  });
+}
+
+// Live label while dragging; the setting lands on `change`, like the two sliders below it.
+el.admireSeconds.addEventListener('input', () => {
+  renderAdmire(el.admireSeconds.value);
+});
+
+el.admireSeconds.addEventListener('change', () => {
+  state.settings.admireSeconds = session.admireFor(el.admireSeconds.value).seconds;
+  renderAdmire(state.settings.admireSeconds);
+  save();
+});
+
+/**
+ * The walkthrough's pace, shown by name and by what it actually costs. A grown-up choosing
+ * this is deciding how long their child sits looking at a sum they got wrong, so the seconds
+ * are worth saying out loud rather than leaving them to be discovered.
+ */
+function renderWalkSpeed(id) {
+  el.walkSpeed.value = String(walkSpeedIndex(id));
+  el.walkSpeedValue.textContent = t('settings.walkSpeedValue', {
+    name: t(`settings.walkSpeed.${id}`),
+    // Two columns is the commonest column sum there is, so it is the honest one to quote.
+    seconds: (walkDuration({ op: '+', a: 47, b: 38 }, stepFor(id)) / 1000).toFixed(1),
+  });
+  // Nothing to set the pace of if the working is switched off entirely.
+  el.walkSpeed.disabled = Boolean(state.settings.walkInstant);
+}
+
+// Live label while dragging; the setting lands on `change`, like the play-time slider above.
+el.walkSpeed.addEventListener('input', () => {
+  renderWalkSpeed(walkSpeedAt(el.walkSpeed.value));
+});
+
+el.walkSpeed.addEventListener('change', () => {
+  state.settings.walkSpeed = walkSpeedAt(el.walkSpeed.value);
+  renderWalkSpeed(state.settings.walkSpeed);
+  save();
+});
+
+el.walkInstant.addEventListener('change', () => {
+  state.settings.walkInstant = el.walkInstant.checked;
+  save();
+  // The pace slider means nothing while the working is skipped, so it says so.
+  renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
 });
 
 el.playMinutes.addEventListener('change', () => {

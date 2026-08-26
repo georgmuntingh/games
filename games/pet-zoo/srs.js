@@ -42,8 +42,14 @@ export const CRACK_STAGES = 2; // crack levels visible before the shell finally 
 /**
  * The crack level a streak has earned, 0..CRACK_STAGES. The first answer leaves the shell smooth
  * — a crack has to mean something — and the last crack lands on the answer before hatching.
+ *
+ * Spread over however long the run to hatching is, because a skill's run is longer than a
+ * fact's and a shell that finished breaking four answers early has stopped saying anything.
+ * At the default HATCH_STREAK of 4 this is 0, 0, 1, 2, 2 — the same numbers it has always
+ * given, which is what lets every existing save and every existing test go on believing it.
  */
-export const crackFor = (streak) => Math.min(Math.max(streak - 1, 0), CRACK_STAGES);
+export const crackFor = (streak, hatchStreak = HATCH_STREAK) =>
+  Math.min(Math.floor((Math.max(streak, 0) * CRACK_STAGES) / Math.max(hatchStreak - 1, 1)), CRACK_STAGES);
 
 // Forms. A pet's shape is earned by feeding it successfully over the long haul, so a form
 // is the visible proof that a time is genuinely known — the reward the SRS's long tail has
@@ -102,6 +108,11 @@ export function createItem({
     feeds: 0,
     lapses: 0,
     correctStreak: 0,
+    // Which of an item's cases the child has actually got right. Empty and unused for anything
+    // whose question never changes — a fact is its own single case — and the whole of the
+    // guarantee that a *skill* was really learned rather than luckily drawn. See
+    // subjects/math/skills.js.
+    covered: [],
     // The high-water mark of `crackFor(correctStreak)`, never lowered: a wrong answer restarts the
     // run to hatching but must not un-break a shell the child has already watched break.
     cracks: 0,
@@ -137,7 +148,27 @@ export const nextInterval = (reps, intervalDays, ease) => {
  * Record one answer. Returns the replacement item plus the events the UI should
  * celebrate — hatching in particular is just graduation wearing a costume.
  */
-export function review(item, { correct, ms = 0, reversals = 0, pace = 1, reviewClock, now }) {
+export function review(
+  item,
+  {
+    correct,
+    ms = 0,
+    reversals = 0,
+    pace = 1,
+    reviewClock,
+    now,
+    // Which case of the item was just asked about, and which cases it has to cover before it
+    // can be called learned. Both absent for anything whose question never changes, which is
+    // why every existing caller and every existing save behaves exactly as it did.
+    shape = null,
+    requiredShapes = null,
+    // How long the run-up is and how high the bar. Defaulted to the module's own numbers, so a
+    // subject that says nothing gets the schedule the clock has always had.
+    steps = LEARNING_STEPS,
+    hatchStreak = HATCH_STREAK,
+    graduationStreak = GRADUATION_STREAK,
+  }
+) {
   const quality = qualityOf({ correct, ms, reversals, pace });
   const next = { ...item, seen: item.seen + 1, lastMs: ms };
   const events = {
@@ -151,15 +182,30 @@ export function review(item, { correct, ms = 0, reversals = 0, pace = 1, reviewC
 
   if (correct) {
     next.correctStreak = item.correctStreak + 1;
+    // Coverage only ever grows, and only on an answer that was right: it records "has shown
+    // they can do this case", which is not something a later bad day untrue.
+    const covered = Array.isArray(item.covered) ? item.covered : [];
+    next.covered = shape && !covered.includes(shape) ? [...covered, shape] : covered;
+    // What is still missing before this item may be called learned. Required for the *first*
+    // graduation only — exactly like the extra answer the first hatch costs — because making a
+    // lapsed skill tour every case again turns one bad day into a twenty-question punishment.
+    const missing =
+      item.hatchedAt === null && Array.isArray(requiredShapes)
+        ? requiredShapes.filter((s) => !next.covered.includes(s))
+        : [];
     if (item.hatchedAt === null) {
-      const cracks = Math.max(item.cracks ?? 0, crackFor(next.correctStreak));
+      let cracks = Math.max(item.cracks ?? 0, crackFor(next.correctStreak, hatchStreak));
+      // Never spend the last crack while a case is still uncovered: the final crack is a
+      // promise that the next answer hatches it, and an egg that sits fully broken for five
+      // more questions has broken that promise.
+      if (missing.length) cracks = Math.min(cracks, CRACK_STAGES - 1);
       if (cracks > (item.cracks ?? 0)) events.cracked = cracks;
       next.cracks = cracks;
     }
     if (item.phase === 'learning') {
       // Only the first hatch costs the extra answer; a lapsed pet re-graduates at the usual bar.
-      const needed = item.hatchedAt === null ? HATCH_STREAK : GRADUATION_STREAK;
-      if (next.correctStreak >= needed) {
+      const needed = item.hatchedAt === null ? hatchStreak : graduationStreak;
+      if (next.correctStreak >= needed && missing.length === 0) {
         next.phase = 'graduated';
         next.reps = 1;
         next.feeds = item.feeds + 1;
@@ -172,8 +218,8 @@ export function review(item, { correct, ms = 0, reversals = 0, pace = 1, reviewC
           events.hatched = true;
         }
       } else {
-        next.step = Math.min(item.step + 1, LEARNING_STEPS.length - 1);
-        next.dueStep = reviewClock + LEARNING_STEPS[next.step];
+        next.step = Math.min(item.step + 1, steps.length - 1);
+        next.dueStep = reviewClock + steps[next.step];
       }
     } else {
       next.ease = applyEase(item.ease, quality);

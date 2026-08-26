@@ -66,17 +66,81 @@ const NUMBER_WORDS = {
     'nitten', 'tjue'],
 };
 
-/** A number spelled out: "fifteen" / "femten". Falls back to the digits past twenty. */
+// Past twenty the two languages build numbers rather than list them, and they build them
+// differently. English hyphenates and keeps its "and": forty-seven, four hundred and five.
+// Norwegian runs the whole thing together as one word — førtisju — and the unit word changes
+// when it is inside one: it is "én" standing alone but "en" in "tjueen". That is the same kind
+// of trap as "klokka ett" against "én pluss to" above, and it is why the compounding path
+// keeps its own list of units rather than reusing NUMBER_WORDS.
+const TENS_WORDS = {
+  en: ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'],
+  nb: ['', '', 'tjue', 'tretti', 'førti', 'femti', 'seksti', 'sytti', 'åtti', 'nitti'],
+};
+
+const COMPOUND_UNITS = {
+  en: ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'],
+  nb: ['', 'en', 'to', 'tre', 'fire', 'fem', 'seks', 'sju', 'åtte', 'ni'],
+};
+
+/**
+ * A number spelled out: "fifteen" / "femten", and on up to four digits, because a column sum
+ * reaches into the hundreds and the aria-label is all a screen-reader user gets to hear.
+ */
 export function numberWord(lang, n) {
-  const list = NUMBER_WORDS[lang] ?? NUMBER_WORDS[DEFAULT_LANGUAGE];
-  return list[n] ?? String(n);
+  const code = NUMBER_WORDS[lang] ? lang : DEFAULT_LANGUAGE;
+  const value = Math.floor(Math.abs(Number(n)));
+  if (!Number.isFinite(value)) return String(n);
+  const listed = NUMBER_WORDS[code][value];
+  if (listed) return listed;
+  if (value > 9999) return String(value);
+  if (value >= 1000) return thousands(code, value);
+  if (value >= 100) return hundreds(code, value);
+  return tensAndUnits(code, value);
+}
+
+function tensAndUnits(lang, n) {
+  const ten = Math.floor(n / 10);
+  const unit = n % 10;
+  const tenWord = TENS_WORDS[lang][ten];
+  if (!unit) return tenWord;
+  return lang === 'en'
+    ? `${tenWord}-${COMPOUND_UNITS.en[unit]}`
+    : `${tenWord}${COMPOUND_UNITS.nb[unit]}`;
+}
+
+function hundreds(lang, n) {
+  const count = Math.floor(n / 100);
+  const rest = n % 100;
+  const head =
+    lang === 'en'
+      ? `${COMPOUND_UNITS.en[count]} hundred`
+      : `${count === 1 ? 'ett' : COMPOUND_UNITS.nb[count]} hundre`;
+  if (!rest) return head;
+  const tail = NUMBER_WORDS[lang][rest] ?? tensAndUnits(lang, rest);
+  return `${head} og ${tail}`.replace(' og ', lang === 'en' ? ' and ' : ' og ');
+}
+
+function thousands(lang, n) {
+  const count = Math.floor(n / 1000);
+  const rest = n % 1000;
+  const head =
+    lang === 'en'
+      ? `${COMPOUND_UNITS.en[count]} thousand`
+      : `${count === 1 ? 'ett' : COMPOUND_UNITS.nb[count]} tusen`;
+  if (!rest) return head;
+  const tail = rest >= 100 ? hundreds(lang, rest) : NUMBER_WORDS[lang][rest] ?? tensAndUnits(lang, rest);
+  return `${head} ${tail}`;
 }
 
 /** A sum as a person would say it: "seven plus eight" / "sju pluss åtte". */
-export const spokenSum = (lang, a, b) =>
-  lang === 'en'
-    ? `${numberWord('en', a)} plus ${numberWord('en', b)}`
-    : `${numberWord('nb', a)} pluss ${numberWord('nb', b)}`;
+export const spokenSum = (lang, a, b) => spokenFact(lang, { op: '+', a, b });
+
+/** And any of the four ways this game writes a question down. */
+export const spokenFact = (lang, { op = '+', a, b } = {}) => {
+  const code = NUMBER_WORDS[lang] ? lang : DEFAULT_LANGUAGE;
+  const joiner = code === 'en' ? (op === '-' ? 'minus' : 'plus') : op === '-' ? 'minus' : 'pluss';
+  return `${numberWord(code, a)} ${joiner} ${numberWord(code, b)}`;
+};
 
 const wrap = (h) => ((h - 1 + 12) % 12) + 1; // keeps hours in 1..12, never 0 or 13
 
@@ -213,7 +277,7 @@ const STRINGS = {
     'grownups.skipped': 'skipped',
     'grownups.lastSubject': 'There has to be something left to practise.',
     'subject.clock': 'The clock',
-    'subject.add': 'Adding up',
+    'subject.math': 'Maths',
     'zoo.resting': '{name} is resting',
     'grownups.title': 'Progress',
     'grownups.answered': 'Times answered',
@@ -324,22 +388,112 @@ const STRINGS = {
     'teach.sumGaveDifference': 'That is taking them apart, not putting them together.',
     'teach.sumPlain': '{a} and {b} makes {sum}.',
     'teach.sumMakeTen': '{a} and {bridge} makes ten, then {rest} more — {sum}.',
-    'tier.add.0.name': 'Counting on',
-    'tier.add.0.blurb': 'Adding nothing, and adding one.',
-    'tier.add.1.name': 'Sums to ten',
-    'tier.add.1.blurb': 'Everything that fits in one ten-frame.',
-    'tier.add.2.name': 'Doubles',
-    'tier.add.2.blurb': 'Two of the same, past ten.',
-    'tier.add.3.name': 'Adding ten',
-    'tier.add.3.blurb': 'The answer is already in the question.',
-    'tier.add.4.name': 'Over the ten',
-    'tier.add.4.blurb': 'Make ten first, then add the rest.',
+    'tier.math.0.name': 'Counting on',
+    'tier.math.0.blurb': 'Adding nothing, and adding one.',
+    'tier.math.1.name': 'Sums to ten',
+    'tier.math.1.blurb': 'Everything that fits in one ten-frame.',
+    'tier.math.2.name': 'Doubles',
+    'tier.math.2.blurb': 'Two of the same, past ten.',
+    'tier.math.3.name': 'Adding ten',
+    'tier.math.3.blurb': 'The answer is already in the question.',
+    'tier.math.4.name': 'Over the ten',
+    'tier.math.4.blurb': 'Make ten first, then add the rest.',
+    'tier.math.5.name': 'Taking one away',
+    'tier.math.5.blurb': 'Taking away nothing, and taking away one.',
+    'tier.math.6.name': 'Under ten',
+    'tier.math.6.blurb': 'Differences that stay inside one ten-frame.',
+    'tier.math.7.name': 'Back down to ten',
+    'tier.math.7.blurb': 'Take away just enough to land on the ten.',
+    'tier.math.8.name': 'Halving the doubles',
+    'tier.math.8.blurb': 'Sixteen take eight — the doubles undone.',
+    'tier.math.9.name': 'Taking ten away',
+    'tier.math.9.blurb': 'One digit moves and the other stays put.',
+    'tier.math.10.name': 'Back under the ten',
+    'tier.math.10.blurb': 'Down to ten first, then take the rest.',
+    'tier.math.11.name': 'Whole tens',
+    'tier.math.11.blurb': 'Thirty and forty, if you know three and four.',
+    'tier.math.12.name': 'Tens and ones',
+    'tier.math.12.blurb': 'One digit changes and the other keeps still.',
+    'tier.math.13.name': 'Columns, no carrying',
+    'tier.math.13.blurb': 'Line them up and add each column on its own.',
+    'tier.math.14.name': 'Columns with carrying',
+    'tier.math.14.blurb': 'A ten in one column moves next door.',
+    'tier.math.15.name': 'Three-digit columns',
+    'tier.math.15.blurb': 'Carrying twice, all the way along.',
+    'tier.math.16.name': 'Columns, no borrowing',
+    'tier.math.16.blurb': 'Take each column away on its own.',
+    'tier.math.17.name': 'Columns with borrowing',
+    'tier.math.17.blurb': 'Borrow a ten, and pay next door back.',
+    'tier.math.18.name': 'Borrowing past a zero',
+    'tier.math.18.blurb': 'When the next column has nothing to lend.',
+    'group.plus': 'Adding',
+    'group.minus': 'Taking away',
+    'group.tens': 'Tens and ones',
+    'group.column': 'Columns',
+    'prompt.colEgg': 'A chilly egg! Set it out and work it out:',
+    'prompt.colEgg1': 'The egg is stirring! Column by column:',
+    'prompt.colEgg2': 'It is cracking open! One more sum:',
+    'prompt.colForgot': '{name} forgot their snack. Work it out:',
+    'prompt.colHungry': '{name} is hungry! Their snack is this sum:',
+    'prompt.colSnack': '{name} fancies a snack. Column by column:',
+    'teach.subGaveSum': 'That is them put together, not taken apart.',
+    'teach.subReversed': 'The other way round — the big number goes first.',
+    'teach.subGaveOperand': 'That is one of the numbers on its own.',
+    'teach.subPlain': '{a} take away {b} leaves {rest}.',
+    'teach.subFamily': 'You know {small} + {large} = {a}, so {a} − {b} = {rest}.',
+    'teach.colFullSum': 'A column only keeps one digit — the rest carries.',
+    'teach.colForgotCarry': 'The ten from that column has to go next door.',
+    'teach.colCarryWrongColumn': 'The carry goes one column left, not two.',
+    'teach.colCarriedIntoOwnColumn': 'The carry goes next door, not back where it came from.',
+    'teach.colSmallerFromLarger': 'The top number is the one being taken from, every time.',
+    'teach.colForgotBorrow': 'Borrowing a ten costs the next column one.',
+    'teach.colBorrowAcrossZero': 'A zero has nothing to lend, so it borrows first.',
+    'teach.colAddedInstead': 'That is a plus, and this one is a minus.',
+    'teach.colSubtractedInstead': 'That is a minus, and this one is a plus.',
+    'teach.colPlaceValueOff': 'The right digits, but one is in the wrong column.',
+    'teach.colAddPlain': '{a} and {b} makes {total}.',
+    'teach.colSubPlain': '{a} take away {b} leaves {total}.',
+    'answer.carryOn': 'Carry written down — tap to rub it out',
+    'answer.carryOff': 'Somewhere to write the carry',
+    'skill.tens+': 'Whole tens +',
+    'skill.tens-': 'Whole tens −',
+    'skill.pv+': 'Tens and ones +',
+    'skill.pv-': 'Tens and ones −',
+    'skill.pv10': 'Add and take ten',
+    'skill.col+2': 'Column +',
+    'skill.col+21': 'Column + ones',
+    'skill.col+2c': 'Column + carry',
+    'skill.col+21c': 'Ones with carry',
+    'skill.col+3': 'Three-digit +',
+    'skill.col+32': 'Three plus two digits',
+    'skill.col-2': 'Column −',
+    'skill.col-21': 'Column − ones',
+    'skill.col-2b': 'Column − borrow',
+    'skill.col-21b': 'Ones with borrow',
+    'skill.col-3': 'Three-digit −',
+    'skill.col-32': 'Three minus two digits',
     'answer.aria': 'Your answer',
     'answer.empty': 'nothing yet',
     'answer.keypad': 'Number buttons',
     'answer.digit': 'Put down {n}',
     'answer.clear': 'Clear',
     'settings.answerMode': 'Answering',
+    'settings.admire': 'Time to look at the pet',
+    'settings.admireValue': '{n}s',
+    'settings.admireHelp':
+      'How long a newly hatched pet — or one that has just grown — stays on screen before the next question. The child can tap the pet to move on straight away.',
+    'settings.walkSpeed': 'Pace of the working',
+    'settings.walkSpeedValue': '{name} · {seconds}s',
+    'settings.walkSpeed.verySlow': 'Very calm',
+    'settings.walkSpeed.slow': 'Calm',
+    'settings.walkSpeed.steady': 'Steady',
+    'settings.walkSpeed.brisk': 'Brisk',
+    'settings.walkSpeed.quick': 'Quick',
+    'settings.walkSpeedHelp':
+      'When a column sum goes wrong, it is worked out on screen a column at a time. This is how long it waits on each one. Start calm — it is easier to speed it up later than to notice that a child never had time to see what happened.',
+    'settings.walkInstant': 'Skip the working',
+    'settings.walkInstantHelp':
+      'Off to begin with. Switched on, only the finished answer is shown, without working it out. A child then knows they were wrong but not why, so this is for one who already knows column sums well.',
     'settings.answerAuto': 'Automatic',
     'settings.answerType': 'Typing',
     'settings.answerTap': 'Buttons',
@@ -456,7 +610,7 @@ const STRINGS = {
     'grownups.skipped': 'hoppet over',
     'grownups.lastSubject': 'Det må være noe igjen å øve på.',
     'subject.clock': 'Klokka',
-    'subject.add': 'Pluss',
+    'subject.math': 'Matte',
     'zoo.resting': '{name} hviler',
     'grownups.title': 'Framgang',
     'grownups.answered': 'Klokkeslett svart på',
@@ -567,22 +721,112 @@ const STRINGS = {
     'teach.sumGaveDifference': 'Det er å ta dem fra hverandre, ikke å legge dem sammen.',
     'teach.sumPlain': '{a} og {b} blir {sum}.',
     'teach.sumMakeTen': '{a} og {bridge} blir ti, så {rest} til — {sum}.',
-    'tier.add.0.name': 'Telle videre',
-    'tier.add.0.blurb': 'Å legge til ingenting, og å legge til én.',
-    'tier.add.1.name': 'Summer opp til ti',
-    'tier.add.1.blurb': 'Alt som får plass i én tierramme.',
-    'tier.add.2.name': 'Dobler',
-    'tier.add.2.blurb': 'To like, over ti.',
-    'tier.add.3.name': 'Legge til ti',
-    'tier.add.3.blurb': 'Svaret står allerede i oppgaven.',
-    'tier.add.4.name': 'Over tieren',
-    'tier.add.4.blurb': 'Lag ti først, så legger du til resten.',
+    'tier.math.0.name': 'Telle videre',
+    'tier.math.0.blurb': 'Å legge til ingenting, og å legge til én.',
+    'tier.math.1.name': 'Summer opp til ti',
+    'tier.math.1.blurb': 'Alt som får plass i én tierramme.',
+    'tier.math.2.name': 'Dobler',
+    'tier.math.2.blurb': 'To like, over ti.',
+    'tier.math.3.name': 'Legge til ti',
+    'tier.math.3.blurb': 'Svaret står allerede i oppgaven.',
+    'tier.math.4.name': 'Over tieren',
+    'tier.math.4.blurb': 'Lag ti først, så legger du til resten.',
+    'tier.math.5.name': 'Trekke fra én',
+    'tier.math.5.blurb': 'Å trekke fra ingenting, og å trekke fra én.',
+    'tier.math.6.name': 'Minus under ti',
+    'tier.math.6.blurb': 'Differanser som holder seg i én tierramme.',
+    'tier.math.7.name': 'Ned til ti',
+    'tier.math.7.blurb': 'Trekk fra akkurat nok til å lande på tieren.',
+    'tier.math.8.name': 'Halve doblene',
+    'tier.math.8.blurb': 'Seksten minus åtte — doblene baklengs.',
+    'tier.math.9.name': 'Trekke fra ti',
+    'tier.math.9.blurb': 'Ett siffer flytter seg, det andre står stille.',
+    'tier.math.10.name': 'Tilbake under tieren',
+    'tier.math.10.blurb': 'Ned til ti først, så trekker du fra resten.',
+    'tier.math.11.name': 'Hele tiere',
+    'tier.math.11.blurb': 'Tretti og førti, når du kan tre og fire.',
+    'tier.math.12.name': 'Tiere og enere',
+    'tier.math.12.blurb': 'Ett siffer endrer seg, det andre står i ro.',
+    'tier.math.13.name': 'Oppstilling uten mente',
+    'tier.math.13.blurb': 'Sett dem under hverandre og legg sammen hver kolonne.',
+    'tier.math.14.name': 'Oppstilling med mente',
+    'tier.math.14.blurb': 'En tier i én kolonne flytter til naboen.',
+    'tier.math.15.name': 'Tresifret oppstilling',
+    'tier.math.15.blurb': 'Mente to ganger, hele veien bortover.',
+    'tier.math.16.name': 'Oppstilling uten veksling',
+    'tier.math.16.blurb': 'Trekk fra hver kolonne for seg.',
+    'tier.math.17.name': 'Oppstilling med veksling',
+    'tier.math.17.blurb': 'Lån en tier, og betal naboen tilbake.',
+    'tier.math.18.name': 'Veksling forbi null',
+    'tier.math.18.blurb': 'Når nabokolonnen ikke har noe å låne bort.',
+    'group.plus': 'Pluss',
+    'group.minus': 'Minus',
+    'group.tens': 'Tiere og enere',
+    'group.column': 'Oppstilling',
+    'prompt.colEgg': 'Et kaldt egg! Still opp og regn ut:',
+    'prompt.colEgg1': 'Egget rører på seg! Kolonne for kolonne:',
+    'prompt.colEgg2': 'Det slår sprekker! Ett stykke til:',
+    'prompt.colForgot': '{name} har glemt matpakka. Regn ut:',
+    'prompt.colHungry': '{name} er sulten! Maten er dette stykket:',
+    'prompt.colSnack': '{name} har lyst på litt mat. Kolonne for kolonne:',
+    'teach.subGaveSum': 'Det er dem lagt sammen, ikke trukket fra.',
+    'teach.subReversed': 'Motsatt vei — det største tallet står først.',
+    'teach.subGaveOperand': 'Det er det ene tallet helt for seg selv.',
+    'teach.subPlain': '{a} minus {b} blir {rest}.',
+    'teach.subFamily': 'Du kan {small} + {large} = {a}, så {a} − {b} = {rest}.',
+    'teach.colFullSum': 'En kolonne beholder bare ett siffer — resten blir mente.',
+    'teach.colForgotCarry': 'Tieren fra den kolonnen må flyttes til naboen.',
+    'teach.colCarryWrongColumn': 'Menten flyttes én kolonne til venstre, ikke to.',
+    'teach.colCarriedIntoOwnColumn': 'Menten går til naboen, ikke tilbake dit den kom fra.',
+    'teach.colSmallerFromLarger': 'Det er alltid det øverste tallet det trekkes fra.',
+    'teach.colForgotBorrow': 'Å låne en tier koster nabokolonnen én.',
+    'teach.colBorrowAcrossZero': 'En null har ingenting å låne bort, så den må låne selv.',
+    'teach.colAddedInstead': 'Det er et pluss, og dette er et minus.',
+    'teach.colSubtractedInstead': 'Det er et minus, og dette er et pluss.',
+    'teach.colPlaceValueOff': 'Riktige siffer, men ett av dem står i feil kolonne.',
+    'teach.colAddPlain': '{a} og {b} blir {total}.',
+    'teach.colSubPlain': '{a} minus {b} blir {total}.',
+    'answer.carryOn': 'Mente skrevet opp — trykk for å viske ut',
+    'answer.carryOff': 'Plass til å skrive menten',
+    'skill.tens+': 'Hele tiere +',
+    'skill.tens-': 'Hele tiere −',
+    'skill.pv+': 'Tier og ener +',
+    'skill.pv-': 'Tier og ener −',
+    'skill.pv10': 'Pluss og minus ti',
+    'skill.col+2': 'Oppstilling +',
+    'skill.col+21': 'Oppstilling + ener',
+    'skill.col+2c': 'Oppstilling + mente',
+    'skill.col+21c': 'Ener med mente',
+    'skill.col+3': 'Tresifret +',
+    'skill.col+32': 'Tresifret pluss tosifret',
+    'skill.col-2': 'Oppstilling −',
+    'skill.col-21': 'Oppstilling − ener',
+    'skill.col-2b': 'Oppstilling − veksling',
+    'skill.col-21b': 'Ener med veksling',
+    'skill.col-3': 'Tresifret −',
+    'skill.col-32': 'Tresifret minus tosifret',
     'answer.aria': 'Svaret ditt',
     'answer.empty': 'ingenting ennå',
     'answer.keypad': 'Talltaster',
     'answer.digit': 'Sett inn {n}',
     'answer.clear': 'Tøm',
     'settings.answerMode': 'Svarer med',
+    'settings.admire': 'Tid til å se på dyret',
+    'settings.admireValue': '{n} s',
+    'settings.admireHelp':
+      'Hvor lenge et nyklekket dyr — eller et som nettopp har vokst — blir stående før neste oppgave. Barnet kan trykke på dyret for å gå videre med én gang.',
+    'settings.walkSpeed': 'Fart på utregningen',
+    'settings.walkSpeedValue': '{name} · {seconds} s',
+    'settings.walkSpeed.verySlow': 'Veldig rolig',
+    'settings.walkSpeed.slow': 'Rolig',
+    'settings.walkSpeed.steady': 'Passe',
+    'settings.walkSpeed.brisk': 'Rask',
+    'settings.walkSpeed.quick': 'Kjapp',
+    'settings.walkSpeedHelp':
+      'Når et stykke i oppstilling blir feil, regnes det ut på skjermen kolonne for kolonne. Her bestemmer du hvor lenge den venter på hver kolonne. Begynn rolig — det er lettere å skru opp farten siden enn å oppdage at barnet aldri rakk å se hva som skjedde.',
+    'settings.walkInstant': 'Hopp over utregningen',
+    'settings.walkInstantHelp':
+      'Av til vanlig. Med den på vises bare det ferdige svaret, uten at det regnes ut. Da får barnet vite at det ble feil, men ikke hvorfor — så dette passer for en som allerede kan oppstilling godt.',
     'settings.answerAuto': 'Automatisk',
     'settings.answerType': 'Tastatur',
     'settings.answerTap': 'Knapper',
@@ -629,6 +873,9 @@ export function translator(lang) {
   t.lang = STRINGS[lang] ? lang : DEFAULT_LANGUAGE;
   t.spoken = (h, m) => spokenTime(t.lang, h, m);
   t.spokenSum = (a, b) => spokenSum(t.lang, a, b);
+  // Whatever is on screen, said out loud — the only thing a screen-reader user has to go on,
+  // and the caption the ten-frame and the column walkthrough are labelled with.
+  t.spokenQuestion = (question) => spokenFact(t.lang, question ?? {});
   t.number = (n) => numberWord(t.lang, n);
   t.hourWord = (h) => hourWord(t.lang, h);
   t.names = NAMES[t.lang] ?? NAMES[DEFAULT_LANGUAGE];

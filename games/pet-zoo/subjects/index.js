@@ -1,7 +1,7 @@
 // The subject registry: the one place that knows how many things this game teaches.
 //
-// A "subject" is a curriculum with an id space and a grader — the clock, and (next) adding
-// numbers. Items from every subject share one `state.items`, one scheduler and one zoo, so
+// A "subject" is a curriculum with an id space and a grader — the clock, and maths. Items from
+// every subject share one `state.items`, one scheduler and one zoo, so
 // a hungry pet is a hungry pet whichever subject it belongs to. What has to be per-subject
 // is the tier ladder: mastering the clock should not hand out addition facts the child has
 // never met. Hence `state.tiers`, a tier per subject, where there used to be one number.
@@ -9,12 +9,12 @@
 // Pure, like everything it registers. Nothing here touches the DOM, storage or the clock.
 
 import { UNLOCK_RATIO } from '../curriculum.js';
-import * as addition from './addition.js';
 import * as clock from './clock.js';
+import * as math from './math/index.js';
 
 // Clock first: the order decides which subject a fresh zoo meets first, and it is also
 // the order pets are handed out in, which existing saves depend on staying put.
-export const SUBJECTS = { [clock.id]: clock, [addition.id]: addition };
+export const SUBJECTS = { [clock.id]: clock, [math.id]: math };
 
 export const SUBJECT_IDS = Object.keys(SUBJECTS);
 
@@ -36,6 +36,17 @@ export function subjectOf(itemId) {
 }
 
 export const subjectIdOf = (itemId) => subjectOf(itemId)?.id ?? null;
+
+/**
+ * The cases an item is expected to cover, by id. Empty for anything whose question never
+ * changes, which is most of the game — only a generated item has cases at all.
+ */
+export function shapesFor(itemId) {
+  const subject = subjectOf(itemId);
+  if (!subject?.pacing) return [];
+  const payload = subject.parse(itemId);
+  return payload ? subject.pacing(payload).requiredShapes ?? [] : [];
+}
 
 /** Every item this build can teach, across every subject. */
 export const totalItemCount = () =>

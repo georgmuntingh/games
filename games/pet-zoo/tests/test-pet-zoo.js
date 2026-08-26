@@ -11,6 +11,10 @@ import {
   norm360,
   parseTimeId,
   pickHand,
+  GRIP_REACH,
+  HOUR_REACH,
+  MINUTE_REACH,
+  PIN_DEAD_ZONE,
   pointOnFace,
   snapMinute,
   timeId,
@@ -65,6 +69,10 @@ import {
   PLAY_MINUTES_DEFAULT,
   PLAY_MINUTES_MAX,
   PLAY_MINUTES_MIN,
+  admireFor,
+  ADMIRE_SECONDS_DEFAULT,
+  ADMIRE_SECONDS_MAX,
+  ADMIRE_SECONDS_MIN,
   QUESTIONS_PER_MINUTE,
   shouldEnd,
   SOFT_STOP_RATIO,
@@ -90,9 +98,25 @@ import { mirror, recognize, UNSURE_BELOW } from '../ink/recognize.js';
 import { CAPACITY, recall, remember, sanitize as sanitizeMemory } from '../ink/memory.js';
 import { bounds as inkBounds, dedupe, hasInk, resample } from '../ink/strokes.js';
 import { CASES } from './ink-fixtures.js';
-import * as addSubject from '../subjects/addition.js';
+import * as addSubject from '../subjects/math/index.js';
+import * as mathFacts from '../subjects/math/facts.js';
+import * as mathSkills from '../subjects/math/skills.js';
+import * as mathColumns from '../subjects/math/columns.js';
+import { ALL_VERDICTS } from '../subjects/math/grade.js';
+import {
+  columnWalkHtml,
+  DEFAULT_WALK_SPEED,
+  isWalkSpeed,
+  stepFor,
+  walkDuration,
+  WALK_SPEEDS,
+  walkSpeedAt,
+  walkSpeedIndex,
+  walkSteps,
+  walkWidth,
+} from '../column.js';
 import * as clockSubject from '../subjects/clock.js';
-import { fillDuration, fillPlan, FRAME, tenFrameSvg } from '../tenframe.js';
+import { fillDuration, fillPlan, FRAME, takeAwayPlan, tenFrameSvg } from '../tenframe.js';
 import {
   interleave,
   refreshTiers,
@@ -101,6 +125,7 @@ import {
   tiersOf,
   totalItemCount,
   unseenItems as unseenAcrossSubjects,
+  shapesFor,
   DEFAULT_PRACTICE,
   enabledItemCount,
   enabledSubjects,
@@ -130,7 +155,10 @@ import {
   appearanceOf,
   defaultName,
   EGG_CRACK_MAX,
+  eggLookFrom,
+  eggMarksFor,
   eggSvg,
+  shellHalfWidth,
   isCrowned,
   LOUD_FAMILIES,
   MARKING_IDS,
@@ -251,6 +279,10 @@ import {
   FACIAL,
   HAIR,
   HAIR_CROWN,
+  EGG_PATTERNS,
+  EGG_SHAPES,
+  EGG_SIZES,
+  EGG_TINTS,
   MARKINGS,
   SIGNATURES,
   stageOf,
@@ -265,6 +297,7 @@ import {
   LANGUAGES,
   languageKeys,
   NAMES,
+  numberWord as numberWordOf,
   spokenTime,
   translator,
 } from '../i18n.js';
@@ -469,6 +502,181 @@ test('in the overlap ring the nearer hand wins', () => {
   const r = 180 * 0.63; // between the two bands
   assertEqual(pickHand({ dx: 0, dy: -r, ...face }), 'hour', 'pointing at the hour hand');
   assertEqual(pickHand({ dx: 0, dy: r, ...face }), 'minute', 'pointing at the minute hand');
+});
+
+
+describe('clock — grabbing the hand you are pointing at');
+
+// The face as main.js actually draws it. The picker measures segments, so the lengths are
+// part of the question rather than a detail of the rendering.
+const FACE = { radius: 180, hourLen: 100, minuteLen: 150 };
+
+/** A point `frac` of the way out along a heading, in the same units as the face. */
+const alongHand = (deg, dist) => {
+  const rad = ((deg - 90) * Math.PI) / 180;
+  return { dx: Math.cos(rad) * dist, dy: Math.sin(rad) * dist };
+};
+
+const grab = (deg, dist, hourDeg, minuteDeg) =>
+  pickHand({ ...alongHand(deg, dist), ...FACE, hourDeg, minuteDeg });
+
+test('a finger on the minute hand grabs the minute hand, however far in it is', () => {
+  // The bug this replaced: the hour hand's tip sits at 0.56 of the radius, and the old rule
+  // handed back the hour hand for *anything* closer in than that — so most of the face could
+  // not be used to grab the minute hand at all.
+  const minuteDeg = 0; // straight up
+  const hourDeg = 90; // and the hour hand well out of the way, at the 3
+  for (const frac of [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8]) {
+    assertEqual(
+      grab(minuteDeg, FACE.radius * frac, hourDeg, minuteDeg),
+      'minute',
+      `dead on the minute hand at ${frac} of the radius`
+    );
+  }
+});
+
+test('and a finger on the hour hand still grabs the hour hand', () => {
+  const hourDeg = 90;
+  const minuteDeg = 0;
+  for (const frac of [0.2, 0.3, 0.4, 0.5, 0.55]) {
+    assertEqual(
+      grab(hourDeg, FACE.radius * frac, hourDeg, minuteDeg),
+      'hour',
+      `dead on the hour hand at ${frac} of the radius`
+    );
+  }
+  // The hour hand only reaches 0.56 of the radius, so a grab further out than its own tip is
+  // covered by the reach test below rather than here.
+});
+
+test('walking out along either hand never changes its mind, at any time on the clock', () => {
+  for (let h = 1; h <= 12; h += 1) {
+    for (const m of [0, 10, 25, 40, 55]) {
+      const hourDeg = hourAngle(h, m);
+      const minuteDeg = minuteAngle(m);
+      // Only where the hands are far enough apart for "along this one" to mean anything.
+      if (angularDistance(hourDeg, minuteDeg) < 25) continue;
+      // Starting clear of the dead zone at the pin, where no angle means anything: the hour
+      // hand is short enough that a quarter of the way along it is still inside the pin.
+      for (const frac of [0.4, 0.6, 0.8]) {
+        assertEqual(
+          grab(minuteDeg, FACE.minuteLen * frac, hourDeg, minuteDeg),
+          'minute',
+          `${h}:${m} along the minute hand`
+        );
+        assertEqual(
+          grab(hourDeg, FACE.hourLen * frac, hourDeg, minuteDeg),
+          'hour',
+          `${h}:${m} along the hour hand`
+        );
+      }
+      // And right out at each tip, which is where the grips are drawn.
+      assertEqual(grab(minuteDeg, FACE.minuteLen, hourDeg, minuteDeg), 'minute', `${h}:${m} minute tip`);
+      assertEqual(grab(hourDeg, FACE.hourLen, hourDeg, minuteDeg), 'hour', `${h}:${m} hour tip`);
+    }
+  }
+});
+
+test('a hand cannot be grabbed by the empty line beyond its own tip', () => {
+  const hourDeg = 0;
+  const minuteDeg = 90;
+  const grip = FACE.radius * GRIP_REACH;
+  // Just inside the grip drawn at the tip: still the hour hand.
+  assertEqual(grab(hourDeg, FACE.hourLen + grip * 0.5, hourDeg, minuteDeg), 'hour');
+  // Past it: there is nothing there, so the only hand in the running is the other one.
+  assertEqual(grab(hourDeg, FACE.hourLen + grip * 1.5, hourDeg, minuteDeg), 'minute');
+  assertEqual(grab(hourDeg, FACE.radius * 0.95, hourDeg, minuteDeg), 'minute');
+});
+
+test('stacked hands are told apart by how far out the grab is', () => {
+  // At 12:00 both hands point the same way and the distances are equal — mathematically
+  // zero, and in floating point two different zeroes — so only the radius is left.
+  for (let h = 1; h <= 12; h += 1) {
+    const deg = hourAngle(h, 0);
+    assertEqual(grab(deg, FACE.hourLen * 0.5, deg, deg), 'hour', `${h}:00 low on the stack`);
+    assertEqual(grab(deg, FACE.minuteLen * 0.9, deg, deg), 'minute', `${h}:00 high on the stack`);
+  }
+});
+
+test('the pin and the rim are unchanged', () => {
+  const face = { ...FACE, hourDeg: 0, minuteDeg: 90 };
+  assertEqual(pickHand({ dx: 0, dy: -FACE.radius * (PIN_DEAD_ZONE - 0.02), ...face }), null, 'inside the pin');
+  assert(pickHand({ dx: 0, dy: -FACE.radius * (PIN_DEAD_ZONE + 0.02), ...face }) !== null, 'and just outside it');
+  assertEqual(pickHand({ dx: 0, dy: -FACE.radius * 1.3, ...face }), null, 'off the face');
+});
+
+test('a grab in the middle of nowhere still picks the nearer hand up', () => {
+  // Forgiving on purpose: a mis-reach that did nothing at all would read as a broken game.
+  const picked = grab(200, FACE.radius * 0.9, 0, 90);
+  assert(picked === 'hour' || picked === 'minute', 'a tap on the empty face grabbed nothing');
+});
+
+test('the lengths default to the proportions the face is drawn at', () => {
+  // Two callers pass the real pixel lengths; anything that does not should still be measuring
+  // a clock rather than a guess at one.
+  assertClose(HOUR_REACH * 180, 100, 1e-9, 'the hour hand');
+  assertClose(MINUTE_REACH * 180, 150, 1e-9, 'the minute hand');
+  assertEqual(
+    pickHand({ ...alongHand(0, 72), radius: 180, hourDeg: 90, minuteDeg: 0 }),
+    'minute',
+    'the defaults disagree with the face'
+  );
+});
+
+describe('a moment to look at a new pet');
+
+test('a hatch is held for three seconds, an evolve a little less', () => {
+  const times = admireFor(ADMIRE_SECONDS_DEFAULT);
+  assertEqual(times.hatchMs, 3000);
+  assertEqual(times.evolveMs, 2500);
+  assert(times.evolveMs < times.hatchMs, 'an evolve should be the shorter of the two');
+});
+
+test('the beat is a grown-up choice, and it is clamped at both ends', () => {
+  assertEqual(admireFor(ADMIRE_SECONDS_MAX + 10).seconds, ADMIRE_SECONDS_MAX);
+  assertEqual(admireFor(0).seconds, ADMIRE_SECONDS_MIN);
+  assertEqual(admireFor(-5).seconds, ADMIRE_SECONDS_MIN);
+  assertEqual(admireFor(4.5).seconds, 4.5, 'a half second is a real choice');
+});
+
+test('a pause is never NaN, however odd the number handed in', () => {
+  // The one failure that matters here: a pause of NaN would leave a child looking at a pet
+  // forever, waiting for a question that never comes.
+  for (const odd of [undefined, null, 'ages', {}, NaN, Infinity]) {
+    const times = admireFor(odd);
+    assert(Number.isFinite(times.hatchMs) && times.hatchMs > 0, `hatch beat for ${String(odd)}`);
+    assert(Number.isFinite(times.evolveMs) && times.evolveMs > 0, `evolve beat for ${String(odd)}`);
+  }
+  assertEqual(admireFor(undefined).seconds, ADMIRE_SECONDS_DEFAULT);
+});
+
+test('the evolve beat never drops below the floor, however short the setting', () => {
+  assertEqual(admireFor(ADMIRE_SECONDS_MIN).evolveMs, ADMIRE_SECONDS_MIN * 1000);
+  assert(admireFor(1.5).evolveMs >= ADMIRE_SECONDS_MIN * 1000);
+});
+
+test('the setting survives a reload, and a hand-edited one is clamped', () => {
+  const storage = fakeStorage();
+  write({ ...freshState(0), settings: { ...freshState(0).settings, admireSeconds: 6 } }, storage);
+  assertEqual(load(0, storage).settings.admireSeconds, 6);
+  write({ ...freshState(0), settings: { ...freshState(0).settings, admireSeconds: 'ages' } }, storage);
+  assertEqual(load(0, storage).settings.admireSeconds, ADMIRE_SECONDS_DEFAULT, 'nonsense was trusted');
+});
+
+test('a save written before the beat existed picks it up', () => {
+  const storage = fakeStorage();
+  const { admireSeconds, ...older } = freshState(0).settings;
+  write({ ...freshState(0), settings: older }, storage);
+  assertEqual(load(0, storage).settings.admireSeconds, ADMIRE_SECONDS_DEFAULT);
+});
+
+test('it is named and explained in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    const t = translator(lang);
+    for (const key of ['settings.admire', 'settings.admireValue', 'settings.admireHelp']) {
+      assert(t(key) !== key, `${lang} is missing ${key}`);
+    }
+  }
 });
 
 describe('clock — grading');
@@ -1749,7 +1957,7 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], hatchedAt: 1 };
+  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], covered: [], hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
 });
 
@@ -3030,7 +3238,7 @@ describe('subjects — one zoo, more than one thing to learn');
 test('an id is claimed by exactly the subject that owns it', () => {
   assertEqual(subjectIdOf('4:15'), 'clock');
   assertEqual(subjectIdOf('12:55'), 'clock');
-  assertEqual(subjectIdOf('add:3+5'), 'add');
+  assertEqual(subjectIdOf('add:3+5'), 'math');
   assertEqual(subjectIdOf('add:5+3'), null, 'and only in its canonical spelling');
   assertEqual(subjectIdOf('chem:H2O'), null, 'a subject this build lacks claims nothing');
   assertEqual(subjectIdOf('nonsense'), null);
@@ -3066,13 +3274,13 @@ test('new material is interleaved between subjects, not concatenated', () => {
 });
 
 test('unseen material stops at the tier a subject has unlocked', () => {
-  const heads = unseenAcrossSubjects({}, { clock: 0, add: 0 });
+  const heads = unseenAcrossSubjects({}, { clock: 0, math: 0 });
   assert(heads.length > 0, 'a fresh zoo has everything to learn');
   assert(heads.every((entry) => entry.tier === 0), 'and nothing above the unlocked tier');
   assert(heads.some((entry) => entry.subject === 'clock'), 'the clock is in there');
-  assert(heads.some((entry) => entry.subject === 'add'), 'and so is adding');
+  assert(heads.some((entry) => entry.subject === 'math'), 'and so is adding');
   assertEqual(heads[0].subject, 'clock', 'a fresh zoo meets the clock first');
-  assertEqual(heads[1].subject, 'add', 'and then a sum, rather than every clock face first');
+  assertEqual(heads[1].subject, 'math', 'and then a sum, rather than every clock face first');
 });
 
 test('a seen item is never offered as new again', () => {
@@ -3082,19 +3290,23 @@ test('a seen item is never offered as new again', () => {
 });
 
 test('the zoo counts every subject it teaches', () => {
-  assertEqual(totalItemCount(), 144 + 66, 'the hardcoded 144 is gone, not merely moved');
-  assertEqual(SUBJECT_IDS.join(), 'clock,add', 'and both subjects are counted');
+  assertEqual(
+    totalItemCount(),
+    144 + addSubject.ALL_ITEMS.length,
+    'the hardcoded 144 is gone, not merely moved'
+  );
+  assertEqual(SUBJECT_IDS.join(), 'clock,math', 'and both subjects are counted');
 });
 
 test('a tier opens for one subject without opening another', () => {
   const items = {};
-  for (const entry of unseenAcrossSubjects({}, { clock: 0, add: 0 })) {
+  for (const entry of unseenAcrossSubjects({}, { clock: 0, math: 0 })) {
     // Only the clock's first tier is finished; the sums are left untouched.
     if (entry.subject === 'clock') items[entry.id] = { subject: 'clock', phase: 'graduated' };
   }
-  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0, add: 0 } });
+  const { tiers, unlocked } = refreshTiers({ items, tiers: { clock: 0, math: 0 } });
   assertEqual(tiers.clock, 1, 'finishing tier 0 opens tier 1');
-  assertEqual(tiers.add, 0, 'and adding has not moved an inch');
+  assertEqual(tiers.math, 0, 'and maths has not moved an inch');
   assertEqual(unlocked.join(), 'clock', 'and only the subject that moved is named');
 });
 
@@ -3171,6 +3383,114 @@ test('upgrading is idempotent — a current save passes through untouched', () =
   assertEqual(upgrade(current), current, 'it was needlessly rebuilt');
 });
 
+
+/** A save exactly as the build before the maths ladder wrote it: the subject was `add`. */
+const v2Save = () => ({
+  version: 2,
+  createdAt: 100,
+  lastPlayedAt: 200,
+  reviewClock: 42,
+  tiers: { clock: 2, add: 3 },
+  practice: { clock: { on: false, floor: 1 }, add: { on: true, floor: 2 } },
+  coins: 37,
+  zooDecor: [],
+  milestones: ['mastery:0', 'mastery:1', 'mastery:add:0', 'mastery:add:1', 'species:add:mochi', 'week:2'],
+  coinsGrantedAt: 1,
+  milestonesGrantedAt: 1,
+  settings: { sound: false, language: 'en', playMinutes: 7, showDigital: true },
+  session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
+  stats: { totalAnswered: 90, totalCorrect: 70, streak: 4, bestStreak: 9, daysPlayed: [] },
+  items: {
+    '4:15': { subject: 'clock', h: 4, m: 15, species: 'fizz', phase: 'graduated', feeds: 5, cracks: 2, decor: [], hatchedAt: 123 },
+    'add:3+5': { subject: 'add', a: 3, b: 5, species: 'glim', phase: 'graduated', feeds: 3, cracks: 2, decor: [], hatchedAt: 456 },
+  },
+});
+
+test('the subject formerly called adding brings its progress across under its new name', () => {
+  const back = load(0, savedAs(v2Save()));
+  assertEqual(back.tiers.math, 3, 'the ladder it had climbed');
+  assertEqual(back.tiers.clock, 2, 'and the clock is left where it was');
+  assertEqual(back.tiers.add, undefined, 'the old name is gone rather than kept alongside');
+});
+
+test("and so does a grown-up's choice about what to practise", () => {
+  // `practiceOf` tolerates a missing key by switching everything on, which means a botched
+  // rename would silently *undo* a grown-up's decision and look like nothing had happened.
+  const back = load(0, savedAs(v2Save()));
+  assertEqual(back.practice.math.on, true);
+  assertEqual(back.practice.math.floor, 2, 'the rungs they had skipped are still skipped');
+  assertEqual(back.practice.clock.on, false, 'and the subject they switched off is still off');
+});
+
+test('a milestone already paid for is not paid for again under the new name', () => {
+  // This is what the rename is really about. `settleMilestones` pays for any id it has not
+  // seen before, so a `mastery:add:1` left behind would hand a child forty coins per tier for
+  // work they finished months ago, on the day they updated the game.
+  const back = load(0, savedAs(v2Save()));
+  assert(back.milestones.includes('mastery:math:0'), 'the paid tier came back unrecognisable');
+  assert(back.milestones.includes('mastery:math:1'));
+  assert(!back.milestones.some((id) => id.startsWith('mastery:add:')), 'the old spelling lingered');
+  assertEqual(back.milestones.filter((id) => id.startsWith('mastery:math:')).length, 2, 'and did not double up');
+
+  // The whole zoo, with both of those tiers genuinely finished: settling must cost nothing.
+  const items = {};
+  for (const tier of [0, 1]) {
+    for (const entry of addSubject.tierItems(tier)) {
+      items[entry.id] = { subject: 'math', tier, phase: 'graduated', hatchedAt: 1 };
+    }
+  }
+  const settled = settleMilestones(items, { daysPlayed: [] }, back.milestones);
+  // Only the mastery ids matter here. Finishing those two rungs also completes a species or
+  // two, and *those* really are newly earned — the claim being tested is that no rung is
+  // paid for a second time under its new spelling.
+  assertEqual(
+    settled.ids.filter((id) => id.startsWith('mastery:')).join(', '),
+    '',
+    'a child was paid twice for the same work'
+  );
+});
+
+test('the ids that were never about the subject are left exactly alone', () => {
+  const back = load(0, savedAs(v2Save()));
+  // `species:add:<id>` still means the sixty-six addition facts, and the clock's bare
+  // `mastery:<n>` was never renamed either — both have been paid out in saves in the wild.
+  assert(back.milestones.includes('species:add:mochi'), 'the adding species milestone was mangled');
+  assert(back.milestones.includes('mastery:0'), "the clock's own milestone was caught in the rename");
+  assert(back.milestones.includes('week:2'));
+});
+
+test('a pet keeps its key, and only learns the new name of its subject', () => {
+  // The key is what a pet's species, colours and name are hashed from. Rewriting it would
+  // hand a child back a zoo of strangers, so the rename stops at the subject field.
+  const back = load(0, savedAs(v2Save()));
+  assertEqual(Object.keys(back.items).sort().join(), '4:15,add:3+5', 'a key was rewritten');
+  assertEqual(back.items['add:3+5'].subject, 'math');
+  assertEqual(back.items['add:3+5'].feeds, 3, 'and everything it had earned is still there');
+  assertEqual(back.items['4:15'].subject, 'clock');
+});
+
+test('upgrading twice does no more than upgrading once', () => {
+  const once = upgrade(v2Save());
+  assertEqual(JSON.stringify(upgrade(once)), JSON.stringify(once), 'a second pass moved something');
+});
+
+test('a v1 save climbs all the way to the current version in one go', () => {
+  const back = load(0, savedAs(v1Save()));
+  assertEqual(back.version, VERSION);
+  assertEqual(back.tiers.clock, 2);
+  assertEqual(back.tiers.math, 0, 'and it starts maths at the bottom, having never met it');
+});
+
+test('a file exported before the rename is imported without being paid for twice', () => {
+  // The same trap one door along: `applyImport` reads the tiers and the milestones out of the
+  // file, and a file written by the old build files both under `add`.
+  const payload = { ...v2Save(), app: TRANSFER_APP, format: TRANSFER_FORMAT, items: {} };
+  const imported = applyImport(freshState(0), { ...payload, items: cleanItems(v2Save().items) }, 1000);
+  assertEqual(imported.tiers.math, 3, 'the imported ladder was lost');
+  assert(imported.milestones.includes('mastery:math:1'), 'the imported milestone was not carried');
+  assert(!imported.milestones.some((id) => id.startsWith('mastery:add:')), 'the old spelling arrived intact');
+});
+
 test('an item whose subject this build does not know is dropped, not carried', () => {
   const save = v1Save();
   save.items['chem:H2O'] = { phase: 'learning', hatchedAt: null };
@@ -3219,7 +3539,7 @@ test('two subjects due at once alternate rather than repeat', () => {
     items: {
       '4:15': due('clock', 1),
       '9:30': due('clock', 2),
-      'add:3+5': due('add', 3),
+      'add:3+5': due('math', 3),
     },
   };
   assertEqual(
@@ -3228,7 +3548,7 @@ test('two subjects due at once alternate rather than repeat', () => {
     'after a clock question, the sum wins even though it is less overdue'
   );
   assertEqual(
-    nextItem(state, { now: 0, lastSubject: 'add' }),
+    nextItem(state, { now: 0, lastSubject: 'math' }),
     '4:15',
     'and after a sum, the most overdue clock face comes back'
   );
@@ -3254,9 +3574,10 @@ test('alternating never overrides urgency within one subject', () => {
 describe('adding — the deck');
 
 test('every unordered pair up to ten and ten, and nothing twice', () => {
-  assertEqual(addSubject.ALL_ITEMS.length, 66);
-  const ids = addSubject.ALL_ITEMS.map((fact) => fact.id);
-  assertEqual(new Set(ids).size, 66, 'a fact appears in two tiers');
+  const sums = addSubject.ALL_ITEMS.filter((entry) => entry.op === '+' && entry.tier <= 4);
+  assertEqual(sums.length, 66);
+  const ids = addSubject.ALL_ITEMS.map((entry) => entry.id);
+  assertEqual(new Set(ids).size, ids.length, 'an item appears in two tiers');
 });
 
 test('the tiers partition the deck, so a tier can actually be finished', () => {
@@ -3337,22 +3658,725 @@ describe('adding — how wide the answer box is');
 test('the strip never changes width, whatever the fact is', () => {
   // A strip that narrowed for small sums would say "this one is under ten" before the child
   // had added anything.
-  const widths = new Set(addSubject.ALL_ITEMS.map(() => addSubject.answerWidth()));
+  // One width per item, and the same one for every fact: a strip that narrowed would say the
+  // answer is small before the child had worked it out.
+  const widths = new Set(
+    addSubject.ALL_ITEMS.filter((entry) => !entry.skill).map((entry) => addSubject.answerWidth(entry))
+  );
   assertEqual(widths.size, 1, 'the width of the answer is a clue');
-  assertEqual(addSubject.answerWidth(), 2);
+  assertEqual(addSubject.answerWidth({ op: '+', a: 3, b: 5 }), 2);
 });
 
 test('every answer in the deck fits in the strip', () => {
   // The first tier contains 0 + 10 — "sums to ten" includes ten — so a one-box strip would
   // not merely leak, it would make a fact impossible to answer at all.
-  for (const fact of addSubject.ALL_ITEMS) {
+  for (const entry of addSubject.ALL_ITEMS) {
+    if (entry.skill) continue; // a skill's numbers are made up; it gets its own sweep below
     assert(
-      addSubject.answerDigits(fact) <= addSubject.answerWidth(),
-      `${fact.id} cannot be answered in ${addSubject.answerWidth()} boxes`
+      addSubject.answerDigits(entry) <= addSubject.answerWidth(entry),
+      `${entry.id} cannot be answered in ${addSubject.answerWidth(entry)} boxes`
     );
   }
-  assertEqual(addSubject.answerDigits({ a: 0, b: 10 }), 2, 'the fact that forced this');
-  assertEqual(addSubject.tierOf({ a: 0, b: 10 }), 0, 'and it really is in the first tier');
+  assertEqual(addSubject.answerDigits({ op: '+', a: 0, b: 10 }), 2, 'the fact that forced this');
+  assertEqual(addSubject.tierOf({ op: '+', a: 0, b: 10 }), 0, 'and it really is in the first tier');
+});
+
+
+/* ---------------------------------------------------------- the maths ladder */
+
+describe('maths — the whole ladder');
+
+test('nineteen rungs, in four groups, with nothing left out of either', () => {
+  assertEqual(addSubject.TIERS.length, 19);
+  assertEqual(addSubject.LAST_TIER, 18);
+  const grouped = addSubject.GROUPS.flatMap((group) => group.tiers);
+  assertEqual(grouped.join(), addSubject.TIERS.map((tier) => tier.id).join(), 'a rung fell out of its group');
+  assertEqual(new Set(grouped).size, grouped.length, 'a rung is in two groups at once');
+});
+
+test('the tiers partition the deck, so a tier can actually be finished', () => {
+  const sizes = addSubject.TIERS.map((tier) => addSubject.tierItems(tier.id).length);
+  assertEqual(sizes.reduce((a, b) => a + b, 0), addSubject.ALL_ITEMS.length);
+  // An empty tier can never reach the 80% bar, so the ladder would stall on it forever.
+  assert(sizes.every((n) => n > 0), 'an empty tier can never be mastered');
+  const ids = addSubject.ALL_ITEMS.map((entry) => entry.id);
+  assertEqual(new Set(ids).size, ids.length, 'an item appears on two rungs');
+});
+
+test('every item lands on the tier it is filed under', () => {
+  for (const entry of addSubject.ALL_ITEMS) {
+    assertEqual(addSubject.tierOf(entry), entry.tier, `${entry.id} disagrees about its own tier`);
+    assert(addSubject.owns(entry.id), `${entry.id} is not owned by the subject that teaches it`);
+  }
+});
+
+test('the sixty-six addition facts and their tiers are exactly what they were', () => {
+  // Pinned rather than derived. A pet's species, name and colours are hashed from its id and
+  // its tier, so a fact that quietly changed rung would come back a different creature.
+  const sums = addSubject.ALL_ITEMS.filter((entry) => entry.op === '+' && entry.tier <= 4);
+  assertEqual(sums.length, 66);
+  assertEqual(
+    mathFacts.factTierItems(2).map((f) => `${f.a}+${f.b}`).join(' '),
+    '6+6 7+7 8+8 9+9 10+10',
+    'tier 2 is the doubles past ten'
+  );
+  assert(mathFacts.factTierItems(0).every((f) => f.a <= 1), 'tier 0 is adding nothing and adding one');
+  assert(mathFacts.factTierItems(3).every((f) => f.b === 10), 'tier 3 is adding ten');
+});
+
+describe('maths — taking away');
+
+test('every difference the game teaches has an addition partner it can lean on', () => {
+  const subs = addSubject.ALL_ITEMS.filter((entry) => entry.op === '-');
+  assertEqual(subs.length, 121, 'the inverses of the sixty-six, and nothing else');
+  for (const fact of subs) {
+    const partner = mathFacts.partnerOf(fact);
+    assert(
+      mathFacts.owns(mathFacts.addIdOf(partner)),
+      `${fact.id} has no partner to point at, so the fact-family correction would have nothing to say`
+    );
+    assertEqual(partner.a + partner.b, fact.a, `${fact.id} named the wrong partner`);
+  }
+});
+
+test('a difference is not symmetric, and its id says so', () => {
+  assertEqual(mathFacts.subIdOf({ a: 15, b: 8 }), 'sub:15-8');
+  assert(mathFacts.owns('sub:15-8'), 'the difference this game teaches');
+  assert(!mathFacts.owns('sub:8-15'), 'and not the one it does not');
+  assert(!mathFacts.owns('sub:20-3'), 'nor one whose answer is past the facts');
+  assert(!mathFacts.owns('sub:015-8'), 'nor a non-canonical spelling of a real one');
+});
+
+test('the minus rungs mirror the plus rungs', () => {
+  const tierOf = (a, b) => mathFacts.subTierOf({ a, b });
+  assertEqual(tierOf(9, 1), 5, 'taking away one is counting back');
+  assertEqual(tierOf(9, 4), 6, 'and this stays inside one frame');
+  assertEqual(tierOf(14, 4), 7, 'landing exactly on the ten');
+  assertEqual(tierOf(16, 8), 8, 'halving a double');
+  assertEqual(tierOf(17, 10), 9, 'taking ten away');
+  assertEqual(tierOf(15, 8), 10, 'and bridging back under it');
+});
+
+describe('maths — the generator');
+
+test('the same seed always draws the same question', () => {
+  for (const entry of mathSkills.ALL_SKILLS) {
+    const once = mathSkills.generate(entry.skill, { shape: entry.shapes[0], seed: 12345 });
+    const twice = mathSkills.generate(entry.skill, { shape: entry.shapes[0], seed: 12345 });
+    assertEqual(JSON.stringify(once), JSON.stringify(twice), `${entry.skill} is not reproducible`);
+  }
+});
+
+test('asked for a case, the generator produces that case — every skill, every case', () => {
+  // The coverage gate is only as good as this: if a shape could not be produced on demand,
+  // an item would sit in learning forever waiting for one.
+  for (const entry of mathSkills.ALL_SKILLS) {
+    for (const shape of entry.shapes) {
+      for (let seed = 1; seed <= 60; seed += 1) {
+        const made = mathSkills.generate(entry.skill, { shape, seed });
+        assertEqual(made.shape, shape, `${entry.skill} could not produce ${shape}`);
+      }
+    }
+  }
+});
+
+test('a generated question never needs more boxes than the strip has', () => {
+  // And the strip is a property of the item, never of the question — a strip that narrowed
+  // when the answer got smaller would hand the answer over.
+  for (const entry of mathSkills.ALL_SKILLS) {
+    const width = addSubject.answerWidth(entry);
+    for (const shape of entry.shapes) {
+      for (let seed = 1; seed <= 60; seed += 1) {
+        const made = mathSkills.generate(entry.skill, { shape, seed });
+        assert(
+          addSubject.answerDigits(made) <= width,
+          `${entry.skill}/${shape} answered ${made.a}${made.op}${made.b} in more than ${width} boxes`
+        );
+        assert(made.a >= 0 && made.b >= 0, 'a question below zero');
+        if (made.op === '-') assert(made.a >= made.b, 'a difference below zero');
+      }
+    }
+  }
+});
+
+test('a skill is one width, whatever it draws', () => {
+  for (const entry of mathSkills.ALL_SKILLS) {
+    const widths = new Set(
+      entry.shapes.flatMap((shape) =>
+        [1, 2, 3, 4, 5].map(() => addSubject.answerWidth({ skill: entry.skill }))
+      )
+    );
+    assertEqual(widths.size, 1, `${entry.skill} changes width, which is a clue`);
+  }
+});
+
+test('the numbers come from the item, and change only when the answer was right', () => {
+  // The whole of the retry behaviour. A wrong answer must leave the seed alone, so the
+  // question comes back with the very numbers the child just watched being explained.
+  const item = createItem({ subject: 'math', skill: 'col+2c', tier: 14, species: 'mochi', reviewClock: 0 });
+  const before = addSubject.instanceOf(item);
+  const missed = review(item, { ...addSubject.pacing(item), correct: false, reviewClock: 1, now: 0 }).item;
+  assertEqual(
+    JSON.stringify(addSubject.instanceOf(missed)),
+    JSON.stringify(before),
+    'the retry showed different numbers from the ones just explained'
+  );
+  const got = review(item, {
+    ...addSubject.pacing(item),
+    shape: before.shape,
+    correct: true,
+    reviewClock: 1,
+    now: 0,
+  }).item;
+  assert(
+    JSON.stringify(addSubject.instanceOf(got)) !== JSON.stringify(before),
+    'a right answer got the same question back'
+  );
+});
+
+test('an uncovered case is always preferred over one already done', () => {
+  const shapes = mathSkills.shapesOf('col+3');
+  const item = { skill: 'col+3', covered: shapes.slice(1), reps: 0, feeds: 0, correctStreak: 0, lapses: 0 };
+  for (let n = 0; n < 20; n += 1) {
+    assertEqual(addSubject.shapeFor({ ...item, reps: n }), shapes[0], 'a covered case was asked again');
+  }
+  // Everything covered: the skill becomes free practice rather than running out of questions.
+  const done = { ...item, covered: shapes };
+  assert(shapes.includes(addSubject.shapeFor(done)), 'a fully covered skill had nothing left to ask');
+});
+
+describe('maths — coverage is what makes the practice enough');
+
+const answerRight = (item, shape, step) =>
+  review(item, { ...addSubject.pacing(item), shape, correct: true, reviewClock: step, now: 0 }).item;
+
+test('a skill cannot graduate on one case answered over and over', () => {
+  const shapes = mathSkills.shapesOf('col+3');
+  assert(shapes.length > 1, 'this test needs a skill with more than one case');
+  let item = createItem({ subject: 'math', skill: 'col+3', tier: 15, species: 'mochi', reviewClock: 0 });
+  for (let n = 0; n < 20; n += 1) item = answerRight(item, shapes[0], n + 1);
+  assertEqual(item.phase, 'learning', 'twenty right answers on one case counted as mastery');
+  assertEqual(item.hatchedAt, null, 'and it hatched anyway');
+  assert(item.cracks < CRACK_STAGES, 'the last crack was spent before the hatch it promises');
+});
+
+test('and graduates once every case has been answered, and not before', () => {
+  const shapes = mathSkills.shapesOf('col+3');
+  let item = createItem({ subject: 'math', skill: 'col+3', tier: 15, species: 'mochi', reviewClock: 0 });
+  let step = 0;
+  for (const shape of shapes) {
+    step += 1;
+    item = answerRight(item, shape, step);
+  }
+  assertEqual(item.covered.length, shapes.length, 'a case answered right went unrecorded');
+  // Coverage is necessary, not sufficient: the streak bar still has to be met.
+  while (item.phase === 'learning' && step < 40) {
+    step += 1;
+    item = answerRight(item, shapes[0], step);
+  }
+  assertEqual(item.phase, 'graduated');
+  assert(item.hatchedAt !== null, 'a graduated skill still had not hatched');
+  assert(item.seen >= mathSkills.shapesOf('col+3').length, 'it graduated in fewer answers than it has cases');
+});
+
+test('a lapsed skill re-graduates without touring every case again', () => {
+  // One bad day should not cost a twenty-question penalty. Coverage is a fact about what the
+  // child has ever shown; the streak is what carries "and can still do it".
+  const shapes = mathSkills.shapesOf('col-3');
+  let item = createItem({ subject: 'math', skill: 'col-3', tier: 18, species: 'mochi', reviewClock: 0 });
+  let step = 0;
+  for (const shape of shapes) item = answerRight(item, shape, (step += 1));
+  while (item.phase === 'learning' && step < 40) item = answerRight(item, shapes[0], (step += 1));
+  assertEqual(item.phase, 'graduated');
+  item = review(item, { ...addSubject.pacing(item), correct: false, reviewClock: (step += 1), now: 0 }).item;
+  assertEqual(item.phase, 'learning', 'a wrong answer did not bring it back');
+  for (let n = 0; n < GRADUATION_STREAK; n += 1) item = answerRight(item, shapes[0], (step += 1));
+  assertEqual(item.phase, 'graduated', 'a lapsed skill was made to start the whole tour again');
+});
+
+test('a fact is unaffected by any of it — no cases, no change', () => {
+  assertEqual(JSON.stringify(addSubject.pacing({ op: '+', a: 3, b: 5 })), '{}');
+  assertEqual(shapesFor('add:3+5').length, 0);
+  assertEqual(shapesFor('4:15').length, 0);
+  assert(shapesFor('skill:col+2c').length > 0, 'a skill really does declare its cases');
+});
+
+test('the shell still breaks at the same rate it always did', () => {
+  // `crackFor` was generalised to spread over however long the run to hatching is. At the
+  // default it must give exactly the numbers it gave before, or every egg in every save
+  // would jump.
+  const before = (streak) => Math.min(Math.max(streak - 1, 0), CRACK_STAGES);
+  for (let streak = 0; streak <= 8; streak += 1) {
+    assertEqual(crackFor(streak), before(streak), `streak ${streak}`);
+  }
+  // And over a longer run the last crack still lands on the answer before hatching.
+  assertEqual(crackFor(5, 6), CRACK_STAGES);
+  assert(crackFor(4, 6) < CRACK_STAGES, 'the shell finished breaking too early');
+});
+
+describe('maths — naming the mistake in a column');
+
+const colVerdict = (op, a, b, answer) => addSubject.grade({ op, a, b, column: true }, answer).verdict;
+
+test('the wrong algorithms are each named, not lumped together as wrong', () => {
+  assertEqual(colVerdict('+', 47, 38, '715'), 'wroteFullSumInColumn');
+  assertEqual(colVerdict('+', 47, 38, '75'), 'forgotCarry');
+  assertEqual(colVerdict('+', 47, 38, '175'), 'carriedWrongColumn');
+  assertEqual(colVerdict('+', 47, 38, '76'), 'carriedIntoOwnColumn');
+  assertEqual(colVerdict('-', 52, 38, '26'), 'smallerFromLarger');
+  assertEqual(colVerdict('-', 52, 38, '24'), 'forgotBorrow');
+  assertEqual(colVerdict('-', 503, 178, '435'), 'borrowAcrossZero');
+  assertEqual(colVerdict('-', 52, 38, '90'), 'addedInstead');
+  assertEqual(colVerdict('+', 47, 38, '9'), 'subtractedInstead');
+  assertEqual(colVerdict('+', 47, 38, '85'), 'correct');
+  assertEqual(colVerdict('+', 47, 38, '86'), 'offByOne');
+  assertEqual(colVerdict('+', 47, 38, '95'), 'placeValueOff');
+  assertEqual(colVerdict('+', 47, 38, ''), 'blank');
+});
+
+test('every wrong algorithm is recognised wherever it is run, not just on the famous example', () => {
+  // Generated rather than hand-computed: run the mistaken procedure, feed its output back to
+  // the grader, and the verdict must come back. Nothing here can be right by luck.
+  const ways = [
+    ['+', 'wroteFullSumInColumn', mathColumns.wroteFullSumInColumn],
+    ['+', 'forgotCarry', mathColumns.forgotCarry],
+    ['-', 'smallerFromLarger', mathColumns.smallerFromLarger],
+    ['-', 'forgotBorrow', mathColumns.forgotBorrow],
+  ];
+  for (const entry of mathSkills.ALL_SKILLS) {
+    for (const shape of entry.shapes) {
+      for (let seed = 1; seed <= 25; seed += 1) {
+        const made = mathSkills.generate(entry.skill, { shape, seed });
+        if (!made.column) continue;
+        for (const [op, name, run] of ways) {
+          if (op !== made.op) continue;
+          const wrong = run(made.a, made.b);
+          const target = made.op === '-' ? made.a - made.b : made.a + made.b;
+          // A wrong way that lands on the right answer is a coincidence, not a mistake.
+          if (wrong === target || wrong < 0) continue;
+          const got = addSubject.grade(made, String(wrong)).verdict;
+          assert(
+            got !== 'wrong',
+            `${made.a}${made.op}${made.b} answered ${wrong} (${name}) was reported as plain wrong`
+          );
+        }
+      }
+    }
+  }
+});
+
+test('a difference tells a child which wrong idea they had', () => {
+  const v = (a, b, answer) => addSubject.grade({ op: '-', a, b }, answer).verdict;
+  assertEqual(v(15, 8, '23'), 'gaveSum', 'reading the minus as a plus');
+  assertEqual(v(15, 8, '7'), 'correct');
+  assertEqual(v(12, 9, '9'), 'gaveOperand', 'reading the second number off the page');
+  assertEqual(v(12, 9, '12'), 'gaveOperand', 'or counting the pile and taking nothing off it');
+  assertEqual(v(15, 8, '6'), 'offByOne');
+  // Where the two readings collide — 8 is both the number on the page and one past the
+  // answer — the miscount wins, because it is the likelier of the two and much the kinder.
+  assertEqual(v(15, 8, '8'), 'offByOne');
+  assert(addSubject.grade({ op: '-', a: 15, b: 8 }, '6').nearMiss, 'and it earns the softer opening');
+  assertEqual(v(15, 8, ''), 'blank');
+  assertEqual(v(15, 8, null), 'blank', 'nothing at all is not zero');
+});
+
+describe('maths — the pictures a mistake gets instead of a cross');
+
+test('a difference fills the frame and then empties the top of it', () => {
+  const plan = takeAwayPlan(15, 8);
+  assertEqual(plan.total, 15, 'the whole starting number goes on the board first');
+  assertEqual(plan.gone, 8);
+  assertEqual(plan.left, 7);
+  assertEqual(plan.toTen, 5, 'five come off to get back down to the ten');
+  assertEqual(plan.rest, 3, 'and three more after that');
+  assertEqual(plan.cells.filter((c) => c.gone).length, 8);
+  assert(
+    plan.cells.filter((c) => c.bridges).every((c) => c.index >= FRAME),
+    'the counters marked as bridging were not the ones in the second frame'
+  );
+});
+
+test('taking away nothing takes nothing away', () => {
+  assertEqual(takeAwayPlan(7, 0).cells.filter((c) => c.gone).length, 0);
+  assertEqual(takeAwayPlan(0, 0).cells.length, 0, 'and an empty board does not throw');
+});
+
+test('the walkthrough carries into the column the carry is going into', () => {
+  const steps = walkSteps({ op: '+', a: 47, b: 38 });
+  assertEqual(steps[0].digit, 5, 'the ones column keeps five');
+  assertEqual(steps[0].carryOut, 1, 'and passes one on');
+  assertEqual(steps[1].carryIn, 1, 'which the tens column receives');
+  assertEqual(steps[1].digit, 8);
+  assertEqual(walkWidth({ op: '+', a: 98, b: 97 }), 3, 'a carry off the top gets its own column');
+  assertEqual(walkWidth({ op: '-', a: 503, b: 178 }), 3);
+});
+
+test('the walkthrough shows the borrow as the digit the column actually worked with', () => {
+  const steps = walkSteps({ op: '-', a: 52, b: 38 });
+  assertEqual(steps[0].borrowed, 12, 'the two became twelve');
+  assertEqual(steps[0].digit, 4);
+  assertEqual(steps[1].borrowIn, 1, 'and the tens column paid for it');
+  assertEqual(steps[1].digit, 1);
+});
+
+test('the walkthrough draws every column and never leaks past them', () => {
+  for (const [op, a, b] of [['+', 47, 38], ['+', 998, 997], ['-', 503, 178], ['-', 90, 72]]) {
+    const html = columnWalkHtml({ op, a, b }, { title: 'x' });
+    const cells = html.match(/class="cw-cell/g) ?? [];
+    const cols = walkWidth({ op, a, b });
+    // Four rows of `cols` cells each: the carries, the two numbers and the answer.
+    assertEqual(cells.length, cols * 4, `${a}${op}${b} drew the wrong number of cells`);
+  }
+});
+
+
+describe('maths — how fast the working goes');
+
+test('the speeds run slow to fast, and the default is one of them', () => {
+  const steps = WALK_SPEEDS.map((speed) => speed.step);
+  assertEqual(
+    steps.join(),
+    [...steps].sort((a, b) => b - a).join(),
+    'the slider would run backwards'
+  );
+  assertEqual(new Set(WALK_SPEEDS.map((s) => s.id)).size, WALK_SPEEDS.length, 'a speed is named twice');
+  assert(isWalkSpeed(DEFAULT_WALK_SPEED), 'the default is not a speed this build has');
+});
+
+test('the default is markedly slower than the pace nobody could follow', () => {
+  // The first version of the walkthrough ran at 0.55s a column, and a child could not keep
+  // up with it. This is the guard on that: if anyone ever tunes the default back towards it,
+  // the complaint comes back with it.
+  assert(
+    stepFor(DEFAULT_WALK_SPEED) >= 1.5,
+    `the default is back down to ${stepFor(DEFAULT_WALK_SPEED)}s a column`
+  );
+});
+
+test('an unknown speed falls back rather than stopping the working', () => {
+  assertEqual(stepFor('nonsense'), stepFor(DEFAULT_WALK_SPEED));
+  assertEqual(stepFor(undefined), stepFor(DEFAULT_WALK_SPEED));
+  assert(!isWalkSpeed('nonsense'));
+});
+
+test('the slider maps to a speed and back, and cannot be dragged off the end', () => {
+  for (const speed of WALK_SPEEDS) {
+    assertEqual(walkSpeedAt(walkSpeedIndex(speed.id)), speed.id, `${speed.id} did not round-trip`);
+  }
+  assertEqual(walkSpeedAt(-3), WALK_SPEEDS[0].id, 'past the slow end');
+  assertEqual(walkSpeedAt(99), WALK_SPEEDS[WALK_SPEEDS.length - 1].id, 'past the fast end');
+  assertEqual(walkSpeedAt('lots'), DEFAULT_WALK_SPEED, 'and nonsense lands on the default');
+  assertEqual(walkSpeedIndex('nonsense'), walkSpeedIndex(DEFAULT_WALK_SPEED));
+});
+
+test('a slower speed really does take longer, and a longer sum longer still', () => {
+  const sum = { op: '+', a: 47, b: 38 };
+  const times = WALK_SPEEDS.map((speed) => walkDuration(sum, speed.step));
+  assertEqual(
+    times.join(),
+    [...times].sort((a, b) => b - a).join(),
+    'the speeds do not actually change how long it takes'
+  );
+  assert(
+    walkDuration({ op: '-', a: 503, b: 178 }, stepFor(DEFAULT_WALK_SPEED)) >
+      walkDuration(sum, stepFor(DEFAULT_WALK_SPEED)),
+    'three columns finished no later than two'
+  );
+  // Long enough to follow: at the default a two-column sum is on screen for seconds, not
+  // for the blink it used to be.
+  assert(walkDuration(sum, stepFor(DEFAULT_WALK_SPEED)) > 4000, 'still too quick to follow');
+});
+
+test('the grown-up starts with the working shown, not skipped', () => {
+  // Being told you were wrong and not why is the one outcome the whole correction exists to
+  // avoid, so skipping it has to be something a grown-up chooses on purpose.
+  const settings = freshState(0).settings;
+  assertEqual(settings.walkInstant, false);
+  assertEqual(settings.walkSpeed, DEFAULT_WALK_SPEED);
+});
+
+test('a hand-edited speed cannot leave a child watching a walk that never ends', () => {
+  const storage = fakeStorage();
+  write({ ...freshState(0), settings: { ...freshState(0).settings, walkSpeed: 'glacial', walkInstant: 'yes' } }, storage);
+  const back = load(0, storage);
+  assertEqual(back.settings.walkSpeed, DEFAULT_WALK_SPEED, 'an unknown speed was trusted');
+  assertEqual(back.settings.walkInstant, true, 'and a truthy value is read as the switch being on');
+});
+
+test('a save written before either setting existed picks both up', () => {
+  const storage = fakeStorage();
+  const { walkSpeed, walkInstant, ...older } = freshState(0).settings;
+  write({ ...freshState(0), settings: older }, storage);
+  const back = load(0, storage);
+  assertEqual(back.settings.walkSpeed, DEFAULT_WALK_SPEED);
+  assertEqual(back.settings.walkInstant, false);
+});
+
+test('every speed has a name a grown-up can read, in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    const t = translator(lang);
+    for (const speed of WALK_SPEEDS) {
+      const key = `settings.walkSpeed.${speed.id}`;
+      assert(t(key) !== key, `${lang} has no name for ${speed.id}`);
+    }
+    for (const key of ['settings.walkSpeed', 'settings.walkSpeedHelp', 'settings.walkInstant', 'settings.walkInstantHelp']) {
+      assert(t(key) !== key, `${lang} is missing ${key}`);
+    }
+  }
+});
+
+describe('maths — the pets a longer ladder must not disturb');
+
+test('an existing zoo comes back exactly as it was', () => {
+  // Pinned against what the build before this ladder produced. A pet's species, trait index
+  // and name are all derived from the id it is filed under and the tier it sits on, so an id
+  // rewrite, a reordering of ALL_ITEMS, or a fact changing rung would hand a child back a zoo
+  // of strangers — silently, and with no way to undo it.
+  const pinned = [
+    ['4:15', 'fizz', 1, 'Stjerneskudd', 'Pudding'],
+    ['1:00', 'mochi', 0, 'Dugg', 'Muffin'],
+    ['12:55', 'sprout', 22, 'Solstråle', 'Wobble'],
+    ['add:3+5', 'glim', 6, 'Mose', 'Jellybean'],
+    ['add:7+8', 'pip', 12, 'Regnbue', 'Cricket'],
+    ['add:0+10', 'mochi', 9, 'Perle', 'Marshmallow'],
+    ['add:10+10', 'fizz', 8, 'Tøffel', 'Pinecone'],
+    ['add:2+2', 'glim', 4, 'Kongle', 'Blossom'],
+  ];
+  for (const [id, species, index, nb, en] of pinned) {
+    const item = addSubject.owns(id)
+      ? { subject: 'math', ...addSubject.parse(id) }
+      : { subject: 'clock', ...parseTimeId(id) };
+    const portrait = portraitOf(item);
+    assertEqual(portrait.key, id, `${id} is filed under a different key now`);
+    assertEqual(portrait.species, species, `${id} changed species`);
+    assertEqual(portrait.index, index, `${id} changed trait index`);
+    assertEqual(petName(item, 'nb'), nb, `${id} was renamed`);
+    assertEqual(petName(item, 'en'), en, `${id} was renamed in English`);
+  }
+});
+
+test('the adding species milestone still means exactly the sixty-six sums', () => {
+  // `species:add:<id>` has already been paid out in saves in the wild. Widening it to mean
+  // "and every difference, and every method" would push a milestone a child was two answers
+  // from earning back over the horizon.
+  const total = SPECIES_IDS.reduce((n, species) => n + factsOfSpecies(species).length, 0);
+  assertEqual(total, 66, 'the adding milestone quietly grew a new requirement');
+  for (const species of SPECIES_IDS) {
+    assert(
+      factsOfSpecies(species).every((id) => id.startsWith('add:')),
+      'a difference or a method was filed as an addition fact'
+    );
+  }
+});
+
+test('a skill hatches a pet like anything else', () => {
+  const portrait = portraitOf({ subject: 'math', skill: 'col+2c' });
+  assertEqual(portrait.key, 'skill:col+2c');
+  assert(SPECIES_IDS.includes(portrait.species), 'a method got no creature');
+  assert(portrait.index >= 0);
+});
+
+describe('maths — every mistake has something to say about it');
+
+test('every verdict has a sentence, in both languages', () => {
+  // Driven off the verdict list rather than a hand-kept copy of it, so a new verdict without
+  // a sentence fails here rather than showing a child a raw key.
+  const keys = {
+    offByOne: 'teach.sumOffByOne',
+    transposed: 'teach.sumTransposed',
+    gaveAddend: 'teach.sumGaveAddend',
+    gaveDifference: 'teach.sumGaveDifference',
+    gaveSum: 'teach.subGaveSum',
+    reversed: 'teach.subReversed',
+    gaveOperand: 'teach.subGaveOperand',
+    wroteFullSumInColumn: 'teach.colFullSum',
+    forgotCarry: 'teach.colForgotCarry',
+    carriedWrongColumn: 'teach.colCarryWrongColumn',
+    carriedIntoOwnColumn: 'teach.colCarriedIntoOwnColumn',
+    smallerFromLarger: 'teach.colSmallerFromLarger',
+    forgotBorrow: 'teach.colForgotBorrow',
+    borrowAcrossZero: 'teach.colBorrowAcrossZero',
+    addedInstead: 'teach.colAddedInstead',
+    subtractedInstead: 'teach.colSubtractedInstead',
+    placeValueOff: 'teach.colPlaceValueOff',
+  };
+  // `correct`, `blank` and `wrong` are the three with nothing to name: they get the plain
+  // closing sentence rather than a diagnosis.
+  const named = ALL_VERDICTS.filter((v) => !['correct', 'blank', 'wrong'].includes(v));
+  for (const verdict of named) {
+    assert(keys[verdict], `${verdict} has no sentence at all`);
+    for (const lang of ['nb', 'en']) {
+      const t = translator(lang);
+      assert(t(keys[verdict]) !== keys[verdict], `${lang} has no sentence for ${verdict}`);
+    }
+  }
+});
+
+test('every rung and every group is named and described, in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    const t = translator(lang);
+    for (const tier of addSubject.TIERS) {
+      assert(t(`tier.math.${tier.id}.name`) !== `tier.math.${tier.id}.name`, `${lang} rung ${tier.id} name`);
+      assert(t(`tier.math.${tier.id}.blurb`) !== `tier.math.${tier.id}.blurb`, `${lang} rung ${tier.id} blurb`);
+    }
+    for (const group of addSubject.GROUPS) {
+      assert(t(`group.${group.id}`) !== `group.${group.id}`, `${lang} group ${group.id}`);
+    }
+    for (const entry of mathSkills.ALL_SKILLS) {
+      assert(t(`skill.${entry.skill}`) !== `skill.${entry.skill}`, `${lang} has no collar for ${entry.skill}`);
+    }
+  }
+});
+
+test('a column sum can be said out loud, past twenty and past a hundred', () => {
+  // The aria-label is the whole question for anyone not looking at the screen, and the deck
+  // now reaches into the thousands.
+  assertEqual(numberWordOf('nb', 47), 'førtisju', 'Norwegian runs it together');
+  assertEqual(numberWordOf('nb', 21), 'tjueen', 'and drops the accent inside a compound');
+  assertEqual(numberWordOf('en', 47), 'forty-seven');
+  assertEqual(numberWordOf('nb', 405), 'fire hundre og fem');
+  assertEqual(numberWordOf('en', 405), 'four hundred and five');
+  assertEqual(numberWordOf('en', 1998), 'one thousand nine hundred and ninety-eight');
+  for (const lang of ['nb', 'en']) {
+    for (let n = 0; n <= 1998; n += 1) {
+      assert(!/\d/.test(numberWordOf(lang, n)), `${lang} fell back to digits at ${n}`);
+    }
+  }
+});
+
+
+describe('eggs — no two the same');
+
+test('an egg is stable: the same pet always gets the same egg', () => {
+  // A child is waiting on *this* egg. One that changed shape between two glances would be a
+  // different egg, and the whole point of it is that it is theirs.
+  for (const species of SPECIES_IDS.slice(0, 6)) {
+    for (const index of [0, 1, 7, 23]) {
+      const once = eggLookFrom({ species, index });
+      const twice = eggLookFrom({ species, index });
+      assertEqual(JSON.stringify(once), JSON.stringify(twice), `${species}/${index}`);
+    }
+  }
+});
+
+test('two eggs side by side differ in every way at once', () => {
+  // Not "a speckle moved": a child does not notice that. The strides are chosen so that
+  // neighbours change size, shape, pattern and colour together.
+  for (const species of SPECIES_IDS) {
+    for (let i = 0; i < 12; i += 1) {
+      const a = eggLookFrom({ species, index: i });
+      const b = eggLookFrom({ species, index: i + 1 });
+      assert(a.size !== b.size, `${species}: ${i} and ${i + 1} are the same size`);
+      assert(a.shape !== b.shape, `${species}: ${i} and ${i + 1} are the same shape`);
+      assert(a.pattern !== b.pattern, `${species}: ${i} and ${i + 1} wear the same pattern`);
+      assert(a.tint.id !== b.tint.id, `${species}: ${i} and ${i + 1} are the same colour`);
+    }
+  }
+});
+
+test('a zoo of one species meets every pattern, every size and every shape', () => {
+  // Twenty-odd eggs of a species is roughly what a full zoo holds, and a look nobody ever
+  // sees is a look that need not exist.
+  const seen = { pattern: new Set(), size: new Set(), shape: new Set(), tint: new Set() };
+  for (let i = 0; i < 24; i += 1) {
+    const look = eggLookFrom({ species: 'mochi', index: i });
+    seen.pattern.add(look.pattern);
+    seen.size.add(look.size);
+    seen.shape.add(look.shape);
+    seen.tint.add(look.tint.id);
+  }
+  assertEqual(seen.pattern.size, EGG_PATTERNS.length, 'a pattern never came up');
+  assertEqual(seen.size.size, EGG_SIZES.length, 'a size never came up');
+  assertEqual(seen.shape.size, EGG_SHAPES.length, 'a shape never came up');
+  assertEqual(seen.tint.size, EGG_TINTS.length, 'a tint never came up');
+});
+
+test('two species do not run through the same eggs in the same order', () => {
+  const line = (species) =>
+    Array.from({ length: 8 }, (_, i) => {
+      const look = eggLookFrom({ species, index: i });
+      return `${look.size}${look.shape}${look.pattern}`;
+    }).join('|');
+  const lines = SPECIES_IDS.map(line);
+  assert(new Set(lines).size > 1, 'every species lays exactly the same eggs in the same order');
+});
+
+test('not one speckle hangs off the side of the egg', () => {
+  // The single thing that would make the whole idea look broken. Checked against the shell's
+  // own width rather than by eye, for every mark of every pattern.
+  for (const pattern of EGG_PATTERNS) {
+    for (const mark of eggMarksFor(pattern)) {
+      const half = shellHalfWidth(mark.y);
+      assert(half > 0, `${pattern}: a mark at y=${mark.y} is off the end of the shell`);
+      const reach = mark.kind === 'dot' ? Math.abs(mark.x - 50) + mark.r : mark.rx;
+      assert(
+        reach <= half,
+        `${pattern}: a ${mark.kind} reaches ${reach.toFixed(1)} where the shell is only ${half.toFixed(1)}`
+      );
+    }
+  }
+});
+
+test('the shell is widest at its waist and comes to nothing at both ends', () => {
+  assertEqual(shellHalfWidth(12), 0, 'the top');
+  assertEqual(shellHalfWidth(90), 0, 'the bottom');
+  assertEqual(shellHalfWidth(4), 0, 'and above the top there is no shell at all');
+  assertClose(shellHalfWidth(58), 30, 1e-9, 'the waist');
+  assert(shellHalfWidth(40) < shellHalfWidth(58), 'it narrows going up');
+  assert(shellHalfWidth(80) < shellHalfWidth(58), 'and going down');
+});
+
+test('every pattern but the plain one actually puts something on the shell', () => {
+  assertEqual(eggMarksFor('plain').length, 0);
+  for (const pattern of EGG_PATTERNS.filter((p) => p !== 'plain')) {
+    assert(eggMarksFor(pattern).length > 0, `${pattern} draws nothing`);
+  }
+  assertEqual(eggMarksFor('nonsense').length, 0, 'and an unknown pattern is simply plain');
+});
+
+test('a plain egg is glossy, so it reads as plain rather than as unfinished', () => {
+  let plains = 0;
+  for (const species of SPECIES_IDS) {
+    for (let i = 0; i < 24; i += 1) {
+      const look = eggLookFrom({ species, index: i });
+      if (look.pattern !== 'plain') continue;
+      plains += 1;
+      assert(look.glint, `${species}/${i} is a bare shell with nothing on it at all`);
+    }
+  }
+  assert(plains > 0, 'no plain eggs came up to check');
+});
+
+test('the whole egg scales together, cracks and all', () => {
+  // The cracks are drawn for one shell at one size. They only stay on a small or a tall egg
+  // because they sit inside the same scaled group the shell does.
+  const svg = eggSvg({ species: 'mochi', index: 1 }, { cracks: EGG_CRACK_MAX });
+  const body = svg.slice(svg.indexOf('<g class="egg-body"'));
+  assert(/class="egg-body" transform="translate\([\d.]+ [\d.]+\) scale\([\d.]+ [\d.]+\)/.test(svg), 'no scale');
+  for (let i = 1; i <= EGG_CRACK_MAX; i += 1) {
+    assert(body.includes(`egg-crack-${i}`), `crack ${i} is outside the scaled group`);
+  }
+  assert(body.includes('egg-shell'), 'the shell is outside the scaled group');
+});
+
+test('an egg is drawn in its own pet\'s colours and nobody else\'s', () => {
+  // The egg is a promise about what is inside it.
+  for (const species of SPECIES_IDS) {
+    const svg = eggSvg({ species, index: 3 });
+    const palette = SPECIES[species].palette;
+    for (const colour of svg.match(/#[0-9a-f]{6}/gi) ?? []) {
+      assert(palette.includes(colour), `${species}'s egg is wearing ${colour}`);
+    }
+  }
+});
+
+test('a bare species id still draws an egg, as it always did', () => {
+  // Two callers hand over a portrait; the unlock exemplars and the tests hand over a name.
+  const svg = eggSvg('mochi', { cracks: 1 });
+  assert(svg.includes('egg-shell'), 'a species id no longer draws anything');
+  assert(svg.includes('egg-crack-1'));
+  assertEqual(eggLookFrom({ species: 'nonsense' }).species, 'mochi', 'and an unknown species falls back');
+  assert(eggSvg('nonsense').includes('egg-shell'), 'rather than throwing');
 });
 
 describe('the ten-frame');
@@ -3404,7 +4428,7 @@ test('the picture waits exactly as long as it takes to draw', () => {
 describe('adding — pets, homes and milestones');
 
 test('a fact hatches a pet of its own', () => {
-  const portrait = portraitOf({ subject: 'add', a: 7, b: 8 });
+  const portrait = portraitOf({ subject: 'math', a: 7, b: 8 });
   assertEqual(portrait.key, 'add:7+8');
   assertEqual(portrait.species, speciesForFact(7, 8));
   assert(portrait.index >= 0);
@@ -3419,9 +4443,9 @@ test('learning to add did not repaint the zoo', () => {
 test('no two pets of one species share a name', () => {
   for (const species of SPECIES_IDS) {
     const names = itemsOfSpecies(species).map((id) => {
-      const fact = addSubject.parse(id);
-      return fact
-        ? petName({ subject: 'add', a: fact.a, b: fact.b }, 'nb')
+      const payload = addSubject.parse(id);
+      return payload
+        ? petName({ subject: 'math', ...payload }, 'nb')
         : petName({ subject: 'clock', ...parseTimeId(id) }, 'nb');
     });
     assertEqual(new Set(names).size, names.length, `${species} has a repeated name`);
@@ -3439,10 +4463,10 @@ test('the clock species milestone still means only clock pets', () => {
 test('finishing an addition tier pays, without repricing the clock', () => {
   const items = {};
   for (const fact of addSubject.tierItems(0)) {
-    items[fact.id] = { subject: 'add', phase: 'graduated', hatchedAt: 1 };
+    items[fact.id] = { subject: 'math', phase: 'graduated', hatchedAt: 1 };
   }
   const reached = milestonesReached(items, { daysPlayed: [] });
-  assert(reached.includes('mastery:add:0'), 'the addition tier went unrewarded');
+  assert(reached.includes('mastery:math:0'), 'the addition tier went unrewarded');
   assert(!reached.includes('mastery:0'), 'and it must not claim the clock’s milestone');
 });
 
@@ -3766,14 +4790,14 @@ test('one child’s handwriting does not travel to another child’s device', ()
 
 describe('practice — choosing what the game asks about');
 
-const practiceWith = (clock, add) => practiceOf({ practice: { clock, add } });
+const practiceWith = (clock, math) => practiceOf({ practice: { clock, math } });
 
 test('a save that predates any of this practises everything', () => {
   const chosen = practiceOf({});
   assertEqual(chosen.clock.on, true);
-  assertEqual(chosen.add.on, true);
+  assertEqual(chosen.math.on, true);
   assertEqual(chosen.clock.floor, 0);
-  assertEqual(practiceOf(undefined).add.floor, 0, 'and no state at all does not throw');
+  assertEqual(practiceOf(undefined).math.floor, 0, 'and no state at all does not throw');
 });
 
 test('a hand-edited floor cannot reach past the ladder', () => {
@@ -3793,9 +4817,9 @@ test('there is always something left to practise', () => {
 test('resting is decided by the choices, not stored on the pet', () => {
   const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
   assert(isResting({ subject: 'clock', tier: 3 }, chosen), 'a switched-off subject rests');
-  assert(isResting({ subject: 'add', tier: 1 }, chosen), 'and so does a tier below the floor');
-  assert(!isResting({ subject: 'add', tier: 2 }, chosen), 'the floor itself is practised');
-  assert(!isResting({ subject: 'add', tier: 4 }, chosen), 'and everything above it');
+  assert(isResting({ subject: 'math', tier: 1 }, chosen), 'and so does a tier below the floor');
+  assert(!isResting({ subject: 'math', tier: 2 }, chosen), 'the floor itself is practised');
+  assert(!isResting({ subject: 'math', tier: 4 }, chosen), 'and everything above it');
 });
 
 test('an item from a subject this build does not know is left alone', () => {
@@ -3806,14 +4830,15 @@ test('the zoo counts towards what is switched on', () => {
   assertEqual(enabledItemCount(DEFAULT_PRACTICE), totalItemCount());
   const chosen = practiceWith({ on: false }, { on: true, floor: 2 });
   // A target that includes what the game has been told not to ask is a target nobody can reach.
-  assertEqual(enabledItemCount(chosen), 30, 'only the addition tiers from 2 up');
+  const fromTwoUp = addSubject.ALL_ITEMS.filter((entry) => entry.tier >= 2).length;
+  assertEqual(enabledItemCount(chosen), fromTwoUp, 'only the maths tiers from 2 up');
 });
 
 test('nothing skipped is ever introduced', () => {
   const chosen = practiceWith({ on: false, floor: 0 }, { on: true, floor: 2 });
-  const fresh = unseenAcrossSubjects({}, { clock: 3, add: 4 }, chosen);
+  const fresh = unseenAcrossSubjects({}, { clock: 3, math: 4 }, chosen);
   assert(fresh.length > 0);
-  assert(fresh.every((entry) => entry.subject === 'add'), 'a switched-off subject was taught');
+  assert(fresh.every((entry) => entry.subject === 'math'), 'a switched-off subject was taught');
   assert(fresh.every((entry) => entry.tier >= 2), 'a skipped tier was taught');
 });
 
@@ -3822,16 +4847,16 @@ describe('practice — the ladder walks past a skipped rung');
 test('the unlocked tier starts at the floor', () => {
   // A tier nobody is asked about can never reach the 80% bar, so a ladder starting at zero
   // would stall the whole subject forever.
-  assertEqual(unlockedTierOf({}, 'add', 2), 2, 'an empty zoo still opens the floor');
-  assertEqual(unlockedTierOf({}, 'add', 0), 0);
+  assertEqual(unlockedTierOf({}, 'math', 2), 2, 'an empty zoo still opens the floor');
+  assertEqual(unlockedTierOf({}, 'math', 0), 0);
 });
 
 test('but mastery keeps telling the truth, so nobody is paid for skipping', () => {
   // wallet.js awards mastery:<tier> on tierMastery >= 1. If a skipped tier reported itself
   // mastered, a child would be handed forty coins for work they never did.
-  assertEqual(tierMasteryOf({}, 'add', 0), 0, 'a skipped tier claimed to be mastered');
+  assertEqual(tierMasteryOf({}, 'math', 0), 0, 'a skipped tier claimed to be mastered');
   const reached = milestonesReached({}, { daysPlayed: [] });
-  assert(!reached.includes('mastery:add:0'), 'a skipped tier was paid for');
+  assert(!reached.includes('mastery:math:0'), 'a skipped tier was paid for');
   assert(!reached.includes('mastery:0'));
 });
 
@@ -3839,7 +4864,7 @@ describe('practice — pets that are resting');
 
 const restingState = (extra = {}) => ({
   reviewClock: 0,
-  tiers: { clock: 3, add: 4 },
+  tiers: { clock: 3, math: 4 },
   practice: practiceWith({ on: false, floor: 0 }, { on: true, floor: 0 }),
   items: {},
   ...extra,
@@ -3853,7 +4878,7 @@ test('a resting pet is never chosen, whichever queue it would have been in', () 
     ['merely graduated', clockItem({ phase: 'graduated', dueAt: 9e15 })],
   ]) {
     const picked = nextItem(restingState({ items: { '1:00': item } }), { now: 1000 });
-    assertEqual(subjectIdOf(picked), 'add', `a resting pet was asked about while ${what}`);
+    assertEqual(subjectIdOf(picked), 'math', `a resting pet was asked about while ${what}`);
   }
 });
 
@@ -3866,7 +4891,7 @@ test('a resting pet never asks to be fed', () => {
 test('the last-resort fallback does not smuggle back what was switched off', () => {
   // Everything excluded and nothing left: the one moment nobody is watching for it.
   const state = restingState({ items: { '1:00': { subject: 'clock', tier: 0, phase: 'learning', dueStep: 99, dueAt: 0, seen: 0 } } });
-  assertEqual(subjectIdOf(nextItem(state, { now: 1000, exclude: '1:00' })), 'add');
+  assertEqual(subjectIdOf(nextItem(state, { now: 1000, exclude: '1:00' })), 'math');
 });
 
 describe('practice — the schedule is frozen, not left running');
@@ -3918,7 +4943,7 @@ test('raising the floor puts the pets below it to sleep too', () => {
   // Consistent with switching a subject off: anything no longer asked stops going hungry.
   const state = {
     reviewClock: 0,
-    items: { 'add:0+0': { subject: 'add', tier: 0, phase: 'graduated', dueAt: 0, hatchedAt: 1 } },
+    items: { 'add:0+0': { subject: 'math', tier: 0, phase: 'graduated', dueAt: 0, hatchedAt: 1 } },
   };
   const raised = applyPractice(state, practiceWith({}, { floor: 2 }), 1000);
   assertEqual(raised.items['add:0+0'].restedAt, 1000);
@@ -3927,11 +4952,11 @@ test('raising the floor puts the pets below it to sleep too', () => {
 
 test('the choices survive a reload, clamped', () => {
   const storage = fakeStorage();
-  write({ ...freshState(0), practice: { clock: { on: false, floor: 9 }, add: { on: true, floor: 1 } } }, storage);
+  write({ ...freshState(0), practice: { clock: { on: false, floor: 9 }, math: { on: true, floor: 1 } } }, storage);
   const back = load(0, storage);
   assertEqual(back.practice.clock.on, false);
   assertEqual(back.practice.clock.floor, LAST_TIER, 'a floor past the ladder was kept');
-  assertEqual(back.practice.add.floor, 1);
+  assertEqual(back.practice.math.floor, 1);
 });
 
 const out = document.getElementById('out');

@@ -5,18 +5,21 @@
 // Everything derivable — a pet's mood, how many are hungry, tier progress — is computed
 // at render time from `items`, never stored, so there is exactly one source of truth.
 
+import { DEFAULT_WALK_SPEED, isWalkSpeed } from './column.js';
 import { DEFAULT_LANGUAGE } from './i18n.js';
-import { PLAY_MINUTES_DEFAULT } from './session.js';
+import { admireFor, ADMIRE_SECONDS_DEFAULT, PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
 import { sanitize as sanitizeInk } from './ink/memory.js';
-import { DEFAULT_PRACTICE, practiceOf, SUBJECT_IDS, subjectIdOf, tiersOf } from './subjects/index.js';
+import { DEFAULT_PRACTICE, practiceOf, shapesFor, SUBJECT_IDS, subjectIdOf, tiersOf } from './subjects/index.js';
 
 export const STORAGE_KEY = 'pet-zoo/v1';
-// 2 added `subject` to every item and turned the single `tier` into one per subject. Bumping
-// this is safe *because* `load` upgrades rather than discards — see the version check there.
-export const VERSION = 2;
+// 2 added `subject` to every item and turned the single `tier` into one per subject.
+// 3 renamed the subject `add` to `math` when it grew from adding up into the whole ladder.
+// Bumping this is safe *because* `load` upgrades rather than discards — see the version
+// check there.
+export const VERSION = 3;
 const SAVE_DEBOUNCE_MS = 400;
 
 export function freshState(now) {
@@ -61,6 +64,19 @@ export function freshState(now) {
       // this only decides whether the game also shows, gently, which way round it usually
       // goes. Some children find that useful and some find it one more thing to get wrong.
       mirrorNudge: false,
+      // How slowly a wrong column sum is walked through, column by column. Named rather than
+      // numbered — see column.js. What is right here is a fact about one child, not about
+      // the game: a child meeting carrying for the first time needs to watch it happen, and
+      // the same child six months later does not.
+      walkSpeed: DEFAULT_WALK_SPEED,
+      // And whether to skip the walk entirely and simply show the finished sum. Off by
+      // default: the working is the whole of what a wrong answer is for, and a child who is
+      // shown only the answer has been told they were wrong and taught nothing.
+      walkInstant: false,
+      // How long a pet that has just hatched or just grown stays on screen before the next
+      // question. Three seconds sounds long written down and is not long at all when it is a
+      // creature you have spent four right answers earning.
+      admireSeconds: ADMIRE_SECONDS_DEFAULT,
     },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
     // What this child's handwriting looks like, learned from the corrections they make.
@@ -123,7 +139,17 @@ export function load(now, storage = safeStorage()) {
       // Ids only, so an unknown one from a future build is simply worth nothing rather than
       // being a number this build has to make sense of.
       milestones: cleanMilestones(save.milestones),
-      settings: { ...freshState(now).settings, ...save.settings },
+      settings: {
+        ...freshState(now).settings,
+        ...save.settings,
+        // Clamped like the tiers and the practice floor: a speed this build has never heard
+        // of must not be able to leave a child watching a walkthrough that never finishes.
+        walkSpeed: isWalkSpeed(save.settings?.walkSpeed) ? save.settings.walkSpeed : DEFAULT_WALK_SPEED,
+        walkInstant: Boolean(save.settings?.walkInstant),
+        // Clamped the same way, and for the same reason: a pause of NaN would leave a child
+        // looking at a pet forever, waiting for a question that never comes.
+        admireSeconds: admireFor(save.settings?.admireSeconds).seconds,
+      },
       items: migrateItems(save.items),
       ink: sanitizeInk(save.ink),
     };
@@ -141,9 +167,33 @@ export function upgrade(parsed) {
   if (!parsed || parsed.version >= VERSION) return parsed;
   const save = { ...parsed, version: VERSION };
   // v1 → v2: the lone `tier` was always the clock's. `tiersOf` reads either shape.
-  save.tiers = tiersOf(parsed);
-  delete save.tier;
+  if (!(parsed.version >= 2)) {
+    save.tiers = tiersOf(parsed);
+    delete save.tier;
+  }
+  // v2 → v3: the subject called `add` is now called `math`. Three things are keyed by the
+  // subject's name and all three move; the *items* keep their `add:3+5` keys, deliberately, or
+  // every addition pet a child owns would be rehashed into a different creature with a
+  // different name. See subjects/math/index.js.
+  save.tiers = renameSubject(save.tiers, 'add', 'math');
+  save.practice = renameSubject(save.practice, 'add', 'math');
+  // Renamed rather than dropped: `settleMilestones` pays for any id it has not seen before, so
+  // leaving `mastery:add:2` behind would hand a child forty coins for work they finished
+  // months ago, every tier, on the day they updated the game.
+  save.milestones = cleanMilestones(save.milestones).map((id) =>
+    id.startsWith('mastery:add:') ? `mastery:math:${id.slice('mastery:add:'.length)}` : id
+  );
   return save;
+}
+
+/**
+ * Move one subject's entry to its new name. Idempotent, and refuses to overwrite: a save that
+ * somehow carries both spellings keeps the new one, because that is the one this build wrote.
+ */
+function renameSubject(map, from, to) {
+  if (!map || typeof map !== 'object' || !(from in map)) return map;
+  const { [from]: moved, ...rest } = map;
+  return to in rest ? rest : { ...rest, [to]: moved };
 }
 
 /**
@@ -170,15 +220,28 @@ export function migrateItems(items) {
     const cracks =
       typeof item?.cracks === 'number' ? item.cracks : crackFor(item?.correctStreak ?? 0);
     const decor = sanitizeDecor(item?.decor);
+    // Which of an item's cases have been shown. Filtered rather than trusted, like the decor:
+    // a hand-edited save must not be able to declare full coverage and skip the practice the
+    // coverage gate exists to make happen.
+    const covered = cleanCovered(id, item?.covered);
     const current =
       item?.subject === subject &&
       typeof item?.feeds === 'number' &&
       typeof item?.cracks === 'number' &&
       Array.isArray(item?.decor) &&
-      decor.length === item.decor.length;
-    out[id] = current ? item : { ...item, subject, feeds, cracks, decor };
+      decor.length === item.decor.length &&
+      Array.isArray(item?.covered) &&
+      covered.length === item.covered.length;
+    out[id] = current ? item : { ...item, subject, feeds, cracks, decor, covered };
   }
   return out;
+}
+
+/** The cases a stored item may claim to have covered: only ones its own subject declares. */
+function cleanCovered(id, list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  const declared = shapesFor(id);
+  return declared.length ? list.filter((shape) => declared.includes(shape)) : [];
 }
 
 export function write(state, storage = safeStorage()) {

@@ -282,6 +282,66 @@
 
         <div class="setting">
           <div class="setting-head">
+            <label class="setting-label" for="walk-speed" data-i18n="settings.walkSpeed">
+              Fart på utregningen
+            </label>
+            <output id="walk-speed-value" class="setting-value" for="walk-speed"></output>
+          </div>
+          <input
+            id="walk-speed"
+            class="setting-range"
+            type="range"
+            min="0"
+            max="4"
+            step="1"
+            value="2"
+          />
+          <p class="setting-help" data-i18n="settings.walkSpeedHelp">
+            Når et stykke i oppstilling blir feil, regnes det ut på skjermen kolonne for
+            kolonne. Her bestemmer du hvor lenge den venter på hver kolonne. Rolig først —
+            det er lettere å skru opp farten siden enn å oppdage at barnet ikke rakk å se
+            hva som skjedde.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="walk-instant" data-i18n="settings.walkInstant">
+              Hopp over utregningen
+            </label>
+            <input id="walk-instant" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.walkInstantHelp">
+            Av til vanlig. Med den på vises bare det ferdige svaret, uten å regne det ut. Da
+            får barnet vite at det ble feil, men ikke hvorfor — så dette er for en som
+            allerede kan oppstilling godt.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-head">
+            <label class="setting-label" for="admire-seconds" data-i18n="settings.admire">
+              Tid til å se på dyret
+            </label>
+            <output id="admire-seconds-value" class="setting-value" for="admire-seconds"></output>
+          </div>
+          <input
+            id="admire-seconds"
+            class="setting-range"
+            type="range"
+            min="1"
+            max="8"
+            step="0.5"
+            value="3"
+          />
+          <p class="setting-help" data-i18n="settings.admireHelp">
+            Hvor lenge et nyklekket dyr — eller et som nettopp har vokst — blir stående før
+            neste oppgave. Barnet kan trykke på dyret for å gå videre med én gang.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-head">
             <label class="setting-label" for="play-minutes" data-i18n="settings.playTime">
               Spilletid
             </label>
