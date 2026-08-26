@@ -18,6 +18,20 @@ export const NAP_MS = 2 * 60 * 1000;
 // next morning should not drop the child straight into a nap.
 export const STALE_SESSION_MS = 30 * 60 * 1000;
 
+// How long a child gets to look at a pet that has just hatched or just grown. Here rather
+// than in main.js because this is the module that already owns how long things last, and
+// because a number the settings panel, the celebration and the tests all read should be a
+// number all three can point at.
+export const ADMIRE_SECONDS_DEFAULT = 3;
+export const ADMIRE_SECONDS_MIN = 1;
+export const ADMIRE_SECONDS_MAX = 8;
+export const ADMIRE_SECONDS_STEP = 0.5;
+
+// An evolve gets a shade less than a hatch. It is the same kind of moment but a smaller one —
+// the pet was already there, and it has changed rather than arrived — and keeping the two tied
+// together means a grown-up sets one number rather than reasoning about two.
+const EVOLVE_SHORTER_BY = 0.5;
+
 const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
 
 /**
@@ -39,6 +53,26 @@ export function limitsFor(playMinutes) {
 }
 
 export const DEFAULT_LIMITS = limitsFor(PLAY_MINUTES_DEFAULT);
+
+/**
+ * How long the two celebrations hold, in milliseconds. Shaped like `limitsFor`, and tolerant
+ * in the same way: a hand-edited or missing value comes back as the default rather than as
+ * nothing, because a pause of NaN would leave a child looking at a pet forever.
+ */
+export function admireFor(seconds) {
+  const raw = Number(seconds);
+  const chosen = clamp(
+    Number.isFinite(raw) ? raw : ADMIRE_SECONDS_DEFAULT,
+    ADMIRE_SECONDS_MIN,
+    ADMIRE_SECONDS_MAX
+  );
+  return {
+    seconds: chosen,
+    hatchMs: Math.round(chosen * 1000),
+    // Never shorter than the floor, however far down the slider goes.
+    evolveMs: Math.round(Math.max(ADMIRE_SECONDS_MIN, chosen - EVOLVE_SHORTER_BY) * 1000),
+  };
+}
 
 export function startSession(now) {
   return { startedAt: now, answered: 0, correct: 0, napUntil: 0 };

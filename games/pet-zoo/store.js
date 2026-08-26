@@ -7,7 +7,7 @@
 
 import { DEFAULT_WALK_SPEED, isWalkSpeed } from './column.js';
 import { DEFAULT_LANGUAGE } from './i18n.js';
-import { PLAY_MINUTES_DEFAULT } from './session.js';
+import { admireFor, ADMIRE_SECONDS_DEFAULT, PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
@@ -73,6 +73,10 @@ export function freshState(now) {
       // default: the working is the whole of what a wrong answer is for, and a child who is
       // shown only the answer has been told they were wrong and taught nothing.
       walkInstant: false,
+      // How long a pet that has just hatched or just grown stays on screen before the next
+      // question. Three seconds sounds long written down and is not long at all when it is a
+      // creature you have spent four right answers earning.
+      admireSeconds: ADMIRE_SECONDS_DEFAULT,
     },
     session: { startedAt: 0, answered: 0, correct: 0, napUntil: 0 },
     // What this child's handwriting looks like, learned from the corrections they make.
@@ -142,6 +146,9 @@ export function load(now, storage = safeStorage()) {
         // of must not be able to leave a child watching a walkthrough that never finishes.
         walkSpeed: isWalkSpeed(save.settings?.walkSpeed) ? save.settings.walkSpeed : DEFAULT_WALK_SPEED,
         walkInstant: Boolean(save.settings?.walkInstant),
+        // Clamped the same way, and for the same reason: a pause of NaN would leave a child
+        // looking at a pet forever, waiting for a question that never comes.
+        admireSeconds: admireFor(save.settings?.admireSeconds).seconds,
       },
       items: migrateItems(save.items),
       ink: sanitizeInk(save.ink),

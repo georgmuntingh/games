@@ -11,6 +11,10 @@ import {
   norm360,
   parseTimeId,
   pickHand,
+  GRIP_REACH,
+  HOUR_REACH,
+  MINUTE_REACH,
+  PIN_DEAD_ZONE,
   pointOnFace,
   snapMinute,
   timeId,
@@ -65,6 +69,10 @@ import {
   PLAY_MINUTES_DEFAULT,
   PLAY_MINUTES_MAX,
   PLAY_MINUTES_MIN,
+  admireFor,
+  ADMIRE_SECONDS_DEFAULT,
+  ADMIRE_SECONDS_MAX,
+  ADMIRE_SECONDS_MIN,
   QUESTIONS_PER_MINUTE,
   shouldEnd,
   SOFT_STOP_RATIO,
@@ -487,6 +495,181 @@ test('in the overlap ring the nearer hand wins', () => {
   const r = 180 * 0.63; // between the two bands
   assertEqual(pickHand({ dx: 0, dy: -r, ...face }), 'hour', 'pointing at the hour hand');
   assertEqual(pickHand({ dx: 0, dy: r, ...face }), 'minute', 'pointing at the minute hand');
+});
+
+
+describe('clock — grabbing the hand you are pointing at');
+
+// The face as main.js actually draws it. The picker measures segments, so the lengths are
+// part of the question rather than a detail of the rendering.
+const FACE = { radius: 180, hourLen: 100, minuteLen: 150 };
+
+/** A point `frac` of the way out along a heading, in the same units as the face. */
+const alongHand = (deg, dist) => {
+  const rad = ((deg - 90) * Math.PI) / 180;
+  return { dx: Math.cos(rad) * dist, dy: Math.sin(rad) * dist };
+};
+
+const grab = (deg, dist, hourDeg, minuteDeg) =>
+  pickHand({ ...alongHand(deg, dist), ...FACE, hourDeg, minuteDeg });
+
+test('a finger on the minute hand grabs the minute hand, however far in it is', () => {
+  // The bug this replaced: the hour hand's tip sits at 0.56 of the radius, and the old rule
+  // handed back the hour hand for *anything* closer in than that — so most of the face could
+  // not be used to grab the minute hand at all.
+  const minuteDeg = 0; // straight up
+  const hourDeg = 90; // and the hour hand well out of the way, at the 3
+  for (const frac of [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8]) {
+    assertEqual(
+      grab(minuteDeg, FACE.radius * frac, hourDeg, minuteDeg),
+      'minute',
+      `dead on the minute hand at ${frac} of the radius`
+    );
+  }
+});
+
+test('and a finger on the hour hand still grabs the hour hand', () => {
+  const hourDeg = 90;
+  const minuteDeg = 0;
+  for (const frac of [0.2, 0.3, 0.4, 0.5, 0.55]) {
+    assertEqual(
+      grab(hourDeg, FACE.radius * frac, hourDeg, minuteDeg),
+      'hour',
+      `dead on the hour hand at ${frac} of the radius`
+    );
+  }
+  // The hour hand only reaches 0.56 of the radius, so a grab further out than its own tip is
+  // covered by the reach test below rather than here.
+});
+
+test('walking out along either hand never changes its mind, at any time on the clock', () => {
+  for (let h = 1; h <= 12; h += 1) {
+    for (const m of [0, 10, 25, 40, 55]) {
+      const hourDeg = hourAngle(h, m);
+      const minuteDeg = minuteAngle(m);
+      // Only where the hands are far enough apart for "along this one" to mean anything.
+      if (angularDistance(hourDeg, minuteDeg) < 25) continue;
+      // Starting clear of the dead zone at the pin, where no angle means anything: the hour
+      // hand is short enough that a quarter of the way along it is still inside the pin.
+      for (const frac of [0.4, 0.6, 0.8]) {
+        assertEqual(
+          grab(minuteDeg, FACE.minuteLen * frac, hourDeg, minuteDeg),
+          'minute',
+          `${h}:${m} along the minute hand`
+        );
+        assertEqual(
+          grab(hourDeg, FACE.hourLen * frac, hourDeg, minuteDeg),
+          'hour',
+          `${h}:${m} along the hour hand`
+        );
+      }
+      // And right out at each tip, which is where the grips are drawn.
+      assertEqual(grab(minuteDeg, FACE.minuteLen, hourDeg, minuteDeg), 'minute', `${h}:${m} minute tip`);
+      assertEqual(grab(hourDeg, FACE.hourLen, hourDeg, minuteDeg), 'hour', `${h}:${m} hour tip`);
+    }
+  }
+});
+
+test('a hand cannot be grabbed by the empty line beyond its own tip', () => {
+  const hourDeg = 0;
+  const minuteDeg = 90;
+  const grip = FACE.radius * GRIP_REACH;
+  // Just inside the grip drawn at the tip: still the hour hand.
+  assertEqual(grab(hourDeg, FACE.hourLen + grip * 0.5, hourDeg, minuteDeg), 'hour');
+  // Past it: there is nothing there, so the only hand in the running is the other one.
+  assertEqual(grab(hourDeg, FACE.hourLen + grip * 1.5, hourDeg, minuteDeg), 'minute');
+  assertEqual(grab(hourDeg, FACE.radius * 0.95, hourDeg, minuteDeg), 'minute');
+});
+
+test('stacked hands are told apart by how far out the grab is', () => {
+  // At 12:00 both hands point the same way and the distances are equal — mathematically
+  // zero, and in floating point two different zeroes — so only the radius is left.
+  for (let h = 1; h <= 12; h += 1) {
+    const deg = hourAngle(h, 0);
+    assertEqual(grab(deg, FACE.hourLen * 0.5, deg, deg), 'hour', `${h}:00 low on the stack`);
+    assertEqual(grab(deg, FACE.minuteLen * 0.9, deg, deg), 'minute', `${h}:00 high on the stack`);
+  }
+});
+
+test('the pin and the rim are unchanged', () => {
+  const face = { ...FACE, hourDeg: 0, minuteDeg: 90 };
+  assertEqual(pickHand({ dx: 0, dy: -FACE.radius * (PIN_DEAD_ZONE - 0.02), ...face }), null, 'inside the pin');
+  assert(pickHand({ dx: 0, dy: -FACE.radius * (PIN_DEAD_ZONE + 0.02), ...face }) !== null, 'and just outside it');
+  assertEqual(pickHand({ dx: 0, dy: -FACE.radius * 1.3, ...face }), null, 'off the face');
+});
+
+test('a grab in the middle of nowhere still picks the nearer hand up', () => {
+  // Forgiving on purpose: a mis-reach that did nothing at all would read as a broken game.
+  const picked = grab(200, FACE.radius * 0.9, 0, 90);
+  assert(picked === 'hour' || picked === 'minute', 'a tap on the empty face grabbed nothing');
+});
+
+test('the lengths default to the proportions the face is drawn at', () => {
+  // Two callers pass the real pixel lengths; anything that does not should still be measuring
+  // a clock rather than a guess at one.
+  assertClose(HOUR_REACH * 180, 100, 1e-9, 'the hour hand');
+  assertClose(MINUTE_REACH * 180, 150, 1e-9, 'the minute hand');
+  assertEqual(
+    pickHand({ ...alongHand(0, 72), radius: 180, hourDeg: 90, minuteDeg: 0 }),
+    'minute',
+    'the defaults disagree with the face'
+  );
+});
+
+describe('a moment to look at a new pet');
+
+test('a hatch is held for three seconds, an evolve a little less', () => {
+  const times = admireFor(ADMIRE_SECONDS_DEFAULT);
+  assertEqual(times.hatchMs, 3000);
+  assertEqual(times.evolveMs, 2500);
+  assert(times.evolveMs < times.hatchMs, 'an evolve should be the shorter of the two');
+});
+
+test('the beat is a grown-up choice, and it is clamped at both ends', () => {
+  assertEqual(admireFor(ADMIRE_SECONDS_MAX + 10).seconds, ADMIRE_SECONDS_MAX);
+  assertEqual(admireFor(0).seconds, ADMIRE_SECONDS_MIN);
+  assertEqual(admireFor(-5).seconds, ADMIRE_SECONDS_MIN);
+  assertEqual(admireFor(4.5).seconds, 4.5, 'a half second is a real choice');
+});
+
+test('a pause is never NaN, however odd the number handed in', () => {
+  // The one failure that matters here: a pause of NaN would leave a child looking at a pet
+  // forever, waiting for a question that never comes.
+  for (const odd of [undefined, null, 'ages', {}, NaN, Infinity]) {
+    const times = admireFor(odd);
+    assert(Number.isFinite(times.hatchMs) && times.hatchMs > 0, `hatch beat for ${String(odd)}`);
+    assert(Number.isFinite(times.evolveMs) && times.evolveMs > 0, `evolve beat for ${String(odd)}`);
+  }
+  assertEqual(admireFor(undefined).seconds, ADMIRE_SECONDS_DEFAULT);
+});
+
+test('the evolve beat never drops below the floor, however short the setting', () => {
+  assertEqual(admireFor(ADMIRE_SECONDS_MIN).evolveMs, ADMIRE_SECONDS_MIN * 1000);
+  assert(admireFor(1.5).evolveMs >= ADMIRE_SECONDS_MIN * 1000);
+});
+
+test('the setting survives a reload, and a hand-edited one is clamped', () => {
+  const storage = fakeStorage();
+  write({ ...freshState(0), settings: { ...freshState(0).settings, admireSeconds: 6 } }, storage);
+  assertEqual(load(0, storage).settings.admireSeconds, 6);
+  write({ ...freshState(0), settings: { ...freshState(0).settings, admireSeconds: 'ages' } }, storage);
+  assertEqual(load(0, storage).settings.admireSeconds, ADMIRE_SECONDS_DEFAULT, 'nonsense was trusted');
+});
+
+test('a save written before the beat existed picks it up', () => {
+  const storage = fakeStorage();
+  const { admireSeconds, ...older } = freshState(0).settings;
+  write({ ...freshState(0), settings: older }, storage);
+  assertEqual(load(0, storage).settings.admireSeconds, ADMIRE_SECONDS_DEFAULT);
+});
+
+test('it is named and explained in both languages', () => {
+  for (const lang of ['nb', 'en']) {
+    const t = translator(lang);
+    for (const key of ['settings.admire', 'settings.admireValue', 'settings.admireHelp']) {
+      assert(t(key) !== key, `${lang} is missing ${key}`);
+    }
+  }
 });
 
 describe('clock — grading');

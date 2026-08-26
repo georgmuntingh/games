@@ -478,6 +478,10 @@ const STRINGS = {
     'answer.digit': 'Put down {n}',
     'answer.clear': 'Clear',
     'settings.answerMode': 'Answering',
+    'settings.admire': 'Time to look at the pet',
+    'settings.admireValue': '{n}s',
+    'settings.admireHelp':
+      'How long a newly hatched pet — or one that has just grown — stays on screen before the next question. The child can tap the pet to move on straight away.',
     'settings.walkSpeed': 'Pace of the working',
     'settings.walkSpeedValue': '{name} · {seconds}s',
     'settings.walkSpeed.verySlow': 'Very calm',
@@ -807,6 +811,10 @@ const STRINGS = {
     'answer.digit': 'Sett inn {n}',
     'answer.clear': 'Tøm',
     'settings.answerMode': 'Svarer med',
+    'settings.admire': 'Tid til å se på dyret',
+    'settings.admireValue': '{n} s',
+    'settings.admireHelp':
+      'Hvor lenge et nyklekket dyr — eller et som nettopp har vokst — blir stående før neste oppgave. Barnet kan trykke på dyret for å gå videre med én gang.',
     'settings.walkSpeed': 'Fart på utregningen',
     'settings.walkSpeedValue': '{name} · {seconds} s',
     'settings.walkSpeed.verySlow': 'Veldig rolig',

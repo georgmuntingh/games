@@ -210,6 +210,8 @@ const el = {
   walkSpeed: $('walk-speed'),
   walkSpeedValue: $('walk-speed-value'),
   walkInstant: $('walk-instant'),
+  admireSeconds: $('admire-seconds'),
+  admireSecondsValue: $('admire-seconds-value'),
   exportFile: $('export-file'),
   exportCode: $('export-code'),
   importFile: $('import-file'),
@@ -369,6 +371,10 @@ el.clock.addEventListener('pointerdown', (event) => {
   const v = svgVector(event);
   const hand = pickHand({
     ...v,
+    // The lengths the hands are actually drawn at, so the picker measures the face the child
+    // is looking at rather than a default of it.
+    hourLen: HOUR_LEN,
+    minuteLen: MINUTE_LEN,
     hourDeg: hourAngle(dial.h, dial.m),
     minuteDeg: minuteAngle(dial.m),
   });
@@ -1263,7 +1269,9 @@ async function celebrate(outcome, paid = 0) {
     el.petStage.querySelector('.pet')?.classList.add('arriving');
     confetti(el.petStage, el.fx, { power: 2.2 });
     el.feedback.textContent = t('evolve.done', { name, label: formLabel(item) });
-    await wait(1800);
+    // The same look a hatch gets, a shade shorter: the pet was already there, and it has
+    // changed rather than arrived.
+    await admire(admireTimes().evolveMs);
     return;
   }
 
@@ -1315,6 +1323,56 @@ const SHELL_DUST = ['#fdf6ec', '#efe3d2', '#e2d3bd'];
  * ever seen to turn into anything. The egg goes in, the smoke happens, and the pet is standing
  * there when it clears.
  */
+/**
+ * A run of pauses the child can cut short by tapping the pet.
+ *
+ * Used twice over a hatch, and deliberately not once: tapping through the shell breaking is
+ * "get on with it", and tapping through the look at the new pet is a different "get on with
+ * it". A child who skipped the build-up has not asked to skip meeting what came out of it, so
+ * the two get separate tokens and the second starts fresh.
+ */
+function skippableBeats(host = el.petStage) {
+  let skipped = false;
+  let resolve = () => {};
+  const done = new Promise((r) => {
+    resolve = r;
+  });
+  const onDown = () => {
+    skipped = true;
+    resolve();
+  };
+  host.addEventListener('pointerdown', onDown);
+  return {
+    /** Wait, unless the child has already asked not to. False once they have. */
+    async beat(ms) {
+      if (skipped) return false;
+      await Promise.race([wait(ms), done]);
+      return !skipped;
+    },
+    get skipped() {
+      return skipped;
+    },
+    release: () => host.removeEventListener('pointerdown', onDown),
+  };
+}
+
+/**
+ * The beat after something new appears. This is the whole of what the long tail of the
+ * schedule is for — a pet that was not there before, or one that has grown — and until now it
+ * was over in half a second, which is not long enough to notice a thing, let alone enjoy it.
+ */
+async function admire(ms) {
+  const beats = skippableBeats();
+  try {
+    await beats.beat(ms);
+  } finally {
+    beats.release();
+  }
+}
+
+/** How long the two celebrations hold, from the grown-up's setting. */
+const admireTimes = () => session.admireFor(state.settings.admireSeconds);
+
 async function hatchShow(item) {
   const name = petName(item, t.lang);
   const palette = SPECIES[appearanceOf(item).species]?.palette ?? [];
@@ -1333,27 +1391,14 @@ async function hatchShow(item) {
     await wait(300);
     arrive();
     el.feedback.textContent = t('hatch.hello', { name });
-    await wait(1200);
+    // The look is a pause, not an animation. A child who wants less motion does not want
+    // less time to see what they have just been given.
+    await admire(admireTimes().hatchMs);
     return;
   }
 
-  let skipped = false;
-  let release = () => {};
-  const skip = new Promise((resolve) => {
-    const onDown = () => {
-      skipped = true;
-      resolve();
-    };
-    el.petStage.addEventListener('pointerdown', onDown);
-    release = () => el.petStage.removeEventListener('pointerdown', onDown);
-  });
-
-  /** A beat a tap can cut short. False once the child has asked to get on with it. */
-  const beat = async (ms) => {
-    if (skipped) return false;
-    await Promise.race([wait(ms), skip]);
-    return !skipped;
-  };
+  const beats = skippableBeats();
+  const beat = (ms) => beats.beat(ms);
 
   try {
     // The build-up: a twitch that grows into something trying to get out.
@@ -1372,7 +1417,7 @@ async function hatchShow(item) {
       }
     }
 
-    if (!skipped) {
+    if (!beats.skipped) {
       // The shell gives, and the cloud takes over.
       el.petStage.querySelector('.pet')?.classList.add('egg-burst');
       audio.play('poof');
@@ -1383,24 +1428,33 @@ async function hatchShow(item) {
       await beat(500);
     }
   } finally {
-    release();
+    beats.release();
   }
 
   arrive();
-  // A held breath before the cheer, so the pet is met before it is celebrated. A child who
-  // skipped still gets that moment — just a shorter one.
-  if (skipped) {
-    await wait(500);
+  // The ending gets its own tap-to-skip, and it starts *here* rather than after the held
+  // breath below. A child jabbing at the screen the instant the pet appears is asking to move
+  // on, and a tap that lands in the gap before the listener exists does nothing, which they
+  // read as the game ignoring them.
+  const ending = skippableBeats();
+  try {
+    // A held breath before the cheer, so the pet is met before it is celebrated. A child who
+    // skipped the shell still gets that moment — just a shorter one.
+    await ending.beat(beats.skipped ? 500 : 700);
     confetti(el.petStage, el.fx, { power: 1.8 });
     el.feedback.textContent = t('hatch.hello', { name });
-    await wait(900);
-    return;
+    // However impatient they are, long enough to read the name of the thing they have just
+    // been given. Only what is left over after that can be tapped away.
+    await wait(NAME_READ_MS);
+    await ending.beat(Math.max(0, admireTimes().hatchMs - NAME_READ_MS));
+  } finally {
+    ending.release();
   }
-  await wait(700);
-  confetti(el.petStage, el.fx, { power: 1.8 });
-  el.feedback.textContent = t('hatch.hello', { name });
-  await wait(500);
 }
+
+// The pet says its name once, and that is the only time it is said. Everything else in the
+// ending can be cut short; this cannot.
+const NAME_READ_MS = 400;
 
 /**
  * The wrong-answer path. No red, no cross, no buzzer: the hands simply walk from where
@@ -2392,8 +2446,9 @@ function applyLanguage() {
 
   applySound(); // its label is a string too
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
-  // Filled in by hand rather than from `data-i18n`, so it has to be redrawn by hand too.
+  // Filled in by hand rather than from `data-i18n`, so they have to be redrawn by hand too.
   renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+  renderAdmire(state.settings.admireSeconds);
   buildAnswerModeOptions();
   buildKeypad(); // its digits carry spoken labels, which are strings like any other
   for (const slot of writeSlots) {
@@ -2448,6 +2503,7 @@ function openSettings() {
   el.playMinutes.value = String(limits.minutes);
   renderWalkSpeed(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
   el.walkInstant.checked = Boolean(state.settings.walkInstant);
+  renderAdmire(state.settings.admireSeconds);
   setTransferStatus('');
   el.playMinutesValue.textContent = t('settings.playTimeValue', { n: limits.minutes });
   el.settings.hidden = false;
@@ -2491,6 +2547,26 @@ el.playMinutes.addEventListener('input', () => {
   el.playMinutesValue.textContent = t('settings.playTimeValue', {
     n: session.limitsFor(el.playMinutes.value).minutes,
   });
+});
+
+/** How long a new pet stays on screen, in seconds, shown as seconds. */
+function renderAdmire(seconds) {
+  const times = session.admireFor(seconds);
+  el.admireSeconds.value = String(times.seconds);
+  el.admireSecondsValue.textContent = t('settings.admireValue', {
+    n: times.seconds.toFixed(1),
+  });
+}
+
+// Live label while dragging; the setting lands on `change`, like the two sliders below it.
+el.admireSeconds.addEventListener('input', () => {
+  renderAdmire(el.admireSeconds.value);
+});
+
+el.admireSeconds.addEventListener('change', () => {
+  state.settings.admireSeconds = session.admireFor(el.admireSeconds.value).seconds;
+  renderAdmire(state.settings.admireSeconds);
+  save();
 });
 
 /**

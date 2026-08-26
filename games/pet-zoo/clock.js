@@ -55,18 +55,94 @@ export function inferHour(deg, m) {
   return h === 0 ? 12 : h;
 }
 
+// How long each hand is, as a fraction of the face's radius. The pixel lengths live in
+// main.js, which is what draws them; these are the defaults so that a caller — or a test —
+// that does not care about the exact geometry still gets the real proportions.
+export const HOUR_REACH = 100 / 180;
+export const MINUTE_REACH = 150 / 180;
+
+// How far past its own tip a hand can still be grabbed, again as a fraction of the radius.
+// This is the radius of the invisible `.hand-grip` circle main.js already draws at each tip,
+// so the reach is the grab target the art itself declares rather than a number picked here.
+export const GRIP_REACH = 40 / 180;
+
+// Inside this the angle means nothing — every direction is a hair's breadth from the pin.
+export const PIN_DEAD_ZONE = 0.18;
+
+// And outside this we are off the face altogether.
+export const FACE_LIMIT = 1.15;
+
+// How near two distances have to be before the hands count as stacked. Small enough that it
+// only catches hands that really are on top of each other, large enough to swallow the
+// last-bit disagreement between two distances that are both, mathematically, zero.
+const TIE = 1;
+
 /**
- * Which hand did a pointer at (dx, dy) from the centre mean to grab? Radius decides it
- * outright near the middle and near the rim; in the ambiguous ring the closer hand wins.
- * `radius` is the face radius in the same units as dx/dy.
+ * How far the pointer is from one hand, treating the hand as what it looks like: a line
+ * segment from the pin out to its tip. Returns null for a hand that is not there to be
+ * grabbed — the pointer has run past its tip by more than the grip allows.
  */
-export function pickHand({ dx, dy, radius, hourDeg, minuteDeg }) {
-  const r = Math.hypot(dx, dy) / radius;
-  if (r < 0.18 || r > 1.15) return null; // dead centre, or outside the face
-  if (r < 0.55) return 'hour';
-  if (r > 0.72) return 'minute';
-  const deg = angleOf(dx, dy);
-  return angularDistance(deg, hourDeg) <= angularDistance(deg, minuteDeg) ? 'hour' : 'minute';
+function distanceToHand(dx, dy, deg, len, grip) {
+  if (len <= 0) return null;
+  const rad = ((deg - 90) * Math.PI) / 180;
+  const tipX = Math.cos(rad) * len;
+  const tipY = Math.sin(rad) * len;
+  // How far along the hand the pointer lies. Negative means behind the pin.
+  const along = (dx * tipX + dy * tipY) / len;
+  if (along > len + grip) return null;
+  const t = Math.max(0, Math.min(along, len)) / len;
+  return Math.hypot(dx - tipX * t, dy - tipY * t);
+}
+
+/**
+ * Which hand did a pointer at (dx, dy) from the centre mean to grab?
+ *
+ * Whichever one it is nearest to, measuring each hand as the segment it is drawn as. That
+ * single number carries both the things that matter — how far out the pointer is and which
+ * way it is pointing — so there are no bands and no thresholds to fall between.
+ *
+ * This replaced a rule that decided by radius alone outside a narrow ring, and the reason is
+ * worth keeping: the hour hand's tip sits at 0.56 of the radius, so "closer in than that means
+ * the hour hand" claimed almost the whole face. A child with a finger dead on the minute hand,
+ * anywhere in the inner half, got the hour hand instead — which is not a corner case, it is
+ * most of the times you would want the minute hand.
+ *
+ * Two rules sit on top of the measurement:
+ *
+ *   A hand cannot be grabbed past its own tip (plus the grip), because there is nothing drawn
+ *   there to grab. Without this the hour hand would be pickable along the empty line beyond
+ *   itself, all the way to the rim.
+ *
+ *   When the hands are stacked — 12:00, say — both distances are zero and only the radius is
+ *   left to go on: low on the stack is the hour hand, high on it is the part only the minute
+ *   hand reaches. Floating point makes those two zeroes differ in the last bits, so the tie
+ *   has to be caught deliberately rather than left to a comparison.
+ *
+ * `radius` is the face radius in the same units as dx/dy; the lengths default to the
+ * proportions the face is actually drawn at.
+ */
+export function pickHand({
+  dx,
+  dy,
+  radius,
+  hourDeg,
+  minuteDeg,
+  hourLen = radius * HOUR_REACH,
+  minuteLen = radius * MINUTE_REACH,
+  grip = radius * GRIP_REACH,
+}) {
+  const r = Math.hypot(dx, dy);
+  if (r < radius * PIN_DEAD_ZONE || r > radius * FACE_LIMIT) return null;
+
+  const toHour = distanceToHand(dx, dy, hourDeg, hourLen, grip);
+  const toMinute = distanceToHand(dx, dy, minuteDeg, minuteLen, grip);
+  if (toHour === null && toMinute === null) return null;
+  if (toHour === null) return 'minute';
+  if (toMinute === null) return 'hour';
+
+  // Too close to call: the hands are on top of each other, so the radius decides.
+  if (Math.abs(toHour - toMinute) < TIE) return r <= hourLen ? 'hour' : 'minute';
+  return toHour < toMinute ? 'hour' : 'minute';
 }
 
 export const timeId = (h, m) => `${h}:${String(m).padStart(2, '0')}`;
