@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pet Zoo</title>
-    <script type="module" crossorigin src="/games/pr-previews/pr-32/assets/games/pet-zoo-DtIdt0V_.js"></script>
+    <script type="module" crossorigin src="/games/pr-previews/pr-32/assets/games/pet-zoo-WH5e9WE8.js"></script>
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/recognize-DolGw8_D.js">
-    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/yard-DuxflAOZ.js">
+    <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/yard-B5e84WGE.js">
     <link rel="modulepreload" crossorigin href="/games/pr-previews/pr-32/assets/pad-C9HCjdes.js">
-    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-32/assets/pet-zoo-4vs2XTwA.css">
+    <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-32/assets/pet-zoo-CIcFexaX.css">
     <link rel="stylesheet" crossorigin href="/games/pr-previews/pr-32/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -282,6 +282,44 @@
           </div>
           <p class="setting-help" data-i18n="settings.mirrorNudgeHelp">
             Av til å begynne med.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-head">
+            <label class="setting-label" for="walk-speed" data-i18n="settings.walkSpeed">
+              Fart på utregningen
+            </label>
+            <output id="walk-speed-value" class="setting-value" for="walk-speed"></output>
+          </div>
+          <input
+            id="walk-speed"
+            class="setting-range"
+            type="range"
+            min="0"
+            max="4"
+            step="1"
+            value="2"
+          />
+          <p class="setting-help" data-i18n="settings.walkSpeedHelp">
+            Når et stykke i oppstilling blir feil, regnes det ut på skjermen kolonne for
+            kolonne. Her bestemmer du hvor lenge den venter på hver kolonne. Rolig først —
+            det er lettere å skru opp farten siden enn å oppdage at barnet ikke rakk å se
+            hva som skjedde.
+          </p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-toggle">
+            <label class="setting-label" for="walk-instant" data-i18n="settings.walkInstant">
+              Hopp over utregningen
+            </label>
+            <input id="walk-instant" class="setting-switch" type="checkbox" />
+          </div>
+          <p class="setting-help" data-i18n="settings.walkInstantHelp">
+            Av til vanlig. Med den på vises bare det ferdige svaret, uten å regne det ut. Da
+            får barnet vite at det ble feil, men ikke hvorfor — så dette er for en som
+            allerede kan oppstilling godt.
           </p>
         </div>
 
