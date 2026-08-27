@@ -39,6 +39,7 @@ import {
   tierMastery,
 } from './subjects/index.js';
 import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
+import { arrayDuration, arraySvg, ROW_STEP_SCALE } from './array.js';
 import {
   columnWalkHtml,
   DEFAULT_WALK_SPEED,
@@ -477,21 +478,35 @@ const EGG_PROMPTS = ['prompt.egg', 'prompt.egg1', 'prompt.egg2'];
 // is…" both lead into something written on one line, which a stacked sum is not.
 const SUM_EGG_PROMPTS = ['prompt.sumEgg', 'prompt.sumEgg1', 'prompt.sumEgg2'];
 const COLUMN_EGG_PROMPTS = ['prompt.colEgg', 'prompt.colEgg1', 'prompt.colEgg2'];
+// And a fourth set for the missing factor, because every line above leads into "what is…",
+// and this one is not asking what something is — it is asking which number is not there.
+const GAP_EGG_PROMPTS = ['prompt.gapEgg', 'prompt.gapEgg1', 'prompt.gapEgg2'];
 
 /** An item answered by writing digits rather than by dragging hands. */
 const isSum = (item) => (item?.subject ?? DEFAULT_SUBJECT) === math.id;
 
+/** Which of the four families of prompt line an item is asked with. */
+const promptKindOf = (item) => (isSum(item) ? (current?.layout ?? 'inline') : 'clock');
+
 function promptFor(item) {
   const sum = isSum(item);
-  const column = sum && current?.layout === 'column';
+  const kind = promptKindOf(item);
   if (item.hatchedAt === null) {
-    const prompts = column ? COLUMN_EGG_PROMPTS : sum ? SUM_EGG_PROMPTS : EGG_PROMPTS;
+    const prompts =
+      kind === 'column'
+        ? COLUMN_EGG_PROMPTS
+        : kind === 'gap'
+          ? GAP_EGG_PROMPTS
+          : sum
+            ? SUM_EGG_PROMPTS
+            : EGG_PROMPTS;
     return { line: t(prompts[Math.min(item.cracks ?? 0, prompts.length - 1)]), button: t('button.warm') };
   }
   const name = petName(item, t.lang);
   const state_ =
     item.phase === 'learning' ? 'Forgot' : item.dueAt <= now() ? 'Hungry' : 'Snack';
-  const key = column ? `prompt.col${state_}` : sum ? `prompt.sum${state_}` : `prompt.${state_.toLowerCase()}`;
+  const prefix = kind === 'column' ? 'col' : kind === 'gap' ? 'gap' : sum ? 'sum' : null;
+  const key = prefix ? `prompt.${prefix}${state_}` : `prompt.${state_.toLowerCase()}`;
   return { line: t(key, { name }), button: t('button.feed', { name }) };
 }
 
@@ -620,6 +635,17 @@ function buildKeypad() {
 
 const emptyBoxes = (width) => new Array(width).fill(null);
 
+// Typographic, not ASCII: a minus sign is not a hyphen and a multiplication sign is not the
+// letter x. The ids stay ASCII (see times.js) — this is only what a child reads.
+const OP_SIGNS = {
+  '+': '<i class="op">+</i>',
+  '-': '<i class="op">−</i>',
+  '×': '<i class="op">×</i>',
+};
+
+/** The same signs as plain text, for a collar or a caption. */
+const OP_TEXT = { '+': '+', '-': '−', '×': '×' };
+
 /** The answer as the graders want it: digits, in order, with blanks contributing nothing. */
 const answerText = (c) => (c?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
 
@@ -671,9 +697,17 @@ function renderAnswer() {
       carries: carryMarkup(),
       width: current.width,
     });
+  } else if (current.layout === 'gap') {
+    // The strip stands inside the equation rather than after it, on whichever side of the sign
+    // `shownForm` put the blank. The product is on the right, where the child is going.
+    const { a, b, gapSwapped } = current.shown;
+    const strip = `<span class="gap-slots">${slots.join('')}</span>`;
+    const written = gapSwapped ? `${strip}${OP_SIGNS['×']}${a}` : `${a}${OP_SIGNS['×']}${strip}`;
+    el.promptSum.innerHTML = `${written}<i class="op">=</i>${a * b}`;
   } else {
     const { op, a, b } = current.shown;
-    el.promptSum.innerHTML = `${a}<i class="op">${op === '-' ? '−' : '+'}</i>${b}<i class="op">=</i>${slots.join('')}`;
+    const strip = `<span class="ans-slots">${slots.join('')}</span>`;
+    el.promptSum.innerHTML = `${a}${OP_SIGNS[op] ?? OP_SIGNS['+']}${b}<i class="op">=</i>${strip}`;
   }
   el.promptSum.setAttribute('aria-label', `${spoken} = ${said}`);
   el.submit.disabled = locked || !isComplete(current);
@@ -1006,7 +1040,15 @@ document.addEventListener('keydown', (event) => {
  * so both are shown exactly as they came.
  */
 function shownForm(question) {
-  const swap = question.op === '+' && !question.column && Math.random() < 0.5;
+  // A product turns round for the same reason a sum does, and a missing factor turns round
+  // too — but there the swap moves the *blank*, from the right of the sign to the left of it,
+  // and leaves the number the child was given and the number they are hunting exactly as they
+  // were. `gapSwapped` is what the renderer reads to know which side the strip stands on.
+  if (question.gap) {
+    return Math.random() < 0.5 ? { ...question, gapSwapped: true } : question;
+  }
+  const commutes = question.op === '+' || question.op === '×';
+  const swap = commutes && !question.column && Math.random() < 0.5;
   return swap ? { ...question, a: question.b, b: question.a } : question;
 }
 
@@ -1097,6 +1139,13 @@ const MATH_VERDICTS = {
   addedInstead: 'teach.colAddedInstead',
   subtractedInstead: 'teach.colSubtractedInstead',
   placeValueOff: 'teach.colPlaceValueOff',
+  mulGaveSum: 'teach.mulGaveSum',
+  mulGaveFactor: 'teach.mulGaveFactor',
+  mulOffByOneRow: 'teach.mulOffByOneRow',
+  mulNeighbour: 'teach.mulNeighbour',
+  gapGaveProduct: 'teach.gapGaveProduct',
+  gapGaveFactor: 'teach.gapGaveFactor',
+  gapTookAway: 'teach.gapTookAway',
 };
 
 /**
@@ -1118,6 +1167,18 @@ function sumTeachLine(result) {
       b: question.b,
       total: question.op === '-' ? question.a - question.b : question.a + question.b,
     });
+  }
+  if (question.op === '×') {
+    const { a, b, gap } = question;
+    const product = a * b;
+    // A missing factor closes on the product it is the flip side of — "you know 7 × 8 = 56, so
+    // the missing number is 8". That is a sentence about something already mastered rather
+    // than a new rule to hold, exactly as a difference closes on its addition partner.
+    if (gap) {
+      const { a: small, b: large } = math.times.partnerOf({ a, b });
+      return opening + t('teach.gapFamily', { a, b, product, small, large });
+    }
+    return opening + t('teach.mulPlain', { a, b, product });
   }
   if (question.op === '-') {
     const { a, b } = question;
@@ -1488,6 +1549,21 @@ async function correctSum(target, result) {
     });
     // A still frame still needs long enough to be read, and a longer sum needs longer.
     await wait(instant ? 1200 + walkWidth(question) * 300 : walkDuration(question, step));
+  } else if (question.op === '×') {
+    // The array, counted out a row at a time — "eight, sixteen, twenty-four" — which is the
+    // multiplying counterpart of the column walkthrough and takes its pace from the same
+    // setting, for the same reason: how long a child needs to watch is a fact about the child.
+    //
+    // A missing factor is shown as the array it is hunting for: the rows are the factor they
+    // were given, and the answer is how long each row turned out to be.
+    const instant = still || Boolean(state.settings.walkInstant);
+    const step = stepFor(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED) * ROW_STEP_SCALE;
+    const { a, b } = question;
+    el.tenframeHost.innerHTML = arraySvg(a, b, {
+      step: instant ? 0 : step,
+      title: t.spokenQuestion(question),
+    });
+    await wait(instant ? 1200 + a * 120 : arrayDuration(a, b, step));
   } else {
     const { op = '+', a, b } = question;
     el.tenframeHost.innerHTML = tenFrameSvg(a, b, {
@@ -1638,9 +1714,13 @@ function penCollar(item, digits) {
     // Not hidden behind the digital setting, unlike the clock's: the question is the question,
     // and seeing it gives the answer away no more than the pet's name does. A skill's pet
     // wears the name of its method instead — there is no one sum to wear.
+    // A missing-factor pet wears its question with the gap still in it: the pair alone would
+    // be the product's collar, and the two pets would be indistinguishable in the grid.
     const label = item.skill
       ? escape(t(`skill.${item.skill}`))
-      : `${item.a} ${item.op === '-' ? '−' : '+'} ${item.b}`;
+      : item.gap
+        ? `${item.a} × ? = ${item.a * item.b}`
+        : `${item.a} ${OP_TEXT[item.op] ?? OP_TEXT['+']} ${item.b}`;
     return `<span class="collar-sum">${label}</span>`;
   }
   return `${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}`;

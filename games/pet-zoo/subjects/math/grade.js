@@ -13,6 +13,7 @@
 
 import * as columns from './columns.js';
 import { grade as gradeFact } from './facts.js';
+import { ALL_TIMES_VERDICTS, grade as gradeTimes } from './times.js';
 
 /** Every verdict a fact can come back with. Exported so the language test can insist each one
  *  has a sentence to say, in both languages. */
@@ -46,7 +47,11 @@ export const COLUMN_VERDICTS = [
   'wrong',
 ];
 
-export const ALL_VERDICTS = [...new Set([...FACT_VERDICTS, ...COLUMN_VERDICTS])];
+// The one list the language test walks, so a new verdict without a sentence fails there rather
+// than showing a child a raw key. The times tables declare their own beside their grader.
+export const ALL_VERDICTS = [
+  ...new Set([...FACT_VERDICTS, ...COLUMN_VERDICTS, ...ALL_TIMES_VERDICTS]),
+];
 
 // Tried in order, first match wins, so the list is also a statement about which explanation is
 // the most useful one when two of them happen to produce the same number.
@@ -75,6 +80,9 @@ const WRONG_WAYS = {
  * column sum — and `answer` is what the strip says, as a string of digits.
  */
 export function grade(question, answer) {
+  // Before the column check, and before the fact grader — which reads any operator that is not
+  // a minus as a plus, and would happily tell a child that 7 × 8 is fifteen.
+  if (question?.op === '×') return gradeTimes(question, answer);
   if (!question?.column) return gradeFact(question ?? {}, answer);
   return gradeColumn(question, answer);
 }

@@ -250,6 +250,21 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  /* `10 × 10 =` followed by three boxes is the widest thing the game ever writes on one line,
+     and on a narrow phone it does not fit beside the pet. Rather than shrinking the type — the
+     equation is the thing the child is reading — the answer strip drops onto a second line,
+     which is where a child would write it anyway. The strip is wrapped in one span so it moves
+     whole: two boxes above and one below would read as two different numbers. */
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.sum .ans-slots,
+.sum .gap-slots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .sum .op {
@@ -577,6 +592,53 @@ main {
 @keyframes tf-lift {
   from { opacity: 1; transform: none; }
   to   { opacity: 0.12; transform: translateY(-9px) scale(0.55); }
+}
+
+/* ------------------------------------------------------------ the array */
+
+/* The multiplying counterpart of the ten-frame: rows of dots arriving one row at a time, with
+   the running total beside each finished row. Same vocabulary as the ten-frame deliberately —
+   the same colour of dot, the same drop, the same delay-as-custom-property — so the two
+   pictures read as two things the game says rather than two things it was taught to say. */
+.dotarray {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  /* A ten-row array stands 208px tall, which is the tallest this ever gets. */
+  max-height: 240px;
+  margin: 0 auto;
+}
+
+.ar-dot {
+  fill: var(--pz-accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tf-drop 0.3s ease-out backwards;
+  animation-delay: var(--ar-delay, 0s);
+}
+
+/* The running total is the skip-counting written down — quieter than the dots, because it
+   describes them rather than being them. */
+.ar-total {
+  fill: var(--pz-ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  animation: ar-fade 0.28s ease-out backwards;
+  animation-delay: var(--ar-delay, 0s);
+}
+
+/* Except the last one, which is the answer. */
+.ar-total.ar-last {
+  fill: var(--pz-good);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@keyframes ar-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* --------------------------------------------------------------- columns */
@@ -2276,6 +2338,11 @@ body.in-habitat .zoo-bar {
   .tf-gone {
     animation: none;
     opacity: 0.12;
+  }
+
+  .ar-dot,
+  .ar-total {
+    animation: none;
   }
 
   .colwalk.is-walking .cw-lit,
