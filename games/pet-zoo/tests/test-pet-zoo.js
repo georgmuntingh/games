@@ -103,6 +103,7 @@ import * as mathFacts from '../subjects/math/facts.js';
 import * as mathSkills from '../subjects/math/skills.js';
 import * as mathColumns from '../subjects/math/columns.js';
 import * as mathTimes from '../subjects/math/times.js';
+import { mulWalkHtml, stackedMulMarkup } from '../column.js';
 import { ALL_VERDICTS } from '../subjects/math/grade.js';
 import { arrayPlan, arraySvg } from '../array.js';
 import {
@@ -3700,9 +3701,9 @@ test('every answer in the deck fits in the strip', () => {
 
 describe('maths — the whole ladder');
 
-test('thirty-one rungs, in six groups, with nothing left out of either', () => {
-  assertEqual(addSubject.TIERS.length, 31);
-  assertEqual(addSubject.LAST_TIER, 30);
+test('thirty-seven rungs, in seven groups, with nothing left out of either', () => {
+  assertEqual(addSubject.TIERS.length, 37);
+  assertEqual(addSubject.LAST_TIER, 36);
   const grouped = addSubject.GROUPS.flatMap((group) => group.tiers);
   assertEqual(grouped.join(), addSubject.TIERS.map((tier) => tier.id).join(), 'a rung fell out of its group');
   assertEqual(new Set(grouped).size, grouped.length, 'a rung is in two groups at once');
@@ -4355,14 +4356,17 @@ test('growing the ladder left every pet a child already has exactly where it was
     const p = portraitOf(item);
     assertEqual(`${p.key} ${p.species} ${p.index}`, expected, 'a pet moved');
   }
-  // And structurally, not only by sample: nothing multiplied appears before the two hundred
-  // and four items that were there first.
-  const older = addSubject.ALL_ITEMS.slice(0, 204);
-  assertEqual(older.length, 204);
-  assert(older.every((entry) => entry.op !== '×'), 'a times fact was inserted rather than appended');
+  // And structurally, not only by sample: every addition of new material has gone on the end.
+  // The first two hundred and four items are the sums, differences and methods that were there
+  // before the times tables; the hundred and fifty-five after them are the times deck; and the
+  // stacked multiplication skills come after that.
+  const items = addSubject.ALL_ITEMS;
+  assert(items.slice(0, 204).every((entry) => entry.op !== '×'), 'a times fact was inserted rather than appended');
+  assertEqual(items.slice(204, 359).filter((entry) => entry.op === '×' && !entry.skill).length, 155,
+    'the times deck moved');
   assert(
-    addSubject.ALL_ITEMS.slice(204).every((entry) => entry.op === '×'),
-    'something other than the times tables was appended'
+    items.slice(359).every((entry) => Boolean(entry.skill)),
+    'something other than the column-multiplication skills was appended'
   );
 });
 
@@ -4406,6 +4410,184 @@ test('every product in the deck can be drawn, and drawn the same way twice', () 
   assert(arraySvg(3, 4, { step: 0 }).includes('--ar-delay:0.00s'), 'a still frame still waits');
 });
 
+describe('maths — multiplying with the numbers stacked');
+
+test('six rungs, and the shift is taught before it is needed', () => {
+  const rungs = [31, 32, 33, 34, 35, 36].map((tier) => addSubject.tierItems(tier));
+  assert(rungs.every((rows) => rows.length === 1), 'a rung holds something other than one method');
+  assertEqual(
+    rungs.flat().map((entry) => entry.skill).join(' '),
+    'tensx colx21 colx21c colx31c colx22 colx32',
+    'the rungs are not in teaching order'
+  );
+  // Multiplying by a whole ten comes first and is written on one line, because it is the
+  // observation the shift rests on rather than a use of it.
+  assert(!mathSkills.isColumn('tensx'), 'the whole-tens rung should be inline');
+  assert(mathSkills.isColumn('colx22'), 'the two-by-two rung should be stacked');
+});
+
+test('the rows are the method: two partial products and their total', () => {
+  assertEqual(mathColumns.mulRows(47, 38).join(), '376,1410,1786');
+  // Written with its zeros on the end, not indented — the notation this game teaches.
+  assertEqual(mathColumns.mulRows(247, 38).join(), '1976,7410,9386');
+  // A single-digit multiplier has nothing to add up, so its answer is the one row.
+  assertEqual(mathColumns.mulRows(47, 8).join(), '376');
+  assertEqual(addSubject.answerRows({ skill: 'colx32' }).join(), '4,5,5');
+  assertEqual(addSubject.answerRows({ skill: 'colx22' }).join(), '3,4,4');
+  assertEqual(addSubject.answerRows({ skill: 'colx21c' }).join(), '3');
+});
+
+test('the working never says how big the answer is going to be', () => {
+  // Rows and widths are a property of the skill, so the strip is the same shape whatever
+  // numbers get drawn — a stack that narrowed for a small product would hand it over.
+  for (const skill of ['tensx', 'colx21', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    const rows = addSubject.answerRows({ skill });
+    const seen = new Set();
+    for (let seed = 1; seed <= 80; seed += 1) {
+      const q = mathSkills.generate(skill, { seed });
+      seen.add(addSubject.answerRows({ skill }).join());
+      // And every question really does fit in the boxes it is given.
+      const wanted = mathColumns.mulRows(q.a, q.b);
+      if (!mathSkills.isColumn(skill)) {
+        assert(String(q.a * q.b).length <= mathSkills.widthOf(skill), `${skill} overflows its strip`);
+        continue;
+      }
+      assertEqual(wanted.length, rows.length, `${skill} drew ${wanted.length} rows for ${rows.length}`);
+      wanted.forEach((value, i) => {
+        assert(String(value).length <= rows[i], `${skill}: ${q.a}x${q.b} row ${i} overflows`);
+      });
+    }
+    assertEqual(seen.size, 1, `${skill} changes shape with its numbers`);
+  }
+});
+
+test('no question on these rungs multiplies by one, or by a whole ten', () => {
+  // A multiplier ending in zero would ask for a row of zeros to be written out, and whole tens
+  // are tier 31's own question. "23 x 1" is not a question about a method at all.
+  for (const skill of ['colx21', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const q = mathSkills.generate(skill, { seed });
+      assert(q.b % 10 !== 0, `${skill} drew ${q.a} x ${q.b}`);
+      assert(q.b !== 1, `${skill} drew a multiplier of one`);
+    }
+  }
+});
+
+test('every step of the method agrees with the answer it comes to', () => {
+  for (const skill of ['colx21', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const { a, b } = mathSkills.generate(skill, { seed });
+      const { partials, total } = mathColumns.mulSteps(a, b);
+      assertEqual(total, a * b, `${a} x ${b}`);
+      // Each partial product is its own run down the multiplicand, carries and all.
+      for (const partial of partials) {
+        const built = mathColumns.fromDigits(partial.steps.map((step) => step.digit));
+        assertEqual(built, a * partial.digit, `${a} x ${partial.digit}`);
+        // A carry out of one column is the carry into the next, never anywhere else.
+        partial.steps.forEach((step, i) => {
+          assertEqual(step.carryIn, i === 0 ? 0 : partial.steps[i - 1].carryOut, 'a carry went astray');
+          assertEqual(step.top * step.by + step.carryIn, step.carryOut * 10 + step.digit);
+        });
+      }
+      assertEqual(partials.reduce((sum, p) => sum + p.value, 0), a * b, 'the rows do not add up');
+    }
+  }
+});
+
+test('each column-multiplication mistake is named, by running the mistake', () => {
+  const verdict = (q, answer) => addSubject.grade(q, answer).verdict;
+  const stacked = (a, b) => ({ op: '×', a, b, column: true });
+
+  const one = stacked(47, 8); // one row: 376
+  assertEqual(verdict(one, ['376']), 'correct');
+  assertEqual(verdict(one, [String(mathColumns.carriedBeforeMultiplying(47, 8))]), 'mulCarriedFirst');
+  assertEqual(verdict(one, [String(mathColumns.wroteFullProductInColumn(47, 8))]), 'mulFullProductInColumn');
+  assertEqual(verdict(one, [String(mathColumns.forgotMulCarry(47, 8))]), 'mulForgotColCarry');
+  assertEqual(verdict(one, ['55']), 'mulAddedInstead');
+  assertEqual(verdict(one, ['375']), 'offByOne');
+  assertEqual(verdict(one, ['476']), 'placeValueOff');
+  for (const empty of [null, undefined, '', 'x', -1]) {
+    assertEqual(verdict(one, [empty]), 'blank', `${JSON.stringify(empty)} became an answer`);
+  }
+
+  const two = stacked(47, 38); // 376, 1410, 1786
+  assertEqual(verdict(two, ['376', '1410', '1786']), 'correct');
+  // The famous one: the second row is right but sitting under the ones.
+  assertEqual(verdict(two, ['376', '141', '517']), 'mulForgotShift');
+  assertEqual(verdict(two, ['376', '141', String(mathColumns.forgotShift(47, 38))]), 'mulForgotShift');
+  assertEqual(verdict(two, ['376', '0', '376']), 'mulOnlyOnes');
+
+  // A wrong way that happens to give the right answer is a coincidence, not a mistake.
+  assertEqual(verdict(stacked(12, 4), ['48']), 'correct', '12 x 4 has no carry to forget');
+});
+
+test('every row has to be right, and the grader says which one was not', () => {
+  const two = { op: '×', a: 47, b: 38, column: true };
+  const right = addSubject.grade(two, ['376', '1410', '1786']);
+  assert(right.correct);
+  assertEqual(right.rows.join(), 'true,true,true');
+
+  // Multiplied correctly and then added the two rows up wrongly: not finished, so not right.
+  const badTotal = addSubject.grade(two, ['376', '1410', '1785']);
+  assert(!badTotal.correct, 'a wrong total passed');
+  assertEqual(badTotal.row, 2, 'the total is the row that went wrong');
+  assertEqual(badTotal.verdict, 'offByOne');
+
+  const badFirst = addSubject.grade(two, ['370', '1410', '1780']);
+  assertEqual(badFirst.row, 0, 'the first wrong row is the one to walk');
+  assert(!badFirst.correct);
+});
+
+test('the walkthrough walks one row, and draws the rest finished', () => {
+  const q = { op: '×', a: 247, b: 38 };
+  const rows = [0, 1, 2].map((row) => mulWalkHtml(q, { row, width: 5, step: 1 }));
+  for (const html of rows) {
+    // Every row of the stack is on screen, whichever one is moving.
+    assertEqual((html.match(/cw-answer/g) ?? []).length, 3, 'a row of the working went missing');
+    assertEqual((html.match(/cw-rule/g) ?? []).length, 2, 'the second rule went missing');
+    assert(html.includes('cw-lands'), 'nothing is being walked at all');
+  }
+  // Carries belong to a partial product; the final addition has none to show.
+  assert(rows[0].includes('cw-mark'), 'the first row shows no carries');
+  assert(!rows[2].includes('cw-mark'), 'the total should not claim carries of its own');
+  // A single-digit multiplier is one row and one rule.
+  const single = mulWalkHtml({ op: '×', a: 47, b: 8 }, { row: 0, width: 3, step: 1 });
+  assertEqual((single.match(/cw-rule/g) ?? []).length, 1);
+});
+
+test('the stacked question offers somewhere to write every carry', () => {
+  const cell = (n) => Array.from({ length: n }, () => '<span class="slot"></span>');
+  const html = stackedMulMarkup(
+    { a: 247, b: 38 },
+    {
+      width: 5,
+      rows: [
+        { slots: cell(4), carries: cell(5) },
+        { slots: cell(5), carries: cell(5) },
+        { slots: cell(5) },
+      ],
+    }
+  );
+  // One carry row per partial product, and none for the final addition — which is column
+  // addition, taught eighteen rungs below this one.
+  assertEqual((html.match(/cw-carries/g) ?? []).length, 2);
+  assertEqual((html.match(/cw-answer/g) ?? []).length, 3);
+  assertEqual((html.match(/cw-rule/g) ?? []).length, 2);
+  assertEqual(addSubject.carryRows({ skill: 'colx32' }, { column: true, op: '×', a: 247, b: 38 }), 2);
+  assertEqual(addSubject.carryRows({ skill: 'colx21c' }, { column: true, op: '×', a: 47, b: 8 }), 1);
+  assertEqual(addSubject.carryRows({ op: '×', a: 7, b: 8 }, { op: '×', a: 7, b: 8 }), 0);
+});
+
+test('a stack of working is given longer than a single line of it', () => {
+  // Three rows to write is not one row to write, and without this the scheduler would read
+  // every correct answer on the last rung as a hesitant one.
+  assert(
+    addSubject.paceOf({ skill: 'colx32' }) > addSubject.paceOf({ skill: 'col+3' }),
+    'a three-row multiplication is not given longer than a column sum'
+  );
+  assert(addSubject.paceOf({ skill: 'colx21c' }) <= addSubject.paceOf({ skill: 'colx32' }));
+});
+
 describe('maths — every mistake has something to say about it');
 
 test('every verdict has a sentence, in both languages', () => {
@@ -4436,6 +4618,12 @@ test('every verdict has a sentence, in both languages', () => {
     gapGaveProduct: 'teach.gapGaveProduct',
     gapGaveFactor: 'teach.gapGaveFactor',
     gapTookAway: 'teach.gapTookAway',
+    mulForgotShift: 'teach.mulColForgotShift',
+    mulCarriedFirst: 'teach.mulColCarriedFirst',
+    mulFullProductInColumn: 'teach.mulColFullProduct',
+    mulForgotColCarry: 'teach.mulColForgotCarry',
+    mulOnlyOnes: 'teach.mulColOnlyOnes',
+    mulAddedInstead: 'teach.mulColAddedInstead',
   };
   // `correct`, `blank` and `wrong` are the three with nothing to name: they get the plain
   // closing sentence rather than a diagnosis.

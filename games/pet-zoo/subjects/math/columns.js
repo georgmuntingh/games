@@ -66,7 +66,8 @@ export function subSteps(a, b) {
   return steps;
 }
 
-export const answerOf = ({ op, a, b }) => (op === '-' ? a - b : a + b);
+export const answerOf = ({ op, a, b }) =>
+  op === '-' ? a - b : op === '×' ? a * b : a + b;
 
 /* ------------------------------------------------------- the wrong ways round */
 
@@ -158,3 +159,123 @@ export function borrowAcrossZero(a, b) {
 
 /** Whether a question even has a zero for a borrow to reach past. */
 export const hasZeroToCross = (a, b) => borrowAcrossZero(a, b) !== a - b;
+
+/* ------------------------------------------------------------ multiplying */
+
+// Column multiplication is the same idea as column addition — work a place at a time, pass
+// what will not fit next door — carried out twice over: once down the multiplicand for each
+// digit of the multiplier, and then once more to add the partial products up.
+//
+// Two things about it are new, and both are here rather than in the renderer because the
+// walkthrough and the grader must not be able to disagree about them:
+//
+//   * the carry is a *number*, not a one. 9 × 9 is 81, so eight can come out of a column.
+//   * the carry is added *after* multiplying, never before. `carriedBeforeMultiplying` below
+//     is what happens when a child does it the other way round, and it is the commonest
+//     wrong idea in the whole method.
+
+/** The digits of the multiplier, ones first, with the place each one works at. */
+const multiplierDigits = (b) =>
+  digitsOf(b, String(Math.abs(b)).length).map((digit, place) => ({ digit, place }));
+
+/**
+ * One partial product, worked a column at a time: `a × digit`, shifted into `place`.
+ *
+ * `steps` runs ones-first along the multiplicand and is exactly what the walkthrough animates.
+ * `value` is the row as it is *written* — with its zeros on the end, because that is the
+ * notation this game teaches: 47 × 30 is written 1410, not 141 shifted along.
+ */
+export function partialStep(a, digit, place) {
+  const top = digitsOf(a, String(Math.abs(a)).length);
+  const steps = [];
+  let carry = 0;
+  for (const t of top) {
+    const product = t * digit + carry;
+    steps.push({ top: t, by: digit, carryIn: carry, digit: product % 10, carryOut: Math.floor(product / 10) });
+    carry = Math.floor(product / 10);
+  }
+  if (carry) steps.push({ top: 0, by: digit, carryIn: carry, digit: carry, carryOut: 0 });
+  return { digit, place, steps, value: a * digit * 10 ** place };
+}
+
+/**
+ * The whole method: a partial product per multiplier digit, then their total. The one
+ * description of column multiplication in the codebase — `column.js` draws from it and
+ * `grade.js` marks against it.
+ */
+export function mulSteps(a, b) {
+  const partials = multiplierDigits(b).map(({ digit, place }) => partialStep(a, digit, place));
+  return { partials, total: a * b };
+}
+
+/** The rows a stacked multiplication is answered in: each partial product, then the total.
+ *  One row when the multiplier is a single digit — there is nothing to add up. */
+export function mulRows(a, b) {
+  const { partials, total } = mulSteps(a, b);
+  if (partials.length < 2) return [total];
+  return [...partials.map((p) => p.value), total];
+}
+
+/* ------------------------------------------------ and the wrong ways round */
+
+/**
+ * The partial products all correct, and all written under the ones: 47 × 38 comes out as 517
+ * rather than 1786. The single most famous mistake in column multiplication, and the reason
+ * tier 31 teaches multiplying by a whole ten before the shift is ever needed.
+ */
+export const forgotShift = (a, b) =>
+  mulSteps(a, b).partials.reduce((sum, p) => sum + a * p.digit, 0);
+
+/**
+ * The carry added to the next digit *before* multiplying it instead of after: 47 × 8 is
+ * 7 × 8 = 56, write the six and carry five — and then (4 + 5) × 8 = 72 rather than
+ * 4 × 8 + 5 = 37, so the answer comes out 726.
+ */
+export function carriedBeforeMultiplying(a, b) {
+  const partials = multiplierDigits(b).map(({ digit, place }) => {
+    const top = digitsOf(a, String(Math.abs(a)).length);
+    const out = [];
+    let carry = 0;
+    for (const t of top) {
+      const product = (t + carry) * digit;
+      out.push(product % 10);
+      carry = Math.floor(product / 10);
+    }
+    while (carry) {
+      out.push(carry % 10);
+      carry = Math.floor(carry / 10);
+    }
+    return fromDigits(out) * 10 ** place;
+  });
+  return partials.reduce((sum, value) => sum + value, 0);
+}
+
+/** Every digit's whole product written into its own column: 47 × 8 → "32" "56" → 3256. */
+export const wroteFullProductInColumn = (a, b) =>
+  multiplierDigits(b).reduce(
+    (sum, { digit, place }) =>
+      sum +
+      Number(
+        digitsOf(a, String(Math.abs(a)).length)
+          .map((t) => t * digit)
+          .reverse()
+          .join('')
+      ) *
+        10 ** place,
+    0
+  );
+
+/** Each column reduced to its last digit and the carry simply dropped: 47 × 8 → 26. */
+export const forgotMulCarry = (a, b) =>
+  multiplierDigits(b).reduce(
+    (sum, { digit, place }) =>
+      sum + fromDigits(digitsOf(a, String(Math.abs(a)).length).map((t) => (t * digit) % 10)) * 10 ** place,
+    0
+  );
+
+/** Stopped after the ones digit of the multiplier: 47 × 38 → 376. */
+export const multipliedOnlyOnes = (a, b) => a * (Math.abs(b) % 10);
+
+/** The sign read as a plus. Its own verdict rather than the column-addition one, because
+ *  "that is a minus and this one is a plus" is the wrong sentence to say here. */
+export const mulAddedInstead = (a, b) => a + b;

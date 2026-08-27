@@ -17,6 +17,8 @@
 // Pure, and deterministic: the same seed gives the same numbers, which is the only reason any
 // of this is testable.
 
+import { mulSteps } from './columns.js';
+
 export const SKILL_PREFIX = 'skill:';
 
 const SHAPE = /^skill:([a-z0-9+-]+)$/;
@@ -143,6 +145,23 @@ const SKILLS = [
       const ones = between(rnd, 0, 9);
       if (shape === 'minus') return { op: '-', a: between(rnd, 2, 9) * 10 + ones, b: 10 };
       return { op: '+', a: between(rnd, 1, 8) * 10 + ones, b: 10 };
+    },
+  },
+  {
+    skill: 'tensx',
+    tier: 31,
+    column: false,
+    // 99 x 90 is 8910, so four boxes — and four for every question on the rung, including
+    // 12 x 10, which is what stops the strip saying how big the answer is going to be.
+    width: 4,
+    shapes: ['ten', 'tens'],
+    make(rnd, shape) {
+      // Multiplying by a whole ten, where the digits stay exactly as they were and a zero
+      // arrives on the end. The observation the shift in a two-digit multiplier rests on, met
+      // here on its own before it has to be used inside something bigger.
+      const a = between(rnd, 11, 99);
+      if (shape === 'ten') return { op: '×', a, b: 10 };
+      return { op: '×', a, b: between(rnd, 2, 9) * 10 };
     },
   },
 ];
@@ -284,6 +303,75 @@ function randomDigits(rnd, digits) {
   return between(rnd, lo, 10 ** digits - 1);
 }
 
+/* -------------------------------------------------------- column multiplication */
+
+// The same idea as column addition carried out twice over: once down the multiplicand for
+// each digit of the multiplier, and then once more to add the partial products up. What is
+// new is the *shift* — the second partial product is 47 x 30, not 47 x 3 — and this game
+// writes it with its zeros on the end rather than indenting it, because a zero a child has
+// put there is a zero they have thought about.
+
+/**
+ * Which case a multiplication turned out to be. Read across *every* partial product rather
+ * than only the first, so `noCarry` means what it says: nothing carried anywhere in the whole
+ * question, not merely nothing in its top row.
+ */
+export function shapeOfMul(a, b) {
+  // A zero inside the number being multiplied is its own lesson — the column comes to nothing
+  // and then whatever was carried lands on it — so it outranks the carry cases.
+  if (String(Math.abs(a)).includes('0')) return 'zeroInside';
+  const digits = String(Math.abs(a)).length;
+  const { partials } = mulSteps(a, b);
+  const carries = partials.flatMap((p) =>
+    p.steps.map((step, col) => (step.carryOut ? col : -1)).filter((col) => col >= 0)
+  );
+  if (!carries.length) return 'noCarry';
+  // A partial product longer than the number it came from: the carry ran off the top.
+  if (partials.some((p) => String(a * p.digit).length > digits)) return 'carryOut';
+  if (carries.length > 1) return 'carryBoth';
+  return 'carryOnes';
+}
+
+const columnMul = ({ skill, tier, digits, other, shapes }) => ({
+  skill,
+  tier,
+  column: true,
+  digits,
+  other,
+  // A product is never longer than the two numbers' digit counts added together, and the strip
+  // is never allowed to be shorter than that — sizing it to the numbers drawn would say how
+  // big the answer was going to be before the child had multiplied anything.
+  width: digits + other,
+  // One row per digit of the multiplier, each a place wider than the last because it carries
+  // its own zeros, and then the total. A single-digit multiplier has nothing to add up, so its
+  // answer is the one row.
+  rows:
+    other > 1
+      ? [...Array.from({ length: other }, (_, place) => digits + 1 + place), digits + other]
+      : [digits + other],
+  shapes,
+  make(rnd, shape) {
+    return makeColumnMul(rnd, shape, digits, other);
+  },
+});
+
+function makeColumnMul(rnd, shape, digits, other) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const a = randomDigits(rnd, digits);
+    // Never one: "23 x 1" is not a question about a method, it is a question about whether the
+    // child is paying attention.
+    const b = other === 1 ? between(rnd, 2, 9) : randomDigits(rnd, other);
+    // And a multiplier ending in zero would ask for a whole row of zeros to be written out.
+    // Whole tens are tier 31's own question, met there on their own.
+    if (other > 1 && b % 10 === 0) continue;
+    if (shapeOfMul(a, b) !== shape) continue;
+    return { op: '\u00d7', a, b };
+  }
+  // Unreachable in practice — every declared shape is exercised by a test — but a generator
+  // that could return nothing would be a generator that could hang the game.
+  return { op: '\u00d7', a: 10 ** (digits - 1) + 1, b: other > 1 ? 11 : 2 };
+}
+
 SKILLS.push(
   columnAdd({ skill: 'col+2', tier: 13, digits: 2, other: 2, shapes: ['noCarry'] }),
   columnAdd({ skill: 'col+21', tier: 13, digits: 2, other: 1, shapes: ['noCarry'] }),
@@ -308,7 +396,27 @@ SKILLS.push(
     other: 3,
     shapes: ['borrowOnes', 'borrowTens', 'borrowBoth', 'acrossZero'],
   }),
-  columnSub({ skill: 'col-32', tier: 18, digits: 3, other: 2, shapes: ['borrowOnes', 'acrossZero'] })
+  columnSub({ skill: 'col-32', tier: 18, digits: 3, other: 2, shapes: ['borrowOnes', 'acrossZero'] }),
+  columnMul({ skill: 'colx21', tier: 32, digits: 2, other: 1, shapes: ['noCarry'] }),
+  columnMul({ skill: 'colx21c', tier: 33, digits: 2, other: 1, shapes: ['carryOnes', 'carryOut'] }),
+  columnMul({
+    skill: 'colx31c',
+    tier: 34,
+    digits: 3,
+    other: 1,
+    shapes: ['carryOnes', 'carryBoth', 'carryOut'],
+  }),
+  columnMul({ skill: 'colx22', tier: 35, digits: 2, other: 2, shapes: ['noCarry', 'carryOnes', 'carryBoth'] }),
+  // Not `carryOnes`: six digit-multiplications with exactly one carry between them barely
+  // exists at this size, and a shape the generator cannot find is a shape the skill can never
+  // finish covering — which would leave the last rung of the ladder unable to graduate.
+  columnMul({
+    skill: 'colx32',
+    tier: 36,
+    digits: 3,
+    other: 2,
+    shapes: ['carryBoth', 'carryOut', 'zeroInside'],
+  })
 );
 
 /* ---------------------------------------------------------------- the register */
@@ -341,6 +449,19 @@ export const widthOf = (skill) => BY_SKILL.get(skill)?.width ?? 2;
 
 export const isColumn = (skill) => Boolean(BY_SKILL.get(skill)?.column);
 
+/**
+ * The widths of the rows a skill is answered in, ones-first within each. Every skill has at
+ * least one; only a stacked multiplication with a two-digit multiplier has more, and there the
+ * rows are the two partial products and their total.
+ */
+export const rowsOf = (skill) => BY_SKILL.get(skill)?.rows ?? [widthOf(skill)];
+
+/** Whether a skill is worked as a stack of partial products rather than a single answer. */
+export const isMultiRow = (skill) => rowsOf(skill).length > 1;
+
+/** How many digits the number being multiplied has — what `shapeOfMul` classifies against. */
+export const digitsOf = (skill) => BY_SKILL.get(skill)?.digits ?? 0;
+
 /** Whether a stored or imported record really describes a skill this build teaches. */
 export const valid = (itemId, item) => owns(itemId) && item?.skill === parse(itemId).skill;
 
@@ -368,7 +489,12 @@ export function generate(skill, { shape = null, seed = 1 } = {}) {
  */
 function actualShape(def, made, wanted) {
   if (!def.column) return wanted;
-  const digits = def.width - (made.op === '+' ? 1 : 0);
-  const found = made.op === '+' ? shapeOfAdd(made.a, made.b, digits) : shapeOfSub(made.a, made.b);
+  const found = shapeOfColumn(def, made);
   return def.shapes.includes(found) ? found : wanted;
+}
+
+function shapeOfColumn(def, made) {
+  if (made.op === '\u00d7') return shapeOfMul(made.a, made.b);
+  if (made.op === '-') return shapeOfSub(made.a, made.b);
+  return shapeOfAdd(made.a, made.b, def.width - 1);
 }

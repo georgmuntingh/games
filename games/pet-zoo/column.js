@@ -13,9 +13,18 @@
 // Pure: numbers in, HTML string out. Every step is a CSS animation delay, so there is no loop
 // to run and nothing to clean up, and reduced motion simply shows the finished thing.
 
-import { addSteps, answerOf, columnCount, columnsOf, digitsOf, subSteps } from './subjects/math/columns.js';
+import {
+  addSteps,
+  answerOf,
+  columnCount,
+  columnsOf,
+  digitsOf,
+  mulRows,
+  mulSteps,
+  subSteps,
+} from './subjects/math/columns.js';
 
-export { addSteps, answerOf, columnCount, columnsOf, subSteps };
+export { addSteps, answerOf, columnCount, columnsOf, mulRows, mulSteps, subSteps };
 
 /* ------------------------------------------------------------------- pacing */
 
@@ -67,15 +76,22 @@ export const walkSpeedAt = (index) => {
 /** How many boxes the walkthrough draws: enough for the answer, and never fewer than the
  *  question's own columns. */
 export const walkWidth = ({ op, a, b }) =>
-  Math.max(columnCount(a, b), String(Math.abs(answerOf({ op, a, b }))).length);
+  op === '\u00d7'
+    ? Math.max(columnCount(a, b), ...mulRows(a, b).map((row) => String(row).length))
+    : Math.max(columnCount(a, b), String(Math.abs(answerOf({ op, a, b }))).length);
 
 /**
  * One step per column, ones first, each carrying everything the picture needs to say: what the
  * column held, what it produced, and what it passed on.
  */
 export function walkSteps({ op, a, b }) {
-  return op === '-' ? subSteps(a, b) : addSteps(a, b);
+  if (op === '-') return subSteps(a, b);
+  if (op === '\u00d7') return mulSteps(a, b).partials[0].steps;
+  return addSteps(a, b);
 }
+
+/** The sign written down the left of the stack. */
+const opSign = (op) => (op === '-' ? '\u2212' : op === '\u00d7' ? '\u00d7' : '+');
 
 const cell = (content, classes = '', style = '') =>
   `<span class="cw-cell ${classes}"${style ? ` style="${style}"` : ''}>${content}</span>`;
@@ -101,11 +117,56 @@ export function stackedMarkup({ op, a, b }, { slots = [], carries = [], width = 
     <div class="colwalk" style="--cw-cols:${cols}">
       ${carries.length ? `<div class="cw-row cw-carries">${leftToRight(padTo(carries, cols)).join('')}</div>` : ''}
       <div class="cw-row cw-top">${leftToRight(blank(top, aLen)).map((d) => cell(d)).join('')}</div>
-      <div class="cw-row cw-bottom"><span class="cw-op">${op === '-' ? '−' : '+'}</span>${leftToRight(blank(bottom, bLen))
+      <div class="cw-row cw-bottom"><span class="cw-op">${opSign(op)}</span>${leftToRight(blank(bottom, bLen))
         .map((d) => cell(d))
         .join('')}</div>
       <div class="cw-rule"></div>
       <div class="cw-row cw-answer">${leftToRight(padTo(slots, cols)).join('')}</div>
+    </div>`;
+}
+
+/**
+ * The same thing for a multiplication, which is answered on more than one line: a row of boxes
+ * per partial product, a second rule, and then the total. `rows` is one `{ slots, carries }` per
+ * answer row, ones-first, because the caller owns those boxes — they may be spans, ink pads or
+ * carry cells, and this module has no business knowing which.
+ *
+ * Where the carries go is a small, deliberate departure from paper. The first partial product's
+ * carries sit above the top number, which is where a child writes them and where the addition
+ * walkthrough has always put them. The second's sit directly above its own row instead of being
+ * rubbed out and rewritten over the first — there is room on a screen, and a carry the child can
+ * still see is a carry they can still check. The final addition gets no carry row: it is column
+ * addition, which this ladder taught eighteen rungs ago, and the stack is tall enough already.
+ */
+export function stackedMulMarkup({ a, b }, { rows = [], width = null } = {}) {
+  const cols = width ?? walkWidth({ op: '\u00d7', a, b });
+  const top = digitsOf(a, cols);
+  const bottom = digitsOf(b, cols);
+  const blank = (n, len) => n.map((d, i) => (i < len ? String(d) : ''));
+  const carryRow = (carries) =>
+    carries?.length
+      ? `<div class="cw-row cw-carries">${leftToRight(padTo(carries, cols)).join('')}</div>`
+      : '';
+  const answerRow = (slots, extra = '') =>
+    `<div class="cw-row cw-answer${extra}">${leftToRight(padTo(slots, cols)).join('')}</div>`;
+
+  const partials = rows.length > 1 ? rows.slice(0, -1) : rows;
+  const total = rows.length > 1 ? rows[rows.length - 1] : null;
+
+  return `
+    <div class="colwalk is-mul" style="--cw-cols:${cols}">
+      ${carryRow(partials[0]?.carries)}
+      <div class="cw-row cw-top">${leftToRight(blank(top, String(Math.abs(a)).length)).map((d) => cell(d)).join('')}</div>
+      <div class="cw-row cw-bottom"><span class="cw-op">${opSign('\u00d7')}</span>${leftToRight(
+        blank(bottom, String(Math.abs(b)).length)
+      )
+        .map((d) => cell(d))
+        .join('')}</div>
+      <div class="cw-rule"></div>
+      ${partials
+        .map((partial, i) => (i === 0 ? '' : carryRow(partial.carries)) + answerRow(partial.slots, ' cw-partial'))
+        .join('')}
+      ${total ? `<div class="cw-rule"></div>${answerRow(total.slots)}` : ''}
     </div>`;
 }
 
@@ -160,6 +221,96 @@ export function columnWalkHtml(question, { step = stepFor(DEFAULT_WALK_SPEED), t
       <div class="cw-rule"></div>
       <div class="cw-row cw-answer">${leftToRight(answerCells).join('')}</div>
     </div>`;
+}
+
+/**
+ * The walkthrough for a stacked multiplication.
+ *
+ * Only one row is walked — the first one that went wrong. The rest of the stack is drawn
+ * finished, because a child who got the ones row right does not need to watch it being done
+ * again, and a 247 x 38 walked in full is ten columns of working and the better part of half a
+ * minute. `row` is which row to walk, straight from the grade result.
+ */
+export function mulWalkHtml(question, { step = stepFor(DEFAULT_WALK_SPEED), row = 0, width = null, title = '' } = {}) {
+  const { a, b } = question;
+  const cols = width ?? walkWidth({ op: '\u00d7', a, b });
+  const { partials } = mulSteps(a, b);
+  const values = mulRows(a, b);
+  const walked = Math.max(0, Math.min(row, values.length - 1));
+  const isPartialWalk = values.length > 1 ? walked < partials.length : true;
+  const delay = (i) => (step * i).toFixed(2);
+
+  // The digits of one row, either landing one at a time or simply there.
+  const digitCells = (value, live) =>
+    digitsOf(value, cols).map((digit, i) => {
+      const blank = i >= String(value).length;
+      const text = blank ? '' : String(digit);
+      return live
+        ? cell(text, 'cw-lands', `--cw-delay:${delay(i + 0.7)}s`)
+        : cell(text, 'cw-done');
+    });
+
+  // The carries the walked partial produces, each above the column it is going *into* — one to
+  // the left of the column that made it, which is the whole point of the picture.
+  const marks = new Array(cols).fill('');
+  if (isPartialWalk) {
+    partials[walked].steps.forEach((s, i) => {
+      if (s.carryOut && i + 1 < cols) {
+        marks[i + 1] = `<span class="cw-mark cw-carry" style="--cw-delay:${delay(i + 0.5)}s">${s.carryOut}</span>`;
+      }
+    });
+  }
+  const markRow = `<div class="cw-row cw-carries">${leftToRight(marks)
+    .map((mark) => `<span class="cw-cell">${mark}</span>`)
+    .join('')}</div>`;
+  const emptyRow = `<div class="cw-row cw-carries">${new Array(cols)
+    .fill('<span class="cw-cell"></span>')
+    .join('')}</div>`;
+
+  // While a partial product is being worked, the two numbers it comes from light up column by
+  // column. The final addition lights nothing: what it is adding is already on the screen.
+  const lit = (n, len) =>
+    digitsOf(n, cols).map((digit, i) =>
+      cell(
+        i < len ? String(digit) : '',
+        isPartialWalk ? 'cw-lit' : 'cw-done',
+        isPartialWalk ? `--cw-delay:${delay(i)}s` : ''
+      )
+    );
+
+  const partialRows = (values.length > 1 ? values.slice(0, -1) : values)
+    .map((value, i) => {
+      const carries = i === 0 ? '' : i === walked && isPartialWalk ? markRow : emptyRow;
+      return `${carries}<div class="cw-row cw-answer cw-partial">${leftToRight(
+        digitCells(value, i === walked)
+      ).join('')}</div>`;
+    })
+    .join('');
+
+  const total =
+    values.length > 1
+      ? `<div class="cw-rule"></div><div class="cw-row cw-answer">${leftToRight(
+          digitCells(values[values.length - 1], walked === values.length - 1)
+        ).join('')}</div>`
+      : '';
+
+  return `
+    <div class="colwalk is-walking is-mul" style="--cw-cols:${cols}" role="img" aria-label="${title}">
+      ${walked === 0 && isPartialWalk ? markRow : emptyRow}
+      <div class="cw-row cw-top">${leftToRight(lit(a, String(Math.abs(a)).length)).join('')}</div>
+      <div class="cw-row cw-bottom"><span class="cw-op">${opSign('\u00d7')}</span>${leftToRight(
+        lit(b, String(Math.abs(b)).length)
+      ).join('')}</div>
+      <div class="cw-rule"></div>
+      ${partialRows}
+      ${total}
+    </div>`;
+}
+
+/** How long a multiplication walk takes — the walked row only, since it is the only one moving. */
+export function mulWalkDuration(question, { step = stepFor(DEFAULT_WALK_SPEED), row = 0, width = null } = {}) {
+  const cols = width ?? walkWidth({ op: '\u00d7', ...question });
+  return ((cols + 1.2) * step + 0.5) * 1000;
 }
 
 /**

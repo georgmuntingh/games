@@ -1,7 +1,7 @@
 // Maths — "Matte" — the second thing this zoo teaches, stated in the shape every subject
 // states itself in.
 //
-// One subject, thirty-one rungs, and three quite different kinds of item behind one interface:
+// One subject, thirty-seven rungs, and three quite different kinds of item behind one interface:
 //
 //   tiers 0–10   facts.js    things to *know*: sixty-six sums and a hundred and twenty-one
 //                            differences, each one its own question, its own egg, its own pet.
@@ -10,6 +10,9 @@
 //                            once every case inside them has been covered.
 //   tiers 19–30  times.js    things to know again: fifty-five products and the hundred
 //                            questions that are those products asked backwards.
+//   tiers 31–36  skills.js   and back to methods: multiplying with the numbers stacked, up to
+//                            three digits by two, which is the first thing here whose answer
+//                            is written on more than one line.
 //
 // The scheduler, the store and the answer loop never learn which is which. They ask this
 // module — `owns`, `parse`, `idOf`, `tierOf`, `tierItems`, `valid`, `grade` — and it dispatches.
@@ -54,6 +57,7 @@ export const GROUPS = [
   { id: 'column', tiers: [13, 14, 15, 16, 17, 18] },
   { id: 'times', tiers: [19, 20, 21, 22, 23, 24] },
   { id: 'gap', tiers: [25, 26, 27, 28, 29, 30] },
+  { id: 'colmul', tiers: [31, 32, 33, 34, 35, 36] },
 ];
 
 export const TIERS = GROUPS.flatMap((group) => group.tiers.map((tier) => ({ id: tier, group: group.id })));
@@ -65,8 +69,9 @@ export const groupOfTier = (tierId) => GROUPS.find((group) => group.tiers.includ
 /** Every item on one rung, in teaching order. Facts, then skills, then the times tables. */
 export const tierItems = (tierId) => {
   if (tierId <= facts.LAST_FACT_TIER) return facts.factTierItems(tierId);
-  if (tierId < times.FIRST_TIMES_TIER) return skills.skillTierItems(tierId);
-  return times.timesTierItems(tierId);
+  if (tierId > times.LAST_TIMES_TIER) return skills.skillTierItems(tierId);
+  if (tierId >= times.FIRST_TIMES_TIER) return times.timesTierItems(tierId);
+  return skills.skillTierItems(tierId);
 };
 
 // Facts first, in exactly the order they have always been in, then the skills. The order
@@ -180,6 +185,30 @@ export const answerWidth = (payload) =>
       ? times.widthOf(payload)
       : FACT_ANSWER_WIDTH;
 
+/**
+ * The rows an answer is written on, ones-first within each, as widths.
+ *
+ * Almost everything this subject teaches is answered on one line and gets a single-entry list.
+ * A stacked multiplication with a two-digit multiplier is the exception: its answer is the two
+ * partial products and their total, and the rows are a property of the *skill*, never of the
+ * numbers drawn, for the same reason the width always has been.
+ */
+export const answerRows = (payload) =>
+  isSkill(payload) ? skills.rowsOf(payload.skill) : [answerWidth(payload)];
+
+/**
+ * How many rows of carry boxes the question offers, and how wide.
+ *
+ * A column sum has one, as it always has. A stacked multiplication has one per partial product
+ * — each is its own run down the multiplicand, with its own carries. Everything else has none:
+ * there is no working to write beside `7 + 8`.
+ */
+export const carryRows = (payload, question) => {
+  if (!question?.column) return 0;
+  if (question.op !== '×') return 1;
+  return String(Math.abs(question.b)).length;
+};
+
 /** Digits in the answer to one question — what `answerWidth` must never be allowed to fall below. */
 export const answerDigits = (question) => {
   if (!question) return 0;
@@ -193,6 +222,7 @@ export const paceScale = 1.6;
 
 /** And a column sum, worked one column at a time, is slower again. */
 export const paceOf = (item) => {
+  if (isSkill(item) && skills.isMultiRow(item.skill)) return 4.0; // two partial products and a total
   if (isSkill(item) && skills.isColumn(item.skill)) return 2.6;
   // A missing factor is hunted rather than recalled — a child runs up the table until they
   // find it, and that takes longer than saying a product they know. Without this the

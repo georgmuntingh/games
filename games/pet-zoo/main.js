@@ -44,6 +44,9 @@ import {
   columnWalkHtml,
   DEFAULT_WALK_SPEED,
   stackedMarkup,
+  stackedMulMarkup,
+  mulWalkHtml,
+  mulWalkDuration,
   stepFor,
   walkDuration,
   walkWidth,
@@ -163,6 +166,7 @@ const el = {
   writePickerTitle: $('write-picker-title'),
   writeUndo: $('write-undo'),
   writeClear: $('write-clear'),
+  writeNext: $('write-next'),
   answerMode: $('answer-mode'),
   mirrorNudge: $('mirror-nudge'),
   feedback: $('feedback'),
@@ -646,32 +650,95 @@ const OP_SIGNS = {
 /** The same signs as plain text, for a collar or a caption. */
 const OP_TEXT = { '+': '+', '-': '−', '×': '×' };
 
-/** The answer as the graders want it: digits, in order, with blanks contributing nothing. */
-const answerText = (c) => (c?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
+// An answer is a list of *rows* of boxes, and almost always a list of one. A stacked
+// multiplication is the exception: 247 × 38 is answered on three lines — the two partial
+// products and their total — so the model that used to be one flat array of digits is a row
+// each. Everything else became a one-row question rather than gaining a second code path, so
+// there is one set of rules about where a digit lands rather than two that can drift apart.
+
+const emptyRow = (width) => ({ width, digits: emptyBoxes(width) });
+
+/** One row's digits, with blanks contributing nothing. */
+const rowText = (row) => (row?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
+
+/**
+ * The answer as the graders want it: a string of digits for a question answered on one line,
+ * and one string per row for one answered on several. `gradeMulColumn` is the only grader that
+ * takes the list, and it is the only question that produces one.
+ */
+const answerText = (c) =>
+  !c?.rows?.length ? '' : c.rows.length > 1 ? c.rows.map(rowText) : rowText(c.rows[0]);
+
+/** What the whole answer reads as out loud — the rows in order, which is how it is written. */
+const spokenAnswer = (c) => c.rows.map(rowText).filter(Boolean).join(', ');
 
 const firstFilled = (digits) => digits.findIndex((d) => d !== null);
 
 /**
- * Whether there is an answer here to submit. The ones box must be filled and there must be no
- * hole in the middle: `[8, _, 5]` is a child part way through, not the number 85, and grading
- * it as 85 would mark them right for something they had not finished saying.
+ * Whether one row has an answer in it to submit. The ones box must be filled and there must be
+ * no hole in the middle: `[8, _, 5]` is a child part way through, not the number 85, and
+ * grading it as 85 would mark them right for something they had not finished saying.
  */
-function isComplete(c) {
-  if (!c?.digits?.length) return false;
-  const first = firstFilled(c.digits);
+function isRowComplete(row) {
+  if (!row?.digits?.length) return false;
+  const first = firstFilled(row.digits);
   if (first === -1) return false;
-  return c.digits.slice(first).every((d) => d !== null);
+  return row.digits.slice(first).every((d) => d !== null);
 }
 
-/** Which box the next typed digit lands in. */
+/** And the whole answer, which for a stacked multiplication means every line of the working. */
+const isComplete = (c) => Boolean(c?.rows?.length) && c.rows.every(isRowComplete);
+
+/**
+ * Which box the next typed digit lands in, as a row and an index — or null when there is
+ * nowhere left to put one.
+ *
+ * An inline answer has no cursor to speak of: digits shuffle left and the newest lands on the
+ * right, which is how a number is written and read. A stacked one does, because *where* a digit
+ * sits is the whole of what a column question is teaching, and because the answer may run over
+ * several rows.
+ */
 function nextBox(c) {
-  if (c.layout === 'column') {
-    // The ones column first, then leftwards — the order the work is actually done in.
-    for (let i = c.digits.length - 1; i >= 0; i -= 1) if (c.digits[i] === null) return i;
-    return -1;
+  if (!c?.rows?.length) return null;
+  if (!c.stacked) {
+    const digits = c.rows[0].digits;
+    return digits[0] === null ? { row: 0, index: digits.length - 1 } : null;
   }
-  return c.digits[0] === null ? c.digits.length - 1 : -1;
+  return c.cursor;
 }
+
+/** The ones box of a row — where writing a number starts, because that is where the work does. */
+const onesBox = (c, row) => ({ row, index: c.rows[row].digits.length - 1 });
+
+/**
+ * One box to the left, and off the left-hand end into the ones of the row below.
+ *
+ * A row is *left* rather than filled: 51 written into three boxes leaves the hundreds blank, and
+ * a child who has finished a row taps the next one to say so. Running off the end of the last
+ * row parks the cursor, so a fourth digit cannot quietly overwrite the first.
+ */
+function stepCursor(c, at) {
+  if (!at) return null;
+  if (at.index > 0) return { row: at.row, index: at.index - 1 };
+  return at.row + 1 < c.rows.length ? onesBox(c, at.row + 1) : null;
+}
+
+/* ------------------------------------------------------------ drawing it */
+
+// The prompt is rebuilt only when its *shape* changes — a new question, or the cursor moving
+// to another row. Every keystroke after that patches the boxes that are already on screen.
+// That is not only cheaper: a carry box in writing mode is a live ink pad, and an innerHTML
+// rewrite on every digit would destroy and recreate it under the child's finger.
+let promptShape = null;
+
+const shapeKey = (c) =>
+  [c.layout, c.width, c.rows.map((r) => r.width).join('.'), c.carries.length, writingWanted()].join('|');
+
+const slotMarkup = (row, r) =>
+  row.digits.map(
+    (digit, i) =>
+      `<span class="slot" data-row="${r}" data-i="${i}">${digit === null ? '' : digit}</span>`
+  );
 
 /**
  * The answer as it stands. Inline questions right-align, because that is what a number does:
@@ -680,53 +747,157 @@ function nextBox(c) {
  * ones column.
  */
 function renderAnswer() {
-  const next = writingWanted() ? -1 : nextBox(current);
-  const slots = current.digits.map((digit, i) => {
-    const filled = digit !== null;
-    const classes = ['slot', filled ? '' : 'is-empty', i === next ? 'is-next' : '']
-      .filter(Boolean)
-      .join(' ');
-    return `<span class="${classes}">${filled ? digit : ''}</span>`;
-  });
+  const key = shapeKey(current);
+  if (key !== promptShape) {
+    promptShape = key;
+    buildPrompt();
+  }
+  paintAnswer();
+}
 
-  const spoken = t.spokenQuestion(current.shown);
-  const said = answerText(current) || t('answer.empty');
-  if (current.layout === 'column') {
+function buildPrompt() {
+  const slots = current.rows.map((row, r) => slotMarkup(row, r));
+  if (current.layout === 'column' && current.shown.op === '×') {
+    el.promptSum.innerHTML = stackedMulMarkup(current.shown, {
+      width: current.width,
+      rows: current.rows.map((row, r) => ({
+        slots: [...slots[r]].reverse(), // the stack wants them ones-first
+        carries: carryMarkup(r),
+      })),
+    });
+  } else if (current.layout === 'column') {
     el.promptSum.innerHTML = stackedMarkup(current.shown, {
-      slots: [...slots].reverse(), // stackedMarkup wants them ones-first
-      carries: carryMarkup(),
+      slots: [...slots[0]].reverse(),
+      carries: carryMarkup(0),
       width: current.width,
     });
   } else if (current.layout === 'gap') {
     // The strip stands inside the equation rather than after it, on whichever side of the sign
     // `shownForm` put the blank. The product is on the right, where the child is going.
     const { a, b, gapSwapped } = current.shown;
-    const strip = `<span class="gap-slots">${slots.join('')}</span>`;
+    const strip = `<span class="gap-slots">${slots[0].join('')}</span>`;
     const written = gapSwapped ? `${strip}${OP_SIGNS['×']}${a}` : `${a}${OP_SIGNS['×']}${strip}`;
     el.promptSum.innerHTML = `${written}<i class="op">=</i>${a * b}`;
   } else {
     const { op, a, b } = current.shown;
-    const strip = `<span class="ans-slots">${slots.join('')}</span>`;
+    const strip = `<span class="ans-slots">${slots[0].join('')}</span>`;
     el.promptSum.innerHTML = `${a}${OP_SIGNS[op] ?? OP_SIGNS['+']}${b}<i class="op">=</i>${strip}`;
   }
-  el.promptSum.setAttribute('aria-label', `${spoken} = ${said}`);
+  attachCarryPads();
+}
+
+/** Put the current digits into the boxes already on screen, and say where the cursor is. */
+function paintAnswer() {
+  const next = writingWanted() ? null : nextBox(current);
+  for (const box of el.promptSum.querySelectorAll('.slot')) {
+    const row = current.rows[Number(box.dataset.row)];
+    const i = Number(box.dataset.i);
+    const digit = row?.digits[i] ?? null;
+    box.textContent = digit === null ? '' : String(digit);
+    box.classList.toggle('is-empty', digit === null);
+    box.classList.toggle(
+      'is-next',
+      Boolean(next) && !current.focus && next.row === Number(box.dataset.row) && next.index === i
+    );
+  }
+  paintCarries();
+  renderWriteTools();
+  const spoken = t.spokenQuestion(current.shown);
+  el.promptSum.setAttribute('aria-label', `${spoken} = ${spokenAnswer(current) || t('answer.empty')}`);
   el.submit.disabled = locked || !isComplete(current);
 }
+
+/* ------------------------------------------------------------ the carries */
 
 /**
  * The little boxes above the columns. Scratch, and only scratch: nothing reads them, nothing
  * grades them, and leaving them empty is a perfectly good way to do a column sum. They are
  * here because writing the carry down is part of how the method is taught, and a child who
  * has been told to write it needs somewhere to write it.
+ *
+ * A column sum's carry is always a one, so its box is a one-tap toggle and has been since the
+ * column tiers arrived. A multiplication's is anything from one to eight — 9 × 9 is 81 — so
+ * those boxes take a real digit: tapped to focus and then typed into, or written in, whichever
+ * way the child is answering the question itself.
  */
-function carryMarkup() {
-  if (current.layout !== 'column') return [];
-  return current.carries.map(
-    (on, i) =>
-      `<button type="button" class="cw-cell cw-carrybox${on ? ' is-on' : ''}" data-carry="${i}"` +
-      ` aria-label="${escape(t(on ? 'answer.carryOn' : 'answer.carryOff'))}">${on ? '1' : ''}</button>`
-  );
+function carryMarkup(rowIndex) {
+  if (!current.carries[rowIndex]) return [];
+  const toggles = current.shown.op !== '×';
+  return current.carries[rowIndex].map((digit, i) => {
+    const on = digit !== null;
+    const label = escape(t(on ? 'answer.carryOn' : 'answer.carryOff'));
+    if (toggles) {
+      return `<button type="button" class="cw-cell cw-carrybox${on ? ' is-on' : ''}"` +
+        ` data-carry="${rowIndex}" data-carry-i="${i}" aria-label="${label}">${on ? digit : ''}</button>`;
+    }
+    if (writingWanted()) {
+      return `<span class="cw-cell cw-carrybox cw-carrypad" data-carry="${rowIndex}" data-carry-i="${i}"` +
+        ` role="application" aria-label="${label}"></span>`;
+    }
+    return `<button type="button" class="cw-cell cw-carrybox cw-carrytype${on ? ' is-on' : ''}"` +
+      ` data-carry="${rowIndex}" data-carry-i="${i}" aria-label="${label}">${on ? digit : ''}</button>`;
+  });
 }
+
+function paintCarries() {
+  for (const box of el.promptSum.querySelectorAll('[data-carry]')) {
+    const digit = current.carries[Number(box.dataset.carry)]?.[Number(box.dataset.carryI)] ?? null;
+    // A pad shows what the child drew, not what we read it as — the ink is the record.
+    if (!box.classList.contains('cw-carrypad')) box.textContent = digit === null ? '' : String(digit);
+    box.classList.toggle('is-on', digit !== null);
+    box.classList.toggle(
+      'is-focus',
+      Boolean(current.focus) &&
+        current.focus.row === Number(box.dataset.carry) &&
+        current.focus.index === Number(box.dataset.carryI)
+    );
+  }
+}
+
+// The ink pads living in the carry boxes, when the child is writing rather than typing. Rebuilt
+// with the prompt and torn down with it, and — because a carry is scratch — a misreading here
+// costs nothing at all, which is why there is no correction chip beside them.
+const carryPads = [];
+
+function clearCarryPads() {
+  for (const pad of carryPads) pad.destroy();
+  carryPads.length = 0;
+}
+
+function attachCarryPads() {
+  clearCarryPads();
+  if (!writingWanted() || current.shown.op !== '×') return;
+  for (const host of el.promptSum.querySelectorAll('.cw-carrypad')) {
+    const row = Number(host.dataset.carry);
+    const index = Number(host.dataset.carryI);
+    const pad = createInkPad({
+      host,
+      onStart: () => {
+        current.focus = null;
+        host.classList.add('has-ink');
+      },
+      onSettled: () => {
+        const strokes = pad.strokes;
+        if (!strokes.length) {
+          setCarry(row, index, null);
+          host.classList.remove('has-ink');
+          return;
+        }
+        setCarry(row, index, recognize(strokes, { memory: state.ink, pad: pad.pad }).digit);
+      },
+    });
+    pad.attach();
+    carryPads.push(pad);
+  }
+}
+
+function setCarry(row, index, digit) {
+  if (!current?.carries[row]) return;
+  current.carries[row][index] = digit;
+  paintCarries();
+}
+
+const blankCarries = (c) => c.carries.map((row) => row.map(() => null));
 
 /**
  * A typed digit, whichever way the child is answering. In writing mode it fills the next empty
@@ -735,16 +906,30 @@ function carryMarkup() {
  * reason.
  */
 function typeDigit(digit) {
+  if (current?.focus) {
+    setCarry(current.focus.row, current.focus.index, Number(digit));
+    audio.play('tick');
+    return;
+  }
   if (!writingWanted()) {
     pushDigit(digit);
     return;
   }
-  const index = nextBox(current);
-  const slot = index === -1 ? null : writeSlots[index];
+  const at = nextBox(current);
+  const slot = at ? writeSlots[at.index] : null;
   if (!slot) return;
   slot.digit = Number(digit);
   slot.corrected = true;
   slot.read = null;
+  // The cursor has to move here too, or every digit typed would land in the same pad. It stops
+  // at the end of the row rather than running on into the next: the pads only ever serve one
+  // row, and the child says when that row is done.
+  if (current.stacked) {
+    const step = stepCursor(current, at);
+    // Parked at the end of the row rather than running on into the next: the pads only ever
+    // serve one row, and the child says when that row is done.
+    current.cursor = step && step.row === at.row ? step : null;
+  }
   audio.play('tick');
   renderSlot(slot);
   syncWrittenAnswer();
@@ -752,14 +937,22 @@ function typeDigit(digit) {
 
 function pushDigit(digit) {
   if (locked || !current || !isSum(current)) return;
-  const index = nextBox(current);
-  if (index === -1) return;
-  if (current.layout === 'column') {
-    current.digits[index] = Number(digit);
+  if (current.focus) {
+    setCarry(current.focus.row, current.focus.index, Number(digit));
+    audio.play('tick');
+    return;
+  }
+  const at = nextBox(current);
+  if (!at) return;
+  const row = current.rows[at.row];
+  if (current.stacked) {
+    row.digits[at.index] = Number(digit);
+    current.cursor = stepCursor(current, at);
+    current.row = current.cursor?.row ?? at.row;
   } else {
     // Inline: everything shuffles left and the new digit lands on the right, which is how a
     // number is written and read.
-    current.digits = [...current.digits.slice(1), Number(digit)];
+    row.digits = [...row.digits.slice(1), Number(digit)];
   }
   audio.play('tick');
   renderAnswer();
@@ -767,26 +960,70 @@ function pushDigit(digit) {
 
 function clearAnswer() {
   if (locked || !current || !isSum(current)) return;
-  if (!current.digits.some((d) => d !== null) && !current.carries.some(Boolean)) return;
+  const written = current.rows.some((row) => row.digits.some((d) => d !== null));
+  const scratched = current.carries.some((row) => row.some((d) => d !== null));
+  if (!written && !scratched) return;
   // Adding's stand-in for waggling the clock hands: starting the answer over is the tell
   // that the child was not sure, and `qualityOf` reads it the same way.
-  if (current.digits.some((d) => d !== null)) current.clears += 1;
-  current.digits = emptyBoxes(current.width);
-  current.carries = current.carries.map(() => false);
+  if (written) current.clears += 1;
+  current.rows = current.rows.map((row) => emptyRow(row.width));
+  current.carries = blankCarries(current);
+  current.row = 0;
+  current.cursor = current.stacked ? onesBox(current, 0) : null;
+  current.focus = null;
   audio.play('grab');
   renderAnswer();
+}
+
+/** The cursor's path in reverse: one box right, and off the right-hand end into the box the
+ *  row above ended on. Mirrors `stepCursor` exactly, which is the only reason it is safe. */
+function unstepCursor(c, at) {
+  if (at.index + 1 < c.rows[at.row].digits.length) return { row: at.row, index: at.index + 1 };
+  return at.row > 0 ? { row: at.row - 1, index: 0 } : null;
+}
+
+/**
+ * The last box the child actually wrote in, walking back the way the cursor came and stepping
+ * over anything they deliberately left blank — the leading box of a row that did not need it.
+ */
+function backCursor(c) {
+  const filled = (box) => box && c.rows[box.row]?.digits[box.index] !== null;
+  // A parked cursor has run off the end of the last row, so the last box there is may itself
+  // be the one to rub out.
+  let at = c.cursor ?? { row: c.rows.length - 1, index: 0 };
+  if (!c.cursor && filled(at)) return at;
+  while (at) {
+    at = unstepCursor(c, at);
+    if (filled(at)) return at;
+  }
+  return null;
 }
 
 /** Rub out the last box filled, rather than the whole answer. Four hand-written digits is a
  *  lot to lose over one slip. */
 function backspaceAnswer() {
   if (locked || !current || !isSum(current)) return;
-  const index =
-    current.layout === 'column'
-      ? firstFilled(current.digits)
-      : current.digits.map((d) => d !== null).lastIndexOf(true);
-  if (index === -1) return;
-  current.digits[index] = null;
+  if (current.focus) {
+    setCarry(current.focus.row, current.focus.index, null);
+    audio.play('grab');
+    return;
+  }
+  if (!current.stacked) {
+    const digits = current.rows[0].digits;
+    const index = digits.map((d) => d !== null).lastIndexOf(true);
+    if (index === -1) return;
+    digits[index] = null;
+    audio.play('grab');
+    renderAnswer();
+    return;
+  }
+  // Backwards along the way the cursor came, so what is rubbed out is what was written last —
+  // and the cursor lands on the box it emptied, ready to take the digit that should be there.
+  const back = backCursor(current);
+  if (!back) return;
+  current.rows[back.row].digits[back.index] = null;
+  current.cursor = back;
+  current.row = back.row;
   audio.play('grab');
   renderAnswer();
 }
@@ -814,19 +1051,56 @@ let lastDrawn = null;
  * and a digit that slid across would be a different number.
  */
 function syncWrittenAnswer() {
-  if (!current) return;
-  if (current.layout === 'column') {
-    current.digits = writeSlots.map((slot) => slot.digit);
+  if (!current?.rows?.length) return;
+  const row = current.rows[current.row] ?? current.rows[0];
+  if (current.stacked) {
+    row.digits = writeSlots.map((slot) => slot.digit);
   } else {
     const written = writeSlots
       .map((slot) => (slot.digit === null ? '' : String(slot.digit)))
       .join('');
-    const boxes = emptyBoxes(current.width);
-    const start = current.width - written.length;
+    const boxes = emptyBoxes(row.width);
+    const start = row.width - written.length;
     for (let i = 0; i < written.length; i += 1) boxes[start + i] = Number(written[i]);
-    current.digits = boxes;
+    row.digits = boxes;
   }
   renderAnswer();
+}
+
+/**
+ * Hand the pads to the next row down.
+ *
+ * The strip holds one row at a time — fourteen ink pads will not fit across a phone, and a
+ * stacked 247 × 38 wants fourteen boxes — so a child working down a stack says when a row is
+ * finished rather than the game guessing. Guessing is not available anyway: a row is "complete"
+ * the moment its ones box has a digit in it, and jumping away then would take the pads off a
+ * child halfway through writing four hundred and thirty-seven.
+ */
+function nextWriteRow() {
+  if (locked || !current?.stacked || current.row + 1 >= current.rows.length) return;
+  if (!isRowComplete(current.rows[current.row])) return;
+  current.row += 1;
+  current.cursor = onesBox(current, current.row);
+  renderAnswer();
+  syncPadsToRow();
+}
+
+/** Whether that button is offered, and whether it may be pressed yet. */
+function renderWriteTools() {
+  const stack = writingWanted() && current?.rows?.length > 1;
+  el.writeNext.hidden = !stack;
+  if (!stack) return;
+  el.writeNext.disabled =
+    current.row + 1 >= current.rows.length || !isRowComplete(current.rows[current.row]);
+}
+
+/** Rebuild the pad strip for whichever row the child is on now, and clear it for writing. */
+function syncPadsToRow() {
+  if (!writingWanted() || !current?.rows?.length) return;
+  const row = current.rows[current.row] ?? current.rows[0];
+  if (writeSlots.length !== row.width) buildWriteBoxes(row.width);
+  resetWriting();
+  for (const slot of writeSlots) slot.pad.resize();
 }
 
 function closePicker() {
@@ -980,11 +1254,17 @@ el.writeUndo.addEventListener('click', () => {
   closePicker();
 });
 
+el.writeNext.addEventListener('click', () => {
+  nextWriteRow();
+});
+
 el.writeClear.addEventListener('click', () => {
   if (locked || !current) return;
   // Starting the whole answer over *is* hesitation, unlike putting a misreading right.
-  if (current.digits.some((d) => d !== null)) current.clears += 1;
-  current.carries = current.carries.map(() => false);
+  if (current.rows.some((row) => row.digits.some((d) => d !== null))) current.clears += 1;
+  current.carries = blankCarries(current);
+  current.rows = current.rows.map((row) => emptyRow(row.width));
+  current.row = 0;
   resetWriting();
   syncWrittenAnswer();
 });
@@ -992,12 +1272,35 @@ el.writeClear.addEventListener('click', () => {
 // The carry boxes. Never read, never graded — see `carryMarkup` — so they are handled here,
 // well away from anything that decides whether an answer is right.
 el.promptSum.addEventListener('click', (event) => {
-  const box = event.target.closest('button[data-carry]');
+  // Tapping a box puts the cursor in it. That is how a child says they have finished a row
+  // whose leading box they meant to leave blank — 51 written into three boxes is finished at
+  // two — and it is also how they go back and put one digit right without clearing the lot.
+  const slot = event.target.closest('.slot');
+  if (slot && current?.stacked && !locked) {
+    current.cursor = { row: Number(slot.dataset.row), index: Number(slot.dataset.i) };
+    current.row = current.cursor.row;
+    current.focus = null;
+    audio.play('tick');
+    paintAnswer();
+    return;
+  }
+  const box = event.target.closest('[data-carry]');
   if (!box || locked || !current) return;
-  const index = Number(box.dataset.carry);
-  current.carries[index] = !current.carries[index];
+  const row = Number(box.dataset.carry);
+  const index = Number(box.dataset.carryI);
+  if (box.classList.contains('cw-carrytype')) {
+    // A multiplication carry is a number, not a one, so tapping it does not set it — it puts
+    // the cursor there and the next digit typed lands in it. Tapping it again gives the cursor
+    // back to the answer.
+    const same = current.focus?.row === row && current.focus?.index === index;
+    current.focus = same ? null : { row, index };
+    audio.play('tick');
+    paintAnswer();
+    return;
+  }
+  if (box.classList.contains('cw-carrypad')) return; // written in, not tapped
+  setCarry(row, index, current.carries[row][index] === null ? 1 : null);
   audio.play('tick');
-  renderAnswer();
 });
 
 // pointerdown rather than click, for the same zero-latency reason the touch controls use it.
@@ -1021,15 +1324,25 @@ document.addEventListener('keydown', (event) => {
   } else if (event.key === 'Backspace' || event.key === 'Delete') {
     event.preventDefault();
     if (writingWanted()) {
-      if (current.digits.some((d) => d !== null)) current.clears += 1;
+      if (current.rows.some((row) => row.digits.some((d) => d !== null))) current.clears += 1;
       resetWriting();
       syncWrittenAnswer();
     } else {
       backspaceAnswer();
     }
-  } else if (event.key === 'Enter' && isComplete(current)) {
+  } else if (event.key === 'Enter') {
     event.preventDefault();
-    submit();
+    // Enter means "this row is done" while there is a row below, and "that is my answer" once
+    // there is not — so a stack can be worked from the keyboard without reaching for the boxes.
+    if (isComplete(current)) submit();
+    else if (current?.stacked && current.rows.length > 1) {
+      if (writingWanted()) nextWriteRow();
+      else if (isRowComplete(current.rows[current.row]) && current.row + 1 < current.rows.length) {
+        current.row += 1;
+        current.cursor = onesBox(current, current.row);
+        renderAnswer();
+      }
+    }
   }
 });
 
@@ -1047,7 +1360,10 @@ function shownForm(question) {
   if (question.gap) {
     return Math.random() < 0.5 ? { ...question, gapSwapped: true } : question;
   }
-  const commutes = question.op === '+' || question.op === '×';
+  // A skill is shown exactly as it made itself. Turning `25 × 10` round would give `10 × 25`,
+  // which is the same number and the wrong lesson: the rung is called "the digits stay put and
+  // a zero goes on the end", and that sentence is only true of the way it was written.
+  const commutes = (question.op === '+' || question.op === '×') && !question.skill;
   const swap = commutes && !question.column && Math.random() < 0.5;
   return swap ? { ...question, a: question.b, b: question.a } : question;
 }
@@ -1066,6 +1382,12 @@ function askNext() {
   // answer, both come back to the very same numbers the child was last looking at.
   const question = sum ? math.instanceOf(item) : { h: item.h, m: item.m };
   const width = sum ? math.answerWidth(item) : 0;
+  const layout = sum ? math.layoutOf(question) : 'clock';
+  // Almost every question is answered on one line. A stacked multiplication is the exception:
+  // its rows are the two partial products and their total, and — like the width — they are a
+  // property of the skill rather than of the numbers drawn, so the shape of the working can
+  // never say how big the answer is going to be.
+  const rows = sum ? math.answerRows(item) : [];
   current = {
     id,
     subject: item.subject ?? DEFAULT_SUBJECT,
@@ -1075,15 +1397,29 @@ function askNext() {
     // and seeing it both ways is how commutativity gets taught without a lesson about it.
     // Turning a *difference* round would not be the same question at all.
     shown: sum ? shownForm(question) : question,
-    layout: sum ? math.layoutOf(question) : 'clock',
+    layout,
+    stacked: layout === 'column',
     width,
-    digits: emptyBoxes(width),
-    // One per column plus one for anything that runs off the top. Scratch only.
-    carries: sum ? new Array(width).fill(false) : [],
+    rows: rows.map(emptyRow),
+    row: 0,
+    // Where the next digit lands, for a question written in columns: the ones of the top row,
+    // because that is where the work starts. An inline answer has no cursor — its digits
+    // shuffle left and the newest lands on the right.
+    cursor: layout === 'column' ? { row: 0, index: rows[0] - 1 } : null,
+    // One row of scratch per run down the columns: one for a sum, one per partial product for a
+    // multiplication, none at all for anything written on a single line. Never read, never graded.
+    carries: Array.from({ length: sum ? math.carryRows(item, question) : 0 }, () =>
+      new Array(width).fill(null)
+    ),
+    // Which carry box the cursor is in, when it is in one at all.
+    focus: null,
     clears: 0,
     startedAt: now(),
     reversals: 0,
   };
+  // The prompt's shape is rebuilt rather than patched whenever it changes, and a new question
+  // always changes it.
+  promptShape = null;
 
   const writing = sum && writingWanted();
   el.answerClock.hidden = sum;
@@ -1093,7 +1429,8 @@ function askNext() {
   el.tenframeHost.hidden = true;
   el.tenframeHost.innerHTML = '';
   if (writing) {
-    if (writeSlots.length !== current.width) buildWriteBoxes(current.width);
+    const row = current.rows[0];
+    if (writeSlots.length !== row.width) buildWriteBoxes(row.width);
     resetWriting();
     // The pads were laid out while hidden, where they had no size to measure.
     for (const slot of writeSlots) slot.pad.resize();
@@ -1146,6 +1483,12 @@ const MATH_VERDICTS = {
   gapGaveProduct: 'teach.gapGaveProduct',
   gapGaveFactor: 'teach.gapGaveFactor',
   gapTookAway: 'teach.gapTookAway',
+  mulForgotShift: 'teach.mulColForgotShift',
+  mulCarriedFirst: 'teach.mulColCarriedFirst',
+  mulFullProductInColumn: 'teach.mulColFullProduct',
+  mulForgotColCarry: 'teach.mulColForgotCarry',
+  mulOnlyOnes: 'teach.mulColOnlyOnes',
+  mulAddedInstead: 'teach.mulColAddedInstead',
 };
 
 /**
@@ -1161,6 +1504,13 @@ function sumTeachLine(result) {
   const question = current.shown;
   const named = MATH_VERDICTS[result.verdict];
   const opening = (result.nearMiss ? t('teach.nearMiss') : '') + (named ? `${t(named)} ` : '');
+  if (current.layout === 'column' && question.op === '×') {
+    return opening + t('teach.mulColPlain', {
+      a: question.a,
+      b: question.b,
+      total: question.a * question.b,
+    });
+  }
   if (current.layout === 'column') {
     return opening + t(question.op === '-' ? 'teach.colSubPlain' : 'teach.colAddPlain', {
       a: question.a,
@@ -1534,7 +1884,21 @@ async function correctSum(target, result) {
   el.feedback.className = 'feedback teach';
   const still = reduceMotion();
   el.tenframeHost.hidden = false;
-  if (current.layout === 'column') {
+  if (current.layout === 'column' && question.op === '×') {
+    // The stacked multiplication's walkthrough, and it walks *one row* — the first that went
+    // wrong, which the grader named. The rest of the stack is drawn finished: a child who got
+    // the ones row right does not need to watch it done again, and 247 × 38 worked through in
+    // full is ten columns and the better part of half a minute on every miss.
+    const instant = still || Boolean(state.settings.walkInstant);
+    const step = stepFor(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+    const opts = { row: result.row ?? 0, width: current.width };
+    el.tenframeHost.innerHTML = mulWalkHtml(question, {
+      ...opts,
+      step: instant ? 0 : step,
+      title: t.spokenQuestion(question),
+    });
+    await wait(instant ? 1200 + current.width * 300 : mulWalkDuration(question, { ...opts, step }));
+  } else if (current.layout === 'column') {
     // The column's counterpart to the clock's ghost hands: it does not say the answer, it does
     // the work — the ones column, then the carry lifting into the box above the tens.
     //
@@ -1611,6 +1975,7 @@ function startNap() {
   state.session = session.beginNap({ ...state.session, startedAt: 0 }, now());
   save();
   audio.play('nap');
+  clearCarryPads();
   current = null;
   locked = true;
   renderNapPets();
@@ -2774,6 +3139,7 @@ function runImport(text) {
   saver.flush();
   // The zoo that was in flight belongs to the save that has just been replaced, and so does
   // whichever pet the stall was serving.
+  clearCarryPads();
   current = null;
   lastAskedId = null;
   shopPetId = null;

@@ -715,6 +715,48 @@ main {
   border-color: var(--pz-warm);
 }
 
+/* A multiplication's carry is a number rather than a one, so its box is somewhere the cursor
+   can be rather than a switch. The focused one is where the next digit typed will land. */
+.cw-carrybox.is-focus {
+  border-style: solid;
+  border-color: var(--pz-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pz-accent) 30%, transparent);
+}
+
+/* And on a touch screen it is written in, like everything else. Scratch either way: nothing
+   reads these, so a misreading here costs a child nothing at all. */
+.cw-carrypad {
+  cursor: crosshair;
+  touch-action: none;
+  position: relative;
+}
+
+.cw-carrypad canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* A stacked multiplication is two partial products and a total, so it is taller than any sum
+   and its rows need to sit closer together to stay on one screen. */
+.colwalk.is-mul {
+  font-size: 1.45rem;
+  gap: 0.02rem 0.3rem;
+}
+
+/* The partial products are working, not the answer — present, and a shade quieter than the
+   total they add up to. */
+.colwalk.is-mul .cw-partial .slot,
+.colwalk.is-mul .cw-partial .cw-cell {
+  color: var(--pz-ink-soft);
+}
+
+/* A digit already worked out, in a row the walkthrough is not walking. */
+.cw-done {
+  opacity: 0.85;
+}
+
 /* The answer boxes, drawn like the inline strip's so the two feel like one game. */
 .cw-answer .slot {
   display: block;
