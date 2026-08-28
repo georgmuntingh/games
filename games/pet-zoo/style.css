@@ -1007,6 +1007,17 @@ main {
   line-height: 1.35;
 }
 
+/* Between questions there is nothing to say, and an empty paragraph holding two lines of
+   height open is sixty pixels of nothing above the button — which is what pushed that button
+   off the bottom of a phone once a stacked multiplication got tall. So it collapses when it is
+   empty and only takes room when it has something to say. The button does move down when a
+   correction appears, but the game is locked while one is on screen, so nothing is under the
+   child's finger at the moment it happens. */
+.feedback:empty {
+  min-height: 0;
+  margin: 0;
+}
+
 .feedback.good {
   color: var(--pz-good);
 }
