@@ -102,7 +102,10 @@ import * as addSubject from '../subjects/math/index.js';
 import * as mathFacts from '../subjects/math/facts.js';
 import * as mathSkills from '../subjects/math/skills.js';
 import * as mathColumns from '../subjects/math/columns.js';
+import * as mathTimes from '../subjects/math/times.js';
+import { mulWalkHtml, stackedMulMarkup } from '../column.js';
 import { ALL_VERDICTS } from '../subjects/math/grade.js';
+import { arrayPlan, arraySvg } from '../array.js';
 import {
   columnWalkHtml,
   DEFAULT_WALK_SPEED,
@@ -3655,16 +3658,28 @@ test('an unanswered question is never scored as a wrong one', () => {
 
 describe('adding — how wide the answer box is');
 
-test('the strip never changes width, whatever the fact is', () => {
+test('the strip never changes width within a deck, whatever the fact is', () => {
   // A strip that narrowed for small sums would say "this one is under ten" before the child
-  // had added anything.
-  // One width per item, and the same one for every fact: a strip that narrowed would say the
-  // answer is small before the child had worked it out.
-  const widths = new Set(
-    addSubject.ALL_ITEMS.filter((entry) => !entry.skill).map((entry) => addSubject.answerWidth(entry))
-  );
-  assertEqual(widths.size, 1, 'the width of the answer is a clue');
+  // had added anything. So the width is one number for every fact a child meets written the
+  // same way — sums and differences, products, missing factors — rather than one number for
+  // the whole game: a question shaped differently on screen gives nothing away by being
+  // answered in a differently sized box.
+  const decks = {
+    plusMinus: (entry) => !entry.skill && entry.op !== '×',
+    products: (entry) => entry.op === '×' && !entry.gap,
+    missing: (entry) => entry.op === '×' && entry.gap,
+  };
+  for (const [name, inDeck] of Object.entries(decks)) {
+    const deck = addSubject.ALL_ITEMS.filter(inDeck);
+    assert(deck.length > 0, `${name} is empty`);
+    const widths = new Set(deck.map((entry) => addSubject.answerWidth(entry)));
+    assertEqual(widths.size, 1, `the width of the answer is a clue in ${name}`);
+  }
   assertEqual(addSubject.answerWidth({ op: '+', a: 3, b: 5 }), 2);
+  // Three, because the deck reaches 10 × 10 — so a two-digit product sits in it with the
+  // leading box blank rather than announcing itself by making the strip shorter.
+  assertEqual(addSubject.answerWidth({ op: '×', a: 3, b: 5 }), 3);
+  assertEqual(addSubject.answerWidth({ op: '×', a: 3, b: 5, gap: true }), 2);
 });
 
 test('every answer in the deck fits in the strip', () => {
@@ -3686,9 +3701,9 @@ test('every answer in the deck fits in the strip', () => {
 
 describe('maths — the whole ladder');
 
-test('nineteen rungs, in four groups, with nothing left out of either', () => {
-  assertEqual(addSubject.TIERS.length, 19);
-  assertEqual(addSubject.LAST_TIER, 18);
+test('thirty-seven rungs, in seven groups, with nothing left out of either', () => {
+  assertEqual(addSubject.TIERS.length, 37);
+  assertEqual(addSubject.LAST_TIER, 36);
   const grouped = addSubject.GROUPS.flatMap((group) => group.tiers);
   assertEqual(grouped.join(), addSubject.TIERS.map((tier) => tier.id).join(), 'a rung fell out of its group');
   assertEqual(new Set(grouped).size, grouped.length, 'a rung is in two groups at once');
@@ -4176,6 +4191,403 @@ test('a skill hatches a pet like anything else', () => {
   assert(portrait.index >= 0);
 });
 
+describe('maths — the times tables');
+
+test('six product rungs and six missing-factor rungs, exactly the sizes they were designed', () => {
+  // The pairs are unordered, so there are fifty-five products rather than a hundred; the
+  // missing-factor deck asks each non-square pair from both ends, which is why it is a
+  // hundred rather than another fifty-five.
+  const products = mathTimes.ALL_TIMES.filter((entry) => !entry.gap);
+  const missing = mathTimes.ALL_TIMES.filter((entry) => entry.gap);
+  assertEqual(products.length, 55, 'the products are not the unordered pairs to ten');
+  assertEqual(missing.length, 100, 'the missing-factor deck lost a direction');
+  assertEqual(
+    [19, 20, 21, 22, 23, 24].map((t) => addSubject.tierItems(t).length).join(),
+    '19,8,7,6,9,6',
+    'a product changed rung'
+  );
+  assertEqual(
+    [25, 26, 27, 28, 29, 30].map((t) => addSubject.tierItems(t).length).join(),
+    '36,15,13,6,18,12',
+    'a missing factor changed rung'
+  );
+});
+
+test('the rungs are strategies, and each pair is on exactly one of them', () => {
+  const seen = new Map();
+  for (let a = 1; a <= 10; a += 1) {
+    for (let b = a; b <= 10; b += 1) {
+      const tier = mathTimes.timesTierOf({ a, b });
+      assert(tier >= 19 && tier <= 24, `${a}×${b} landed off the times ladder`);
+      seen.set(`${a}x${b}`, tier);
+    }
+  }
+  assertEqual(seen.size, 55);
+  // The lessons the rungs are named after, spot-checked where two rules could both apply.
+  assertEqual(mathTimes.timesTierOf({ a: 2, b: 10 }), 19, 'ten wins over two — it is the plainer rule');
+  assertEqual(mathTimes.timesTierOf({ a: 2, b: 5 }), 20, 'and doubling wins over five');
+  assertEqual(mathTimes.timesTierOf({ a: 5, b: 5 }), 21, 'twenty-five is a five before it is a square');
+  assertEqual(mathTimes.timesTierOf({ a: 7, b: 7 }), 22);
+  assertEqual(mathTimes.timesTierOf({ a: 3, b: 9 }), 23);
+  assertEqual(mathTimes.timesTierOf({ a: 7, b: 8 }), 24, 'the hardest one is on the last rung');
+  // Six rungs above, mirroring the six below them.
+  assertEqual(mathTimes.gapTierOf({ a: 7, b: 8 }), 30);
+  assertEqual(mathTimes.gapTierOf({ a: 8, b: 7 }), 30, 'both directions sit on the same rung');
+});
+
+test('a product is one pet, however the pair is written', () => {
+  assertEqual(addSubject.idOf({ op: '×', a: 7, b: 3 }), 'mul:3x7');
+  assertEqual(addSubject.idOf({ op: '×', a: 3, b: 7 }), 'mul:3x7');
+  assert(addSubject.owns('mul:3x7'), 'the canonical spelling is the fact');
+  assert(!addSubject.owns('mul:7x3'), 'and the other spelling is not a second pet');
+  assert(!addSubject.owns('mul:0x5'), 'nothing is multiplied by nothing here');
+  assert(!addSubject.owns('mul:3x11'), 'eleven is off the end of the tables');
+  assert(!addSubject.owns('mul:3x'), 'nor is half an id');
+});
+
+test('a missing factor is stored as the two numbers on screen', () => {
+  // `mis:7x56` is "7 × __ = 56": the factor shown and the product, because those are the
+  // numbers a child can see. What they have to supply is derived, which is also why an id
+  // whose product does not divide describes nothing.
+  assertEqual(addSubject.idOf({ op: '×', a: 7, b: 8, gap: true }), 'mis:7x56');
+  assertEqual(addSubject.idOf({ op: '×', a: 8, b: 7, gap: true }), 'mis:8x56');
+  assert(addSubject.owns('mis:7x56') && addSubject.owns('mis:8x56'), 'a direction went missing');
+  assert(!addSubject.owns('mis:7x57'), 'fifty-seven is not seven of anything');
+  assert(!addSubject.owns('mis:7x140'), 'twenty is off the end of the tables');
+  assert(!addSubject.owns('mis:07x56'), 'a padded id is not a second pet for one question');
+  for (const entry of mathTimes.ALL_TIMES) {
+    assertEqual(addSubject.idOf(entry), entry.id, `${entry.id} does not round-trip`);
+    assert(addSubject.owns(entry.id), `${entry.id} is not owned by the subject that teaches it`);
+    assertEqual(mathTimes.answerOf(entry), entry.gap ? entry.b : entry.a * entry.b);
+  }
+});
+
+test('every non-square pair is asked from both ends, and a square only from one', () => {
+  const hunted = new Map();
+  for (const entry of mathTimes.ALL_TIMES.filter((e) => e.gap)) {
+    const pair = `${Math.min(entry.a, entry.b)}x${Math.max(entry.a, entry.b)}`;
+    hunted.set(pair, (hunted.get(pair) ?? 0) + 1);
+  }
+  assertEqual(hunted.size, 55, 'a pair has no missing-factor question at all');
+  for (const [pair, n] of hunted) {
+    const [a, b] = pair.split('x').map(Number);
+    assertEqual(n, a === b ? 1 : 2, `${pair} is asked ${n} times`);
+  }
+});
+
+test('each multiplication mistake is named, by running the mistake', () => {
+  // Built rather than hand-computed: the wrong answer is produced by doing the wrong thing,
+  // so a verdict cannot pass by coincidence.
+  const verdict = (q, answer) => addSubject.grade(q, answer).verdict;
+  const q = { op: '×', a: 7, b: 8 };
+  assertEqual(verdict(q, '56'), 'correct');
+  assertEqual(verdict(q, '15'), 'mulGaveSum', 'the sign read as a plus');
+  assertEqual(verdict(q, '7'), 'mulGaveFactor');
+  assertEqual(verdict(q, String(7 * 7)), 'mulOffByOneRow', 'one row short');
+  assertEqual(verdict(q, String(9 * 7)), 'mulOffByOneRow', 'and one row long');
+  assertEqual(verdict(q, String(6 * 7)), 'mulNeighbour', 'a real seven, just not eight of them');
+  assertEqual(verdict(q, '55'), 'offByOne');
+  assertEqual(verdict(q, '65'), 'transposed');
+  assertEqual(verdict(q, '31'), 'wrong');
+  for (const empty of [null, undefined, '', 'x', -1]) {
+    assertEqual(verdict(q, empty), 'blank', `${JSON.stringify(empty)} became an answer`);
+  }
+  // A wrong way that happens to give the right answer is a coincidence, not a mistake.
+  assertEqual(verdict({ op: '×', a: 2, b: 2 }, '4'), 'correct', '2 + 2 and 2 × 2 are both four');
+});
+
+test('"so close" is only said about something that was close', () => {
+  // One row out of seven is nearly right. One row out of two is not nearly anything, and
+  // being kind about it would be the game telling a child they almost had a fact they simply
+  // do not have yet.
+  assert(addSubject.grade({ op: '×', a: 7, b: 8 }, String(7 * 7)).nearMiss, 'seven eights, one row short');
+  assert(addSubject.grade({ op: '×', a: 6, b: 7 }, String(5 * 7)).nearMiss);
+  const small = addSubject.grade({ op: '×', a: 1, b: 3 }, '6');
+  assertEqual(small.verdict, 'mulOffByOneRow', 'it is still a row out');
+  assert(!small.nearMiss, 'double the answer is not "so close"');
+  assert(!addSubject.grade({ op: '×', a: 3, b: 4 }, '16').nearMiss, 'a third out is not "so close"');
+  // These two are softened whatever the numbers are: both are an answer the child had and
+  // lost on the way to the page.
+  assert(addSubject.grade({ op: '×', a: 1, b: 3 }, '2').nearMiss, 'one out is always a miscount');
+  assert(addSubject.grade({ op: '×', a: 7, b: 8 }, '65').nearMiss, 'and so are swapped digits');
+});
+
+test('each missing-factor mistake is named too', () => {
+  const verdict = (q, answer) => addSubject.grade(q, answer).verdict;
+  const q = { op: '×', a: 7, b: 8, gap: true };
+  assertEqual(verdict(q, '8'), 'correct');
+  assertEqual(verdict(q, '56'), 'gapGaveProduct', 'the product written back');
+  assertEqual(verdict(q, '7'), 'gapGaveFactor', 'the number they already had');
+  assertEqual(verdict(q, String(56 - 7)), 'gapTookAway', 'subtracted instead of divided');
+  assertEqual(verdict(q, '9'), 'offByOne');
+  assertEqual(verdict(q, '3'), 'wrong');
+  // A near miss is softened; a whole wrong idea is not.
+  assert(addSubject.grade(q, '9').nearMiss, 'one out is a miscount');
+  assert(!addSubject.grade(q, '56').nearMiss, 'writing the product back is not "nearly"');
+});
+
+test('a missing factor is drawn with the strip inside the equation', () => {
+  assertEqual(addSubject.layoutOf({ op: '×', a: 7, b: 8 }), 'inline');
+  assertEqual(addSubject.layoutOf({ op: '×', a: 7, b: 8, gap: true }), 'gap');
+  // And it is given longer, because it is hunted rather than recalled — without that the
+  // scheduler reads every thoughtful right answer as a hesitant one.
+  assert(
+    addSubject.paceOf({ op: '×', a: 7, b: 8, gap: true }) > addSubject.paceOf({ op: '×', a: 7, b: 8 }),
+    'hunting for a factor is not given any longer than saying a product'
+  );
+});
+
+test('growing the ladder left every pet a child already has exactly where it was', () => {
+  // The one rule the whole placement rests on: `pets.js` hands out species and trait indices
+  // by *position* in `math.ALL_ITEMS`, so the times tables had to be appended and not
+  // inserted. Pinned to the values from before they existed — a pet that came back a
+  // different colour with a different name would be a bug with feelings attached.
+  const pinned = [
+    [{ subject: 'math', op: '+', a: 3, b: 5 }, 'add:3+5 glim 6'],
+    [{ subject: 'math', op: '+', a: 7, b: 8 }, 'add:7+8 pip 12'],
+    [{ subject: 'math', op: '+', a: 0, b: 10 }, 'add:0+10 mochi 9'],
+    [{ subject: 'math', op: '-', a: 15, b: 8 }, 'sub:15-8 noodle 25'],
+    [{ subject: 'math', op: '-', a: 20, b: 10 }, 'sub:20-10 bubs 32'],
+    [{ subject: 'math', skill: 'col+2c' }, 'skill:col+2c noodle 27'],
+    [{ subject: 'math', skill: 'col-32' }, 'skill:col-32 cloudlet 28'],
+    [{ subject: 'clock', h: 4, m: 15 }, '4:15 fizz 1'],
+  ];
+  for (const [item, expected] of pinned) {
+    const p = portraitOf(item);
+    assertEqual(`${p.key} ${p.species} ${p.index}`, expected, 'a pet moved');
+  }
+  // And structurally, not only by sample: every addition of new material has gone on the end.
+  // The first two hundred and four items are the sums, differences and methods that were there
+  // before the times tables; the hundred and fifty-five after them are the times deck; and the
+  // stacked multiplication skills come after that.
+  const items = addSubject.ALL_ITEMS;
+  assert(items.slice(0, 204).every((entry) => entry.op !== '×'), 'a times fact was inserted rather than appended');
+  assertEqual(items.slice(204, 359).filter((entry) => entry.op === '×' && !entry.skill).length, 155,
+    'the times deck moved');
+  assert(
+    items.slice(359).every((entry) => Boolean(entry.skill)),
+    'something other than the column-multiplication skills was appended'
+  );
+});
+
+test('a times fact hatches a pet like anything else', () => {
+  for (const item of [
+    { subject: 'math', op: '×', a: 7, b: 8 },
+    { subject: 'math', op: '×', a: 7, b: 8, gap: true },
+  ]) {
+    const portrait = portraitOf(item);
+    assert(SPECIES_IDS.includes(portrait.species), `${portrait.key} got no creature`);
+    assert(portrait.index >= 0);
+  }
+  // The two are separate pets, or the grid would show one question twice.
+  assert(portraitOf({ subject: 'math', op: '×', a: 7, b: 8 }).key !==
+    portraitOf({ subject: 'math', op: '×', a: 7, b: 8, gap: true }).key);
+});
+
+describe('maths — the array that explains a wrong product');
+
+test('the array is the question as it was written: a rows of b', () => {
+  const plan = arrayPlan(7, 8);
+  assertEqual(plan.rows, 7, 'seven times eight is seven rows of eight');
+  assertEqual(plan.cols, 8);
+  assertEqual(plan.cells.length, 56);
+  assertEqual(plan.total, 56);
+  // The running total beside each row is the skip-counting written down.
+  assertEqual(plan.totals.join(), '8,16,24,32,40,48,56');
+  assertEqual(plan.totals[plan.totals.length - 1], plan.total, 'the last total is the answer');
+  // Every cell once, and no cell twice.
+  const seen = new Set(plan.cells.map((c) => `${c.row},${c.col}`));
+  assertEqual(seen.size, 56, 'a dot landed on top of another');
+});
+
+test('every product in the deck can be drawn, and drawn the same way twice', () => {
+  for (const entry of mathTimes.ALL_TIMES.filter((e) => !e.gap)) {
+    const plan = arrayPlan(entry.a, entry.b);
+    assertEqual(plan.total, entry.a * entry.b, `${entry.id} drew the wrong number of dots`);
+    assertEqual(arraySvg(entry.a, entry.b), arraySvg(entry.a, entry.b), `${entry.id} is not stable`);
+  }
+  // A still frame is what reduced motion and "skip the working" both ask for.
+  assert(arraySvg(3, 4, { step: 0 }).includes('--ar-delay:0.00s'), 'a still frame still waits');
+});
+
+describe('maths — multiplying with the numbers stacked');
+
+test('six rungs, and the shift is taught before it is needed', () => {
+  const rungs = [31, 32, 33, 34, 35, 36].map((tier) => addSubject.tierItems(tier));
+  assert(rungs.every((rows) => rows.length === 1), 'a rung holds something other than one method');
+  assertEqual(
+    rungs.flat().map((entry) => entry.skill).join(' '),
+    'tensx colx21 colx21c colx31c colx22 colx32',
+    'the rungs are not in teaching order'
+  );
+  // Multiplying by a whole ten comes first and is written on one line, because it is the
+  // observation the shift rests on rather than a use of it.
+  assert(!mathSkills.isColumn('tensx'), 'the whole-tens rung should be inline');
+  assert(mathSkills.isColumn('colx22'), 'the two-by-two rung should be stacked');
+});
+
+test('the rows are the method: two partial products and their total', () => {
+  assertEqual(mathColumns.mulRows(47, 38).join(), '376,1410,1786');
+  // Written with its zeros on the end, not indented — the notation this game teaches.
+  assertEqual(mathColumns.mulRows(247, 38).join(), '1976,7410,9386');
+  // A single-digit multiplier has nothing to add up, so its answer is the one row.
+  assertEqual(mathColumns.mulRows(47, 8).join(), '376');
+  assertEqual(addSubject.answerRows({ skill: 'colx32' }).join(), '4,5,5');
+  assertEqual(addSubject.answerRows({ skill: 'colx22' }).join(), '3,4,4');
+  assertEqual(addSubject.answerRows({ skill: 'colx21c' }).join(), '3');
+});
+
+test('the working never says how big the answer is going to be', () => {
+  // Rows and widths are a property of the skill, so the strip is the same shape whatever
+  // numbers get drawn — a stack that narrowed for a small product would hand it over.
+  for (const skill of ['tensx', 'colx21', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    const rows = addSubject.answerRows({ skill });
+    const seen = new Set();
+    for (let seed = 1; seed <= 80; seed += 1) {
+      const q = mathSkills.generate(skill, { seed });
+      seen.add(addSubject.answerRows({ skill }).join());
+      // And every question really does fit in the boxes it is given.
+      const wanted = mathColumns.mulRows(q.a, q.b);
+      if (!mathSkills.isColumn(skill)) {
+        assert(String(q.a * q.b).length <= mathSkills.widthOf(skill), `${skill} overflows its strip`);
+        continue;
+      }
+      assertEqual(wanted.length, rows.length, `${skill} drew ${wanted.length} rows for ${rows.length}`);
+      wanted.forEach((value, i) => {
+        assert(String(value).length <= rows[i], `${skill}: ${q.a}x${q.b} row ${i} overflows`);
+      });
+    }
+    assertEqual(seen.size, 1, `${skill} changes shape with its numbers`);
+  }
+});
+
+test('no question on these rungs multiplies by one, or by a whole ten', () => {
+  // A multiplier ending in zero would ask for a row of zeros to be written out, and whole tens
+  // are tier 31's own question. "23 x 1" is not a question about a method at all.
+  for (const skill of ['colx21', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const q = mathSkills.generate(skill, { seed });
+      assert(q.b % 10 !== 0, `${skill} drew ${q.a} x ${q.b}`);
+      assert(q.b !== 1, `${skill} drew a multiplier of one`);
+    }
+  }
+});
+
+test('every step of the method agrees with the answer it comes to', () => {
+  for (const skill of ['colx21', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const { a, b } = mathSkills.generate(skill, { seed });
+      const { partials, total } = mathColumns.mulSteps(a, b);
+      assertEqual(total, a * b, `${a} x ${b}`);
+      // Each partial product is its own run down the multiplicand, carries and all.
+      for (const partial of partials) {
+        const built = mathColumns.fromDigits(partial.steps.map((step) => step.digit));
+        assertEqual(built, a * partial.digit, `${a} x ${partial.digit}`);
+        // A carry out of one column is the carry into the next, never anywhere else.
+        partial.steps.forEach((step, i) => {
+          assertEqual(step.carryIn, i === 0 ? 0 : partial.steps[i - 1].carryOut, 'a carry went astray');
+          assertEqual(step.top * step.by + step.carryIn, step.carryOut * 10 + step.digit);
+        });
+      }
+      assertEqual(partials.reduce((sum, p) => sum + p.value, 0), a * b, 'the rows do not add up');
+    }
+  }
+});
+
+test('each column-multiplication mistake is named, by running the mistake', () => {
+  const verdict = (q, answer) => addSubject.grade(q, answer).verdict;
+  const stacked = (a, b) => ({ op: '×', a, b, column: true });
+
+  const one = stacked(47, 8); // one row: 376
+  assertEqual(verdict(one, ['376']), 'correct');
+  assertEqual(verdict(one, [String(mathColumns.carriedBeforeMultiplying(47, 8))]), 'mulCarriedFirst');
+  assertEqual(verdict(one, [String(mathColumns.wroteFullProductInColumn(47, 8))]), 'mulFullProductInColumn');
+  assertEqual(verdict(one, [String(mathColumns.forgotMulCarry(47, 8))]), 'mulForgotColCarry');
+  assertEqual(verdict(one, ['55']), 'mulAddedInstead');
+  assertEqual(verdict(one, ['375']), 'offByOne');
+  assertEqual(verdict(one, ['476']), 'placeValueOff');
+  for (const empty of [null, undefined, '', 'x', -1]) {
+    assertEqual(verdict(one, [empty]), 'blank', `${JSON.stringify(empty)} became an answer`);
+  }
+
+  const two = stacked(47, 38); // 376, 1410, 1786
+  assertEqual(verdict(two, ['376', '1410', '1786']), 'correct');
+  // The famous one: the second row is right but sitting under the ones.
+  assertEqual(verdict(two, ['376', '141', '517']), 'mulForgotShift');
+  assertEqual(verdict(two, ['376', '141', String(mathColumns.forgotShift(47, 38))]), 'mulForgotShift');
+  assertEqual(verdict(two, ['376', '0', '376']), 'mulOnlyOnes');
+
+  // A wrong way that happens to give the right answer is a coincidence, not a mistake.
+  assertEqual(verdict(stacked(12, 4), ['48']), 'correct', '12 x 4 has no carry to forget');
+});
+
+test('every row has to be right, and the grader says which one was not', () => {
+  const two = { op: '×', a: 47, b: 38, column: true };
+  const right = addSubject.grade(two, ['376', '1410', '1786']);
+  assert(right.correct);
+  assertEqual(right.rows.join(), 'true,true,true');
+
+  // Multiplied correctly and then added the two rows up wrongly: not finished, so not right.
+  const badTotal = addSubject.grade(two, ['376', '1410', '1785']);
+  assert(!badTotal.correct, 'a wrong total passed');
+  assertEqual(badTotal.row, 2, 'the total is the row that went wrong');
+  assertEqual(badTotal.verdict, 'offByOne');
+
+  const badFirst = addSubject.grade(two, ['370', '1410', '1780']);
+  assertEqual(badFirst.row, 0, 'the first wrong row is the one to walk');
+  assert(!badFirst.correct);
+});
+
+test('the walkthrough walks one row, and draws the rest finished', () => {
+  const q = { op: '×', a: 247, b: 38 };
+  const rows = [0, 1, 2].map((row) => mulWalkHtml(q, { row, width: 5, step: 1 }));
+  for (const html of rows) {
+    // Every row of the stack is on screen, whichever one is moving.
+    assertEqual((html.match(/cw-answer/g) ?? []).length, 3, 'a row of the working went missing');
+    assertEqual((html.match(/cw-rule/g) ?? []).length, 2, 'the second rule went missing');
+    assert(html.includes('cw-lands'), 'nothing is being walked at all');
+  }
+  // Carries belong to a partial product; the final addition has none to show.
+  assert(rows[0].includes('cw-mark'), 'the first row shows no carries');
+  assert(!rows[2].includes('cw-mark'), 'the total should not claim carries of its own');
+  // A single-digit multiplier is one row and one rule.
+  const single = mulWalkHtml({ op: '×', a: 47, b: 8 }, { row: 0, width: 3, step: 1 });
+  assertEqual((single.match(/cw-rule/g) ?? []).length, 1);
+});
+
+test('the stacked question offers somewhere to write every carry', () => {
+  const cell = (n) => Array.from({ length: n }, () => '<span class="slot"></span>');
+  const html = stackedMulMarkup(
+    { a: 247, b: 38 },
+    {
+      width: 5,
+      rows: [
+        { slots: cell(4), carries: cell(5) },
+        { slots: cell(5), carries: cell(5) },
+        { slots: cell(5) },
+      ],
+    }
+  );
+  // One carry row per partial product, and none for the final addition — which is column
+  // addition, taught eighteen rungs below this one.
+  assertEqual((html.match(/cw-carries/g) ?? []).length, 2);
+  assertEqual((html.match(/cw-answer/g) ?? []).length, 3);
+  assertEqual((html.match(/cw-rule/g) ?? []).length, 2);
+  assertEqual(addSubject.carryRows({ skill: 'colx32' }, { column: true, op: '×', a: 247, b: 38 }), 2);
+  assertEqual(addSubject.carryRows({ skill: 'colx21c' }, { column: true, op: '×', a: 47, b: 8 }), 1);
+  assertEqual(addSubject.carryRows({ op: '×', a: 7, b: 8 }, { op: '×', a: 7, b: 8 }), 0);
+});
+
+test('a stack of working is given longer than a single line of it', () => {
+  // Three rows to write is not one row to write, and without this the scheduler would read
+  // every correct answer on the last rung as a hesitant one.
+  assert(
+    addSubject.paceOf({ skill: 'colx32' }) > addSubject.paceOf({ skill: 'col+3' }),
+    'a three-row multiplication is not given longer than a column sum'
+  );
+  assert(addSubject.paceOf({ skill: 'colx21c' }) <= addSubject.paceOf({ skill: 'colx32' }));
+});
+
 describe('maths — every mistake has something to say about it');
 
 test('every verdict has a sentence, in both languages', () => {
@@ -4199,6 +4611,19 @@ test('every verdict has a sentence, in both languages', () => {
     addedInstead: 'teach.colAddedInstead',
     subtractedInstead: 'teach.colSubtractedInstead',
     placeValueOff: 'teach.colPlaceValueOff',
+    mulGaveSum: 'teach.mulGaveSum',
+    mulGaveFactor: 'teach.mulGaveFactor',
+    mulOffByOneRow: 'teach.mulOffByOneRow',
+    mulNeighbour: 'teach.mulNeighbour',
+    gapGaveProduct: 'teach.gapGaveProduct',
+    gapGaveFactor: 'teach.gapGaveFactor',
+    gapTookAway: 'teach.gapTookAway',
+    mulForgotShift: 'teach.mulColForgotShift',
+    mulCarriedFirst: 'teach.mulColCarriedFirst',
+    mulFullProductInColumn: 'teach.mulColFullProduct',
+    mulForgotColCarry: 'teach.mulColForgotCarry',
+    mulOnlyOnes: 'teach.mulColOnlyOnes',
+    mulAddedInstead: 'teach.mulColAddedInstead',
   };
   // `correct`, `blank` and `wrong` are the three with nothing to name: they get the plain
   // closing sentence rather than a diagnosis.

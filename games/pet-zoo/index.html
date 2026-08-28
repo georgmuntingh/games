@@ -37,7 +37,7 @@
 
       <!-- ---------------------------------------------------------- feeding -->
       <section id="play-scene" class="scene">
-        <div class="prompt-card">
+        <div id="prompt-card" class="prompt-card">
           <div id="pet-stage" class="pet-stage"></div>
           <div class="prompt-text">
             <p id="prompt-line" class="prompt-line" data-i18n="prompt.booting">Vekker dyrehagen…</p>
@@ -76,6 +76,12 @@
               </button>
               <button id="write-clear" type="button" class="write-tool" data-i18n="answer.clear">
                 Tøm
+              </button>
+              <!-- Only for an answer written on more than one line: a stacked multiplication.
+                   The pads serve one row at a time, and this is how a child says that row is
+                   done and the next one is theirs. -->
+              <button id="write-next" type="button" class="write-tool" data-i18n="answer.nextRow" hidden>
+                Neste rad
               </button>
             </div>
           </div>
