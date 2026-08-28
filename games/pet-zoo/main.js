@@ -149,6 +149,7 @@ const el = {
   playScene: $('play-scene'),
   napScene: $('nap-scene'),
   zooScene: $('zoo-scene'),
+  promptCard: $('prompt-card'),
   petStage: $('pet-stage'),
   promptLine: $('prompt-line'),
   promptDigital: $('prompt-digital'),
@@ -756,6 +757,10 @@ function renderAnswer() {
 }
 
 function buildPrompt() {
+  // A stacked question's columns are finger-sized, and five of them will not fit beside the
+  // pet — so the card lays itself out differently and the working goes underneath. Only the
+  // stack moves; the clock, the inline sums and the times tables are untouched.
+  el.promptCard.classList.toggle('is-stacked', current.layout === 'column');
   const slots = current.rows.map((row, r) => slotMarkup(row, r));
   if (current.layout === 'column' && current.shown.op === '×') {
     el.promptSum.innerHTML = stackedMulMarkup(current.shown, {
@@ -817,8 +822,10 @@ function paintAnswer() {
  *
  * A column sum's carry is always a one, so its box is a one-tap toggle and has been since the
  * column tiers arrived. A multiplication's is anything from one to eight — 9 × 9 is 81 — so
- * those boxes take a real digit: tapped to focus and then typed into, or written in, whichever
- * way the child is answering the question itself.
+ * those boxes take a real digit, and which widget that is follows *how the child is answering
+ * the question*, not what device they are on: writing the answer means writing the carry, and
+ * typing or tapping the answer means tapping the box to put the cursor in it and filling it
+ * from the keyboard or the keypad. One rule everywhere, rather than one widget everywhere.
  */
 function carryMarkup(rowIndex) {
   if (!current.carries[rowIndex]) return [];
@@ -900,6 +907,19 @@ function setCarry(row, index, digit) {
 const blankCarries = (c) => c.carries.map((row) => row.map(() => null));
 
 /**
+ * Put a digit in the carry box the cursor is in, and give the cursor straight back to the
+ * answer. A carry is one digit long — holding on to the cursor after it would mean the next
+ * digit the child typed quietly overwrote the note they had just made, which is a nasty way to
+ * lose your working.
+ */
+function fillFocusedCarry(digit) {
+  const { row, index } = current.focus;
+  current.focus = null;
+  setCarry(row, index, Number(digit));
+  audio.play('tick');
+}
+
+/**
  * A typed digit, whichever way the child is answering. In writing mode it fills the next empty
  * box rather than being ignored — a grown-up sitting beside a child on a touchscreen laptop
  * will reach for the keyboard, and having it do nothing there would be a small mystery for no
@@ -907,8 +927,7 @@ const blankCarries = (c) => c.carries.map((row) => row.map(() => null));
  */
 function typeDigit(digit) {
   if (current?.focus) {
-    setCarry(current.focus.row, current.focus.index, Number(digit));
-    audio.play('tick');
+    fillFocusedCarry(digit);
     return;
   }
   if (!writingWanted()) {
@@ -938,8 +957,7 @@ function typeDigit(digit) {
 function pushDigit(digit) {
   if (locked || !current || !isSum(current)) return;
   if (current.focus) {
-    setCarry(current.focus.row, current.focus.index, Number(digit));
-    audio.play('tick');
+    fillFocusedCarry(digit);
     return;
   }
   const at = nextBox(current);
@@ -1275,8 +1293,11 @@ el.promptSum.addEventListener('click', (event) => {
   // Tapping a box puts the cursor in it. That is how a child says they have finished a row
   // whose leading box they meant to leave blank — 51 written into three boxes is finished at
   // two — and it is also how they go back and put one digit right without clearing the lot.
+  // Not while the child is writing: there the pad strip serves one row at a time and the
+  // "next row" button is what moves it on, so a tap that moved the cursor without moving the
+  // pads would leave the two pointing at different rows.
   const slot = event.target.closest('.slot');
-  if (slot && current?.stacked && !locked) {
+  if (slot && current?.stacked && !locked && !writingWanted()) {
     current.cursor = { row: Number(slot.dataset.row), index: Number(slot.dataset.i) };
     current.row = current.cursor.row;
     current.focus = null;

@@ -648,11 +648,20 @@ main {
    sum is that alignment, so it is the grid that enforces it rather than any padding. */
 .colwalk {
   display: inline-grid;
-  grid-template-columns: auto repeat(var(--cw-cols, 2), 1.15em);
-  gap: 0.05rem 0.32rem;
+  /* Wide enough to put a finger in. The boxes here are not decoration: a carry is written into
+     one and a tap on an answer box is how the cursor is moved, and at the 1.15em they used to
+     be — about 27px — neither was possible on a phone. The width falls out of how many columns
+     there are and how much screen there is, so it is stated once rather than guessed twice.
+     Five columns come out at 40px on a 320px phone and 58px on a 430px one. */
+  --cw-col: clamp(34px, calc((100vw - 5rem) / (var(--cw-cols, 2) + 1)), 52px);
+  /* And the shorter side of anything touched, which is the number a finger actually needs. */
+  --cw-touch: max(44px, var(--cw-col));
+  grid-template-columns: auto repeat(var(--cw-cols, 2), var(--cw-col));
+  gap: 0.18rem 0.32rem;
   /* Fixed rather than relative, because this is drawn in two quite different places — inside
      the question, where the surrounding type is large, and inside the correction, where it is
-     not — and a column sum that changed size between them would read as two different things. */
+     not — and a column sum that changed size between them would read as two different things.
+     The walkthrough is not touched, but it is the same working, so it is the same size. */
   font-size: 1.75rem;
   font-variant-numeric: tabular-nums;
   font-weight: 800;
@@ -695,9 +704,15 @@ main {
 /* The carry row is small and quiet: it is working-out, not part of the sum. */
 .cw-carries .cw-cell,
 .cw-carrybox {
-  font-size: 0.5em;
+  /* Bigger than the 0.5em it was: a carry is working rather than answer, and stays quieter
+     than the sum, but it stopped being legible somewhere below this and a number nobody can
+     read is not much of a note to have written. */
+  font-size: 0.8em;
   color: var(--pz-warm);
-  min-height: 1.3em;
+  min-height: var(--cw-touch);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .cw-carrybox {
@@ -723,12 +738,32 @@ main {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--pz-accent) 30%, transparent);
 }
 
-/* And on a touch screen it is written in, like everything else. Scratch either way: nothing
-   reads these, so a misreading here costs a child nothing at all. */
+/* And on a touch screen it is written in, like everything else — which only works because the
+   box is now the size of a fingertip. Scratch either way: nothing reads these, so a misreading
+   here costs a child nothing at all. */
 .cw-carrypad {
   cursor: crosshair;
   touch-action: none;
   position: relative;
+  border-style: solid;
+  border-color: var(--pz-line);
+}
+
+/* The same faint baseline the answer pads show, so a carry box reads as a small one of those
+   rather than as a different kind of thing. It goes the moment there is ink on it. */
+.cw-carrypad::after {
+  content: '';
+  position: absolute;
+  /* Solid rather than the answer pads' dotted line: a carry box is half their size, and at
+     27px across a dotted rule comes out as three dots and reads as an ellipsis. */
+  inset: 24% 22%;
+  border-bottom: 1.5px solid var(--pz-line);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.cw-carrypad.has-ink::after {
+  display: none;
 }
 
 .cw-carrypad canvas {
@@ -742,7 +777,38 @@ main {
    and its rows need to sit closer together to stay on one screen. */
 .colwalk.is-mul {
   font-size: 1.45rem;
-  gap: 0.02rem 0.3rem;
+  gap: 0.18rem 0.3rem;
+}
+
+/* ------------------------------------------------ the stack below the pet */
+
+/* Finger-sized columns do not fit beside a 92px portrait: five of them come to about 270px,
+   and a 360px phone leaves 190px next to the pet. So on a stacked question — and only there —
+   the working drops underneath and takes the whole card.
+   `display: contents` flattens the two wrappers the equation is nested in so that its children
+   land on the card's own grid; it is the same trick `.cw-row` uses, one level up. */
+.prompt-card.is-stacked {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  row-gap: 0.5rem;
+}
+
+.prompt-card.is-stacked .prompt-text,
+.prompt-card.is-stacked .prompt-time {
+  display: contents;
+}
+
+.prompt-card.is-stacked .prompt-line {
+  grid-column: 2;
+  margin: 0;
+}
+
+.prompt-card.is-stacked #prompt-sum,
+.prompt-card.is-stacked .spoken {
+  grid-column: 1 / -1;
+  justify-self: center;
+  text-align: center;
 }
 
 /* The partial products are working, not the answer — present, and a shade quieter than the
@@ -757,11 +823,19 @@ main {
   opacity: 0.85;
 }
 
-/* The answer boxes, drawn like the inline strip's so the two feel like one game. */
+/* The answer boxes. Tall enough to tap, because tapping one is how the cursor is moved down a
+   stack — and once a box is that tall it has to *look* like a box: an underline on its own,
+   with the digit floating somewhere above it, reads as a broken row rather than as somewhere
+   to write. So it keeps the inline strip's underline and gains a tile to sit on. */
 .cw-answer .slot {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 0;
   width: 100%;
+  min-height: var(--cw-touch);
+  border-radius: 10px 10px 4px 4px;
+  background: var(--pz-card-2);
   border-bottom: 3px solid var(--pz-line);
   color: var(--pz-ink);
 }
