@@ -17,6 +17,8 @@ import * as llm from './llm.js';
 const $ = (id) => document.getElementById(id);
 
 const BLOCK_STORAGE = 'tasks.ask.blocks';
+/** Restored after the button has briefly said it copied. */
+const COPY_LABEL = '⧉ Copy context';
 const DEFAULT_BLOCKS = ['goal', 'tasks'];
 
 /** Same neutralising the project goal gets: this markdown is not trusted markup. */
@@ -42,6 +44,7 @@ export function createAsk({ getState, onStatus, openSettings } = {}) {
   const els = {
     blocks: $('ask-blocks'),
     size: $('ask-size'),
+    copy: $('ask-copy-context'),
     warning: $('ask-warning'),
     thread: $('ask-thread'),
     form: $('ask-form'),
@@ -71,6 +74,37 @@ export function createAsk({ getState, onStatus, openSettings } = {}) {
    * assembled text rather than the tick boxes means an edit made behind the dialog counts too.
    */
   const stale = () => thread.length > 0 && currentBrief() !== sentBrief;
+
+  /**
+   * What the first user message would say if the question were sent now.
+   *
+   * Assembled the same way `askMessages` assembles it, so what lands on the clipboard is
+   * what the model would be handed, character for character — the point of the button being
+   * to ask the same thing somewhere else and get a comparable answer.
+   */
+  const clipboardText = () => {
+    const brief = currentBrief();
+    const question = els.question.value.trim();
+    if (!brief) return question;
+    return question ? `${brief}\n---\n${question}` : brief;
+  };
+
+  async function copyContext() {
+    const text = clipboardText();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      // The status bar is behind the dialog's backdrop, so the button has to answer for
+      // itself; the bar gets the message too, for when the dialog is closed afterwards.
+      els.copy.textContent = '✓ Copied';
+      setTimeout(() => {
+        els.copy.textContent = COPY_LABEL;
+      }, 1500);
+      onStatus?.('Context copied — paste it into another model.');
+    } catch (error) {
+      onStatus?.(`Could not copy: ${error.message}`, true);
+    }
+  }
 
   function setBusy(busy) {
     els.send.disabled = busy;
@@ -138,6 +172,7 @@ export function createAsk({ getState, onStatus, openSettings } = {}) {
       ? `${words(total)} will be sent with your question.`
       : 'Nothing selected — the model will see only your question.';
     els.warning.hidden = !stale();
+    els.copy.disabled = !clipboardText();
   }
 
   function renderThread() {
@@ -271,6 +306,12 @@ export function createAsk({ getState, onStatus, openSettings } = {}) {
 
   els.stop.addEventListener('click', () => controller?.abort());
   els.fresh.addEventListener('click', newConversation);
+  els.copy.addEventListener('click', copyContext);
+  // The question travels with the context, so an empty box and a typed one are not the
+  // same copy — and with no blocks ticked, the box is the only thing there is to copy.
+  els.question.addEventListener('input', () => {
+    els.copy.disabled = !clipboardText();
+  });
   // Leaving the dialog ends the conversation; the picker state is what persists.
   root.addEventListener('close', () => {
     controller?.abort();
@@ -285,6 +326,7 @@ export function createAsk({ getState, onStatus, openSettings } = {}) {
       if (task) chosen.add('task');
       writeBlocks(chosen);
       renderThread();
+      els.copy.textContent = COPY_LABEL;
       renderBlocks();
       els.status.textContent = '';
       if (!root.open) root.showModal();

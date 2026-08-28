@@ -529,13 +529,18 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
    * This is what makes an open tab notice a folder that moved under it. The comparison is by
    * meaning, not bytes, so a sync client rewriting a file it did not really change does not
    * count as the folder having changed.
+   *
+   * `force` is for someone who has just asked, out loud, to re-read: it skips the read-only
+   * gate and Dropbox's own word on whether anything moved, and goes and looks. Reading is
+   * always safe — the read-only gate that matters is in `saveNow`, and stays where it is.
    */
-  async function revalidateNow() {
-    if (directory ? !unlocked : !remote) return { files: null, changed: false };
+  async function revalidateNow({ force = false } = {}) {
+    if (!directory && !remote) return { files: null, changed: false };
+    if (!force && directory && !unlocked) return { files: null, changed: false };
     // Dropbox will say whether anything moved for the price of one request, so ask that
     // before pulling the folder down again. Deletions come back as entries too, so an empty
     // answer really does mean untouched.
-    if (remote && cursor) {
+    if (remote && cursor && !force) {
       const delta = await dropbox.listSince(cursor);
       cursor = delta.cursor;
       if (!delta.entries.length) return { files: null, changed: false };
@@ -555,7 +560,7 @@ export function createStorage({ sameFile = (path, a, b) => a === b } = {}) {
     return { files, changed };
   }
 
-  const revalidate = () => serialise(revalidateNow);
+  const revalidate = (options) => serialise(() => revalidateNow(options));
 
   /**
    * Stop claiming these files: leave them on disk, unwritten and undeleted.

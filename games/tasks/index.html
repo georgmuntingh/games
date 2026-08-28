@@ -14,20 +14,36 @@
   <body>
     <div class="app">
       <header class="toolbar">
-        <a class="back-link toolbar-back" href="../../" title="Back to games">←</a>
+        <span class="toolbar-slot" data-for="back-link" hidden></span>
+        <a id="back-link" class="back-link toolbar-back" href="../../" aria-label="Back to games" title="Back to games"
+          >←<span class="menu-name">Back to games</span></a
+        >
 
-        <label class="field">
+        <label class="field" id="project-field">
           <span class="sr-only">Project</span>
           <select id="project-picker" aria-label="Project"></select>
         </label>
         <button type="button" id="project-open" class="icon-btn" title="Project details">
           ✎
         </button>
-        <button type="button" id="project-new" class="icon-btn" title="New project">+</button>
-        <button type="button" id="projects-open" class="icon-btn" title="Manage projects">
-          ☰
+        <span class="toolbar-slot" data-for="project-new" hidden></span>
+        <button type="button" id="project-new" class="icon-btn" aria-label="New project" title="New project">
+          +<span class="menu-name">New project</span>
         </button>
-        <button type="button" id="trash-open" class="icon-btn" title="Trash">🗑</button>
+        <span class="toolbar-slot" data-for="projects-open" hidden></span>
+        <button
+          type="button"
+          id="projects-open"
+          class="icon-btn"
+          aria-label="Manage projects"
+          title="Manage projects"
+        >
+          ☰<span class="menu-name">Manage projects</span>
+        </button>
+        <span class="toolbar-slot" data-for="trash-open" hidden></span>
+        <button type="button" id="trash-open" class="icon-btn" aria-label="Trash" title="Trash">
+          🗑<span class="menu-name">Trash</span>
+        </button>
 
         <button
           type="button"
@@ -40,41 +56,56 @@
           People
         </button>
 
-        <label class="check">
+        <span class="toolbar-slot" data-for="hide-done-field" hidden></span>
+        <label class="check" id="hide-done-field">
           <input type="checkbox" id="hide-done" />
           <span>Hide done</span>
         </label>
 
-        <label class="check">
+        <span class="toolbar-slot" data-for="collapse-empty-field" hidden></span>
+        <label class="check" id="collapse-empty-field">
           <input type="checkbox" id="collapse-empty" />
           <span>Collapse empty</span>
         </label>
 
         <span class="toolbar-gap"></span>
 
-        <button type="button" id="add-task" title="New task (N)">+ Task</button>
+        <button type="button" id="add-task" aria-label="New task" title="New task (N)">
+          <span class="label-full">+ Task</span>
+          <span class="label-icon" aria-hidden="true">＋</span>
+        </button>
+        <span class="toolbar-slot" data-for="link-mode" hidden></span>
         <button type="button" id="link-mode" title="Draw a link between two tasks (E)">
           Link: <span id="link-kind">blocks</span>
         </button>
-        <button type="button" id="assist" title="Ask the assistant about this project">
-          Assist
+        <button
+          type="button"
+          id="assist"
+          aria-label="Assistant"
+          title="Ask the assistant about this project"
+        >
+          <span class="label-full">Assist</span>
+          <span class="label-icon" aria-hidden="true">✨</span>
         </button>
 
-        <label class="field">
+        <span class="toolbar-slot" data-for="bucket-field" hidden></span>
+        <label class="field" id="bucket-field">
           <span class="sr-only">Timeline scale</span>
           <select id="bucket" aria-label="Timeline scale" title="Timeline scale">
-            <option value="auto">Auto scale</option>
+            <option value="auto">Auto</option>
             <option value="day">Days</option>
             <option value="week">Weeks</option>
             <option value="month">Months</option>
           </select>
         </label>
 
-        <span class="stepper" role="group" aria-label="Row height">
+        <span class="toolbar-slot" data-for="rows-stepper" hidden></span>
+        <span class="stepper" id="rows-stepper" role="group" aria-label="Row height">
           <button type="button" id="rows-tighter" title="Tighter rows">−</button>
           <button type="button" id="rows-looser" title="Taller rows">+</button>
         </span>
 
+        <span class="toolbar-slot" data-for="auto-layout" hidden></span>
         <button
           type="button"
           id="auto-layout"
@@ -84,6 +115,7 @@
           Auto-layout
         </button>
 
+        <span class="toolbar-slot" data-for="fit" hidden></span>
         <button type="button" id="fit" title="Fit to view (F)">Fit</button>
         <button
           type="button"
@@ -92,7 +124,26 @@
         >
           ?
         </button>
+        <button
+          type="button"
+          id="refresh-folder"
+          aria-label="Reload from the folder"
+          title="Reload from the folder"
+        >
+          ⟳
+        </button>
         <button type="button" id="settings-open" title="Settings">⚙</button>
+        <button
+          type="button"
+          id="toolbar-more"
+          class="toolbar-more-button"
+          aria-expanded="false"
+          aria-haspopup="true"
+          aria-label="More controls"
+          title="More controls"
+        >
+          ⋯
+        </button>
       </header>
 
       <div id="readonly-bar" class="readonly-bar" hidden>
@@ -221,6 +272,7 @@
       <p id="status-bar" class="status-bar" aria-live="polite"></p>
     </div>
 
+    <span class="toolbar-slot" data-for="people-options" hidden></span>
     <div id="people-options" class="menu-panel" popover>
       <div class="menu-actions">
         <button type="button" id="people-all" class="link-button" title="Tick everyone, which hides tasks with nobody on them">
@@ -231,6 +283,23 @@
         </button>
       </div>
       <div id="people-checks"></div>
+    </div>
+
+    <!-- Everything the bar has no room for on a phone. The controls are moved here as they
+         are, not copied: toolbar.js hands the real elements over and takes them back. -->
+    <div id="toolbar-more-panel" class="menu-panel toolbar-more" popover>
+      <section class="more-group">
+        <h3>View</h3>
+        <div class="more-slot" data-group="view"></div>
+      </section>
+      <section class="more-group">
+        <h3>Board</h3>
+        <div class="more-slot" data-group="board"></div>
+      </section>
+      <section class="more-group">
+        <h3>Projects</h3>
+        <div class="more-slot" data-group="projects"></div>
+      </section>
     </div>
 
     <!-- `manual`, not `auto`: a right-click opens the menu between pointerdown and
@@ -483,7 +552,10 @@
       <section class="ask-context">
         <h3>What the model gets to see</h3>
         <ul id="ask-blocks" class="ask-blocks"></ul>
-        <p id="ask-size" class="muted small"></p>
+        <p class="ask-size-row">
+          <span id="ask-size" class="muted small"></span>
+          <button type="button" id="ask-copy-context" class="link-button">⧉ Copy context</button>
+        </p>
         <p id="ask-warning" class="ask-warning small" hidden>
           The context has changed — asking now starts a fresh conversation.
         </p>

@@ -121,6 +121,138 @@ body {
   cursor: default;
 }
 
+/* A full bar shrinks its selects, and a select shrunk past its own words reads as broken.
+   Both may still give ground — down to where what they say is still legible. */
+.toolbar #project-picker {
+  min-width: 5rem;
+}
+
+.toolbar #bucket {
+  min-width: 4.5rem;
+}
+
+/* Spelled out under a menu heading, where a lone glyph says nothing; in the bar the
+   glyph has neighbours and a tooltip, and the button's `aria-label` covers both. */
+.menu-name {
+  display: none;
+}
+
+/* A word on a laptop, a glyph on a phone. Both live in the markup and the button carries
+   its own `aria-label`, so the accessible name does not change with the window. */
+.label-icon {
+  display: none;
+}
+
+/* Reloading a Dropbox folder from a phone takes long enough that the tap needs an answer. */
+#refresh-folder[aria-busy='true'] {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The overflow menu earns its place only once the bar has run out of room. */
+.toolbar-more-button {
+  display: none;
+}
+
+.toolbar-more .more-group + .more-group {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--ui-border);
+}
+
+.toolbar-more h3 {
+  margin: 0 0 0.2rem;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ui-muted);
+}
+
+.toolbar-more .more-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+/* Toolbar controls read as a row; in the menu they are rows in a column. */
+.toolbar-more .more-slot > button,
+.toolbar-more .more-slot > a {
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  text-decoration: none;
+  color: var(--ui-fg);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+}
+
+.toolbar-more .more-slot > .stepper {
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.1rem;
+}
+
+.toolbar-more .more-slot > .stepper::before {
+  content: 'Row height';
+  flex: 1 1 auto;
+  font-size: 0.85rem;
+}
+
+.toolbar-more .more-slot > .stepper button {
+  border-radius: 6px;
+}
+
+.toolbar-more .more-slot .menu-name {
+  display: inline;
+  margin-left: 0.5rem;
+}
+
+/* `.menu-panel label` centres its rows, which is right for a checkbox and wrong for a
+   stacked field. In the bar the select sits among labelled siblings and needs no label of
+   its own; alone under a heading it does, so the name it already carries is simply shown. */
+.toolbar-more .more-slot > .field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+  padding: 0;
+}
+
+.toolbar-more .more-slot > .field:hover {
+  background: none;
+}
+
+.toolbar-more .more-slot > .field .sr-only {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  padding: 0 0.1rem;
+  font-size: 0.7rem;
+  color: var(--ui-muted);
+}
+
+.toolbar-more .more-slot > .field select {
+  font: inherit;
+  font-size: 0.85rem;
+  width: 100%;
+  color: var(--ui-fg);
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.45rem;
+}
+
 /* A menu button and its panel. The panel is positioned by menu.js and opens in the top
    layer, since the toolbar scrolls and would otherwise clip it to its own height. */
 .menu-button::after {
@@ -142,6 +274,21 @@ body {
   border: 1px solid var(--ui-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+/* The people panel while it lives inside the overflow menu: still the same element, but
+   not floating any more, so everything that made it a panel has to come off. */
+.menu-panel.inline {
+  position: static;
+  z-index: auto;
+  min-width: 0;
+  max-height: none;
+  overflow-y: visible;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .menu-panel label {
@@ -795,6 +942,87 @@ div.vis-tooltip {
 
 /* ------------------------------------------------------------- narrow */
 
+/*
+ * The compact toolbar. The breakpoint is `COMPACT_QUERY` in toolbar.js and the two must
+ * agree: this rules on what the bar looks like, that one on what is still in it.
+ *
+ * 820px, not the 640px below, because the full bar wants about 880px — anything narrower
+ * is already scrolling today. `overflow-x` stays on `.toolbar` as a floor: below ~320px
+ * even this row is too wide, and nothing may become unreachable.
+ */
+@media (max-width: 820px) {
+  .toolbar-more-button {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Three groups of controls, not the handful of rows a menu panel is sized for. */
+  .toolbar-more {
+    max-height: min(78vh, 40rem);
+  }
+
+  /* Its panel is in the menu, and its own button would open an empty popover. */
+  #people-menu {
+    display: none;
+  }
+
+  .label-full {
+    display: none;
+  }
+
+  .label-icon {
+    display: inline;
+  }
+
+  /* Nothing is pushed to the far end any more: the picker takes whatever is left over. */
+  .toolbar-gap {
+    display: none;
+  }
+
+  #project-picker {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #project-field {
+    flex: 1 1 4rem;
+    min-width: 0;
+  }
+
+  /* Whatever room is left is the picker's; this one keeps the width its words need. */
+  #bucket-field {
+    flex: 0 0 auto;
+  }
+
+  .toolbar #bucket {
+    max-width: 6rem;
+  }
+
+  /* As large a target as fits inside a 3rem bar, once nine of them have to fit across it. */
+  .toolbar {
+    gap: 0.25rem;
+    padding: 0 0.35rem;
+  }
+
+  .toolbar button {
+    min-width: 2.2rem;
+    min-height: 2.2rem;
+    padding: 0.28rem 0.35rem;
+  }
+}
+
+/*
+ * `TIGHT_QUERY` in toolbar.js. Seven glyph buttons, their gaps and the bar's own padding
+ * come to 286px; on a 360px screen that leaves the timeline scale and the project picker
+ * about 35px each, which is neither. The scale is set once and read rarely, so it goes to
+ * the menu and the picker gets the room.
+ */
+@media (max-width: 480px) {
+  #project-field {
+    flex: 1 1 5rem;
+  }
+}
+
 @media (max-width: 640px) {
   /* The panel covers the whole workspace here, so there is no boundary to drag. */
   .panel-resize {
@@ -1185,13 +1413,32 @@ div.vis-tooltip {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ask-turn.streaming .ask-body::after {
+  .ask-turn.streaming .ask-body::after,
+  #refresh-folder[aria-busy='true'] {
     animation: none;
   }
 }
 
 .ask-copy {
   flex: 0 0 auto;
+}
+
+.ask-size-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0.4rem 0;
+}
+
+/* The count is a sentence and may wrap; the button is a name and must not. */
+.ask-size-row #ask-size {
+  flex: 1 1 auto;
+}
+
+#ask-copy-context {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .ask-form textarea {
