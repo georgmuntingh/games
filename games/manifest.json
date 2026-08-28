@@ -37,6 +37,12 @@
       "tags": ["arcade", "action", "solo", "versus"]
     },
     {
+      "id": "eggerland",
+      "title": "Eggerland",
+      "description": "Collect hearts, open the chest, dodge Medusas — a puzzle labyrinth of connected rooms inspired by the MSX2 classic.",
+      "tags": ["puzzle", "adventure", "solo"]
+    },
+    {
       "id": "sokoban",
       "title": "Sokoban",
       "description": "Push every crate onto a goal pad. 155 Microban puzzles from gentle to brain-bending.",
