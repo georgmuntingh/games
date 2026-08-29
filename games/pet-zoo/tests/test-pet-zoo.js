@@ -103,9 +103,13 @@ import * as mathFacts from '../subjects/math/facts.js';
 import * as mathSkills from '../subjects/math/skills.js';
 import * as mathColumns from '../subjects/math/columns.js';
 import * as mathTimes from '../subjects/math/times.js';
+import * as mathDivFacts from '../subjects/math/divfacts.js';
+import * as mathDivide from '../subjects/math/divide.js';
 import { mulWalkHtml, stackedMulMarkup } from '../column.js';
-import { ALL_VERDICTS } from '../subjects/math/grade.js';
+import { ALL_VERDICTS, gradeDivide } from '../subjects/math/grade.js';
 import { arrayPlan, arraySvg } from '../array.js';
+import { dividedMarkup, divideWalkHtml, spanOf, stepOfRow, walkCols } from '../divwalk.js';
+import { sharePlan, shareSvg } from '../share.js';
 import {
   columnWalkHtml,
   DEFAULT_WALK_SPEED,
@@ -3701,9 +3705,9 @@ test('every answer in the deck fits in the strip', () => {
 
 describe('maths — the whole ladder');
 
-test('thirty-seven rungs, in seven groups, with nothing left out of either', () => {
-  assertEqual(addSubject.TIERS.length, 37);
-  assertEqual(addSubject.LAST_TIER, 36);
+test('fifty-one rungs, in nine groups, with nothing left out of either', () => {
+  assertEqual(addSubject.TIERS.length, 51);
+  assertEqual(addSubject.LAST_TIER, 50);
   const grouped = addSubject.GROUPS.flatMap((group) => group.tiers);
   assertEqual(grouped.join(), addSubject.TIERS.map((tier) => tier.id).join(), 'a rung fell out of its group');
   assertEqual(new Set(grouped).size, grouped.length, 'a rung is in two groups at once');
@@ -4358,16 +4362,24 @@ test('growing the ladder left every pet a child already has exactly where it was
   }
   // And structurally, not only by sample: every addition of new material has gone on the end.
   // The first two hundred and four items are the sums, differences and methods that were there
-  // before the times tables; the hundred and fifty-five after them are the times deck; and the
-  // stacked multiplication skills come after that.
+  // before the times tables; the hundred and fifty-five after them are the times deck; then the
+  // six stacked-multiplication skills, the hundred division facts, and the eight long-division
+  // skills — each block appended behind the last, never inserted among it.
   const items = addSubject.ALL_ITEMS;
   assert(items.slice(0, 204).every((entry) => entry.op !== '×'), 'a times fact was inserted rather than appended');
   assertEqual(items.slice(204, 359).filter((entry) => entry.op === '×' && !entry.skill).length, 155,
     'the times deck moved');
   assert(
-    items.slice(359).every((entry) => Boolean(entry.skill)),
+    items.slice(359, 365).every((entry) => Boolean(entry.skill)),
     'something other than the column-multiplication skills was appended'
   );
+  assertEqual(items.slice(365, 465).filter((entry) => entry.op === '÷' && !entry.skill).length, 100,
+    'the division deck moved');
+  assert(
+    items.slice(465).every((entry) => Boolean(entry.skill)),
+    'something other than the long-division skills was appended'
+  );
+  assertEqual(items.length, 473, 'the ladder changed length somewhere other than its end');
 });
 
 test('a times fact hatches a pet like anything else', () => {
@@ -4432,9 +4444,16 @@ test('the rows are the method: two partial products and their total', () => {
   assertEqual(mathColumns.mulRows(247, 38).join(), '1976,7410,9386');
   // A single-digit multiplier has nothing to add up, so its answer is the one row.
   assertEqual(mathColumns.mulRows(47, 8).join(), '376');
-  assertEqual(addSubject.answerRows({ skill: 'colx32' }).join(), '4,5,5');
-  assertEqual(addSubject.answerRows({ skill: 'colx22' }).join(), '3,4,4');
-  assertEqual(addSubject.answerRows({ skill: 'colx21c' }).join(), '3');
+  // A row now says where it sits as well as how wide it is, because a long division's rows step
+  // across the page. A multiplication's all sit under the ones, so every one of them is place 0.
+  const widths = (skill) => addSubject.answerRows({ skill }).map((row) => row.width).join();
+  assertEqual(widths('colx32'), '4,5,5');
+  assertEqual(widths('colx22'), '3,4,4');
+  assertEqual(widths('colx21c'), '3');
+  assert(
+    addSubject.answerRows({ skill: 'colx32' }).every((row) => row.place === 0),
+    'a partial product carries its own zeros, so it is not indented'
+  );
 });
 
 test('the working never says how big the answer is going to be', () => {
@@ -4445,7 +4464,7 @@ test('the working never says how big the answer is going to be', () => {
     const seen = new Set();
     for (let seed = 1; seed <= 80; seed += 1) {
       const q = mathSkills.generate(skill, { seed });
-      seen.add(addSubject.answerRows({ skill }).join());
+      seen.add(JSON.stringify(addSubject.answerRows({ skill })));
       // And every question really does fit in the boxes it is given.
       const wanted = mathColumns.mulRows(q.a, q.b);
       if (!mathSkills.isColumn(skill)) {
@@ -4454,7 +4473,7 @@ test('the working never says how big the answer is going to be', () => {
       }
       assertEqual(wanted.length, rows.length, `${skill} drew ${wanted.length} rows for ${rows.length}`);
       wanted.forEach((value, i) => {
-        assert(String(value).length <= rows[i], `${skill}: ${q.a}x${q.b} row ${i} overflows`);
+        assert(String(value).length <= rows[i].width, `${skill}: ${q.a}x${q.b} row ${i} overflows`);
       });
     }
     assertEqual(seen.size, 1, `${skill} changes shape with its numbers`);
@@ -4588,6 +4607,298 @@ test('a stack of working is given longer than a single line of it', () => {
   assert(addSubject.paceOf({ skill: 'colx21c' }) <= addSubject.paceOf({ skill: 'colx32' }));
 });
 
+describe('maths — the division facts');
+
+const DIV_SKILLS = ['div10', 'div21', 'div21x', 'div21s', 'div31', 'div31z', 'div21r', 'div31r'];
+
+test('a hundred divisions, both ways round, on six rungs', () => {
+  // Both ways because they are two different things to know: how many eights fit inside
+  // fifty-six is not the same piece of knowing as how many sevens do. A square pair has only
+  // one direction to be asked in, which is why it is a hundred rather than a hundred and ten.
+  assertEqual(mathDivFacts.ALL_DIV_FACTS.length, 100);
+  const tiers = new Set(mathDivFacts.ALL_DIV_FACTS.map((fact) => fact.tier));
+  assertEqual([...tiers].sort((x, y) => x - y).join(','), '37,38,39,40,41,42');
+});
+
+test('the rungs partition the deck, so each one can actually be finished', () => {
+  // `tierMastery` divides by the size of a rung. A fact counted twice would make one
+  // impossible to finish, and a fact counted nowhere would make it impossible to start.
+  const counted = [37, 38, 39, 40, 41, 42].flatMap((tier) =>
+    mathDivFacts.divTierItems(tier).map((fact) => fact.id)
+  );
+  assertEqual(counted.length, 100, 'a fact landed on two rungs, or on none');
+  assertEqual(new Set(counted).size, 100);
+});
+
+test('both directions of a pair sit on the same rung', () => {
+  // They are the same picture read two ways, and the rungs are strategies rather than sizes —
+  // so `56 : 8` and `56 : 7` are met together, leaning on the one product underneath them both.
+  assertEqual(mathDivFacts.tierOf({ a: 56, b: 8 }), mathDivFacts.tierOf({ a: 56, b: 7 }));
+  assertEqual(mathDivFacts.tierOf({ a: 10, b: 1 }), 37, 'dividing by one is not a strategy rung');
+  assertEqual(mathDivFacts.tierOf({ a: 49, b: 7 }), 40, 'a square belongs with the squares');
+});
+
+test('an id that describes nothing is refused rather than rounded off', () => {
+  // Refused rather than normalised, exactly as `mul:7x3` is: it would otherwise be possible to
+  // hold two pets for one fact, or one pet for a fact this game does not teach.
+  assert(mathDivFacts.owns('div:56/8'), '56 : 8 is a fact this game teaches');
+  assert(!mathDivFacts.owns('div:57/8'), 'eight does not go into fifty-seven');
+  assert(!mathDivFacts.owns('div:110/11'), 'eleven is off the end of the tables');
+  assert(!mathDivFacts.owns('div:0/5'), 'nothing shared out is not a question');
+  for (const fact of mathDivFacts.ALL_DIV_FACTS) {
+    assertEqual(mathDivFacts.idOf(mathDivFacts.parse(fact.id)), fact.id, `${fact.id} did not round-trip`);
+  }
+});
+
+test('a division closes on the product it is the flip side of', () => {
+  // What the correction says: "you know 7 × 8 = 56". A sentence about something already
+  // mastered rather than a new rule to hold.
+  const { a, b } = mathDivFacts.partnerOf({ a: 56, b: 8 });
+  assertEqual(`${a}x${b}`, '7x8');
+  assertEqual(mathTimes.timesIdOf(mathDivFacts.partnerOf({ a: 56, b: 7 })), 'mul:7x8', 'both ways lean on one product');
+});
+
+test('every way of getting a division fact wrong has a name', () => {
+  const verdict = (a, b, answer) => mathDivFacts.grade({ a, b }, String(answer)).verdict;
+  assertEqual(verdict(56, 8, 7), 'correct');
+  assertEqual(verdict(56, 8, 56), 'divGaveDividend', 'that is the number being shared out');
+  assertEqual(verdict(56, 8, 8), 'divGaveDivisor', 'that is how many it is shared between');
+  assertEqual(verdict(56, 8, 48), 'divTookAway', 'taken away rather than shared out');
+  assertEqual(verdict(56, 8, 448), 'divMultiplied');
+  assertEqual(verdict(56, 8, 6), 'offByOne');
+  assertEqual(verdict(56, 8, 3), 'divNeighbour', 'a real quotient, just not this one');
+  assertEqual(mathDivFacts.grade({ a: 56, b: 8 }, '').verdict, 'blank', 'an empty strip never means zero');
+  assert(mathDivFacts.grade({ a: 56, b: 8 }, '6').nearMiss, 'one group out is a miscount');
+  assert(!mathDivFacts.grade({ a: 56, b: 8 }, '48').nearMiss, 'a misread sign is not "nearly"');
+});
+
+describe('maths — long division');
+
+test('the working comes out right, for every question the rungs can ask', () => {
+  for (let b = 2; b <= 9; b += 1) {
+    for (let a = 10; a <= 999; a += 1) {
+      const steps = mathDivide.divSteps(a, b);
+      const quotient = Number(steps.map((step) => step.digit).join(''));
+      assertEqual(quotient, Math.floor(a / b), `${a} : ${b} came out wrong`);
+      assertEqual(steps[steps.length - 1].remainder, a % b, `${a} : ${b} left the wrong amount`);
+    }
+  }
+});
+
+test('the first step takes two digits exactly when the first one is too small', () => {
+  // `456 : 8` starts at 45, not at 4, and the answer is two digits rather than three with a
+  // nothing on the front — nobody writes 056.
+  assertEqual(mathDivide.divSteps(456, 8).length, 2, 'the quotient should be shorter than the dividend');
+  assertEqual(mathDivide.divSteps(456, 8)[0].working, 45);
+  assertEqual(mathDivide.divSteps(846, 8).length, 3, 'eight goes into eight, so every digit gets a turn');
+  assertEqual(mathDivide.divSteps(846, 8)[0].working, 8);
+});
+
+test('the rows are the working as it is written, in the order it is written', () => {
+  // Quotient digit, then what it takes away, then what is left with the next digit down beside
+  // it. The last remainder row is the remainder itself, which is why there is no extra box.
+  const rows = mathDivide.divRows(456, 8);
+  assertEqual(rows.map((row) => row.value).join(','), '5,40,56,7,56,0');
+  assertEqual(rows.map((row) => row.kind).join(','), 'quotient,product,remainder,quotient,product,remainder');
+  assertEqual(mathDivide.divRows(457, 8).map((row) => row.value).join(','), '5,40,57,7,56,1');
+});
+
+test('the answer strip and the walkthrough lay the rows out in the same places', () => {
+  // One description of where the working goes — `rowShape` — read by both, so the boxes a child
+  // types into and the working the correction draws cannot end up in different columns.
+  for (const skill of DIV_SKILLS.slice(1)) {
+    const digits = mathSkills.digitsOf(skill);
+    const quotient = mathSkills.quotientDigitsOf(skill);
+    const declared = mathSkills.rowsOf(skill);
+    const shape = mathDivide.rowShape(quotient, digits);
+    assertEqual(declared.length, shape.length, `${skill} declares a different number of rows`);
+    for (let i = 0; i < shape.length; i += 1) {
+      assertEqual(declared[i].width, shape[i].width, `${skill} row ${i} is a different width`);
+      assertEqual(declared[i].place, shape[i].place, `${skill} row ${i} sits in a different column`);
+    }
+  }
+});
+
+test('every row fits on the page, and every number fits in its row', () => {
+  // A product row a box too wide would run off the left of the stack; a value a digit too long
+  // for its row would be silently cut in half. Both are layout bugs that only show up on the
+  // one question in a thousand that produces them, so they are checked across all of them.
+  for (const skill of DIV_SKILLS.slice(1)) {
+    const cols = mathSkills.digitsOf(skill);
+    for (const row of mathSkills.rowsOf(skill)) {
+      if (row.line === 'q') continue;
+      const { start, end } = spanOf(cols, row);
+      assert(start >= 1, `${skill} has a row running off the left`);
+      assert(end <= cols + 1, `${skill} has a row running off the right`);
+      assertEqual(end - start, row.width, `${skill} lost a box off the edge`);
+    }
+  }
+  for (let b = 2; b <= 9; b += 1) {
+    for (let a = 10; a <= 999; a += 1) {
+      for (const row of mathDivide.divRows(a, b)) {
+        assert(String(row.value).length <= row.width, `${a} : ${b} wrote ${row.value} into ${row.width} boxes`);
+      }
+    }
+  }
+});
+
+test('eight rungs, each asking for the shape it says it does', () => {
+  // A shape the generator cannot find is a rung that can never finish covering itself, which
+  // would leave the top of the ladder unable to graduate.
+  for (const skill of DIV_SKILLS) {
+    const wanted = mathSkills.shapesOf(skill);
+    assert(wanted.length > 0, `${skill} declares no cases at all`);
+    for (const shape of wanted) {
+      const drawn = new Set();
+      for (let seed = 1; seed <= 200; seed += 1) {
+        drawn.add(mathSkills.generate(skill, { shape, seed }).shape);
+      }
+      assertEqual([...drawn].join(','), shape, `${skill} could not reliably draw ${shape}`);
+    }
+  }
+});
+
+test('a rung never asks outside the band it promises', () => {
+  // The quotient's length is what fixes the height of the stack, so a rung that quietly drew a
+  // shorter answer would have a stack that said how the division was going to come out.
+  for (const skill of DIV_SKILLS.slice(1)) {
+    const digits = mathSkills.digitsOf(skill);
+    const quotient = mathSkills.quotientDigitsOf(skill);
+    for (const shape of mathSkills.shapesOf(skill)) {
+      for (let seed = 1; seed <= 200; seed += 1) {
+        const q = mathSkills.generate(skill, { shape, seed });
+        assertEqual(String(q.a).length, digits, `${skill} drew a ${String(q.a).length}-digit number`);
+        assertEqual(mathDivide.divSteps(q.a, q.b).length, quotient, `${skill} drew a different-length answer`);
+        assert(q.b >= 2 && q.b <= 9, `${skill} drew ${q.b} as a divisor`);
+      }
+    }
+  }
+});
+
+test('exact rungs are exact and the remainder rungs always leave something', () => {
+  const leaves = { div21r: true, div31r: true };
+  for (const skill of DIV_SKILLS.slice(1)) {
+    for (const shape of mathSkills.shapesOf(skill)) {
+      const q = mathSkills.generate(skill, { shape, seed: 11 });
+      assertEqual(q.a % q.b > 0, Boolean(leaves[skill]), `${skill} drew the wrong kind of question`);
+    }
+  }
+});
+
+test('every mistake in the working is named by running it', () => {
+  // The same testable-by-construction property the column methods have: run the wrong
+  // procedure, feed its output back to the grader, and the verdict must come back.
+  const answerFor = (a, b, { quotient = null, tweak = null } = {}) => {
+    const rows = mathDivide.divRows(a, b);
+    const digits = quotient === null ? null : String(quotient).split('').map(Number);
+    let at = 0;
+    const out = rows.map((row) =>
+      row.kind === 'quotient' && digits ? String(digits[at++] ?? '') : String(row.value)
+    );
+    if (tweak) tweak(out, rows);
+    return out;
+  };
+  const verdict = (a, b, answer) => gradeDivide({ a, b }, answer).verdict;
+
+  assertEqual(verdict(456, 8, answerFor(456, 8)), 'correct');
+  assertEqual(verdict(456, 8, answerFor(456, 8).map((v, i) => (i ? v : ''))), 'blank');
+
+  for (const [named, run, a, b] of [
+    ['divDroppedRemainder', mathDivide.droppedRemainder, 456, 8],
+    ['divBackwards', mathDivide.dividedBackwards, 618, 6],
+    ['divSubInstead', mathDivide.dividedSubtractedInstead, 84, 4],
+    ['divMulInstead', mathDivide.dividedMultipliedInstead, 242, 2],
+  ]) {
+    const wrote = run(a, b);
+    assertEqual(String(wrote).length, mathDivide.divSteps(a, b).length, `${named} cannot be written here`);
+    assert(wrote !== Math.floor(a / b), `${named} happens to be right for ${a} : ${b}`);
+    assertEqual(verdict(a, b, answerFor(a, b, { quotient: wrote })), named);
+  }
+
+  // And the three that live in one step rather than in the whole method.
+  const at = (a, b, kind, pick = () => true) =>
+    mathDivide.divRows(a, b).findIndex((row) => row.kind === kind && pick(row));
+  assertEqual(
+    verdict(456, 8, answerFor(456, 8, { tweak: (out) => { out[at(456, 8, 'remainder')] = '5'; } })),
+    'divForgotBringDown',
+    'the digit that should have come down never did'
+  );
+  assertEqual(
+    verdict(457, 8, answerFor(457, 8, { tweak: (out) => { out[out.length - 1] = '0'; } })),
+    'divIgnoredRemainder',
+    'what was left over was rubbed out'
+  );
+  assertEqual(
+    verdict(618, 6, answerFor(618, 6, {
+      tweak: (out) => { out[at(618, 6, 'quotient', (row) => row.value === 0)] = '1'; },
+    })),
+    'divZeroStep',
+    'something written where the step comes to nothing'
+  );
+
+  const slipBy = (a, b, by) =>
+    answerFor(a, b, { tweak: (out, rows) => { out[at(a, b, 'product')] = String(rows[at(a, b, 'product')].value + by); } });
+  assertEqual(verdict(456, 8, slipBy(456, 8, 1)), 'offByOne');
+  assertEqual(verdict(456, 8, slipBy(456, 8, 10)), 'placeValueOff');
+  assertEqual(verdict(456, 8, slipBy(456, 8, 23)), 'wrong');
+});
+
+test('a wrong way that happens to be right is a coincidence, not a mistake', () => {
+  // 242 : 2 has no column that needs turning round, so running it backwards gives the right
+  // answer — and a child who wrote it has not made that mistake.
+  assertEqual(mathDivide.dividedBackwards(242, 2), 121, 'this is the case the guard is for');
+  const rows = mathDivide.divRows(242, 2).map((row) => String(row.value));
+  assertEqual(gradeDivide({ a: 242, b: 2 }, rows).verdict, 'correct');
+});
+
+test('the stack is written out the way it is written on paper', () => {
+  // Every row under the digits it came from: the product under the number it was taken from,
+  // what is left under the next digit along, and a rule spanning exactly the subtraction.
+  assertEqual(walkCols(456), 3);
+  // 456 : 8 is the `shortFirst` shape — three digits in, two out — so its rows are the ones
+  // `div21s` would declare for a longer dividend rather than `div21`'s.
+  const rows = mathDivide.rowShape(2, 3);
+  assertEqual(JSON.stringify(spanOf(3, rows[1])), JSON.stringify({ start: 1, end: 3 }), 'the product sits under 45');
+  assertEqual(JSON.stringify(spanOf(3, rows[2])), JSON.stringify({ start: 2, end: 4 }), 'what is left sits under 56');
+  // And a rung that divides every digit starts under the first one alone: 84 : 4 takes 8 away
+  // from 8, which is one column wide, not two.
+  assertEqual(JSON.stringify(spanOf(2, mathSkills.rowsOf('div21')[1])), JSON.stringify({ start: 1, end: 2 }));
+  assertEqual(stepOfRow(0), 0);
+  assertEqual(stepOfRow(4), 1, 'three rows to a step');
+
+  const html = dividedMarkup({ a: 456, b: 8 }, {
+    sign: ':',
+    rows: rows.map((row) => ({ ...row, slots: new Array(row.width).fill('<span class="slot"></span>') })),
+  });
+  assert(html.includes('--dw-cols:3'), 'the stack is as wide as the dividend');
+  assertEqual((html.match(/class="slot"/g) ?? []).length, 9, 'every box the answer needs is on screen');
+  assert(html.includes('<i class="dw-op">:</i>'), 'the sign the child was taught');
+});
+
+test('the walkthrough starts at the step that went wrong and not before', () => {
+  // A child who got the first two steps right does not need to watch them done again, and a
+  // three-digit answer worked through in full is nine rows on every miss.
+  const whole = divideWalkHtml({ a: 618, b: 6 }, { step: 1, from: 0 });
+  const late = divideWalkHtml({ a: 618, b: 6 }, { step: 1, from: 2 });
+  const moving = (html) => (html.match(/dw-mark/g) ?? []).length;
+  assert(moving(late) < moving(whole), 'the late walk animates as much as the whole one');
+  assert(whole.includes('--dw-delay:0.00s'), 'the first step moves straight away');
+  assert(divideWalkHtml({ a: 456, b: 8 }, { step: 0 }).includes('--dw-delay:0.00s'), 'a still frame is one frame');
+});
+
+test('sharing out deals a round at a time, and the leftovers stand apart', () => {
+  // The lesson is "one each, and one each again" — not counting all fifty-six.
+  const plan = sharePlan(56, 8);
+  assertEqual(plan.rounds, 7);
+  assertEqual(plan.left, 0);
+  assertEqual(plan.counts.join(','), '8,16,24,32,40,48,56', 'the skip-counting written down');
+  assertEqual(plan.dots.length, 56);
+  assertEqual(sharePlan(57, 8).left, 1, 'not enough to go round, so nobody gets one');
+  assert(shareSvg(56, 8).includes('sh-dot'), 'a picture for a fact');
+  assert(shareSvg(57, 8).includes('sh-spare'), 'the leftover is drawn, not dropped');
+  assertEqual(shareSvg(450, 10), '', 'four hundred and fifty dots is a wall, not a picture');
+});
+
 describe('maths — every mistake has something to say about it');
 
 test('every verdict has a sentence, in both languages', () => {
@@ -4624,6 +4935,18 @@ test('every verdict has a sentence, in both languages', () => {
     mulForgotColCarry: 'teach.mulColForgotCarry',
     mulOnlyOnes: 'teach.mulColOnlyOnes',
     mulAddedInstead: 'teach.mulColAddedInstead',
+    divGaveDividend: 'teach.divGaveDividend',
+    divGaveDivisor: 'teach.divGaveDivisor',
+    divTookAway: 'teach.divTookAway',
+    divMultiplied: 'teach.divMultiplied',
+    divNeighbour: 'teach.divNeighbour',
+    divForgotBringDown: 'teach.divForgotBringDown',
+    divIgnoredRemainder: 'teach.divIgnoredRemainder',
+    divZeroStep: 'teach.divZeroStep',
+    divDroppedRemainder: 'teach.divDroppedRemainder',
+    divBackwards: 'teach.divBackwards',
+    divMulInstead: 'teach.divMulInstead',
+    divSubInstead: 'teach.divSubInstead',
   };
   // `correct`, `blank` and `wrong` are the three with nothing to name: they get the plain
   // closing sentence rather than a diagnosis.

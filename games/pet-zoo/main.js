@@ -53,6 +53,8 @@ import {
   walkSpeedAt,
   walkSpeedIndex,
 } from './column.js';
+import { dividedMarkup, divideWalkDuration, divideWalkHtml, stepOfRow } from './divwalk.js';
+import { ROUND_STEP_SCALE, shareDuration, shareSvg } from './share.js';
 import { remember } from './ink/memory.js';
 import { createInkPad } from './ink/pad.js';
 import { recognize } from './ink/recognize.js';
@@ -486,31 +488,39 @@ const COLUMN_EGG_PROMPTS = ['prompt.colEgg', 'prompt.colEgg1', 'prompt.colEgg2']
 // And a fourth set for the missing factor, because every line above leads into "what is…",
 // and this one is not asking what something is — it is asking which number is not there.
 const GAP_EGG_PROMPTS = ['prompt.gapEgg', 'prompt.gapEgg1', 'prompt.gapEgg2'];
+// And a fifth for the long division, because "work it out" is what you say over a stacked sum
+// and this one is not worked out so much as shared out, a step at a time.
+const DIVIDE_EGG_PROMPTS = ['prompt.divEgg', 'prompt.divEgg1', 'prompt.divEgg2'];
 
 /** An item answered by writing digits rather than by dragging hands. */
 const isSum = (item) => (item?.subject ?? DEFAULT_SUBJECT) === math.id;
 
-/** Which of the four families of prompt line an item is asked with. */
+/** Which of the families of prompt line an item is asked with. */
 const promptKindOf = (item) => (isSum(item) ? (current?.layout ?? 'inline') : 'clock');
 
+// The prefix each layout's lines are filed under, and the egg lines that go with it. A layout
+// with no entry here — an inline sum — falls back to the plain `sum` family, which is what every
+// written question was asked with before any of them had a shape of its own.
+const PROMPT_PREFIXES = { column: 'col', gap: 'gap', divide: 'div' };
+
+const EGG_LINES = {
+  col: COLUMN_EGG_PROMPTS,
+  gap: GAP_EGG_PROMPTS,
+  div: DIVIDE_EGG_PROMPTS,
+  sum: SUM_EGG_PROMPTS,
+};
+
 function promptFor(item) {
-  const sum = isSum(item);
-  const kind = promptKindOf(item);
+  // `col`, `gap` or `div` for a question that is written out, `sum` for one on a single line,
+  // and null for the clock, whose lines are not filed under a prefix at all.
+  const prefix = isSum(item) ? PROMPT_PREFIXES[promptKindOf(item)] ?? 'sum' : null;
   if (item.hatchedAt === null) {
-    const prompts =
-      kind === 'column'
-        ? COLUMN_EGG_PROMPTS
-        : kind === 'gap'
-          ? GAP_EGG_PROMPTS
-          : sum
-            ? SUM_EGG_PROMPTS
-            : EGG_PROMPTS;
+    const prompts = EGG_LINES[prefix] ?? EGG_PROMPTS;
     return { line: t(prompts[Math.min(item.cracks ?? 0, prompts.length - 1)]), button: t('button.warm') };
   }
   const name = petName(item, t.lang);
   const state_ =
     item.phase === 'learning' ? 'Forgot' : item.dueAt <= now() ? 'Hungry' : 'Snack';
-  const prefix = kind === 'column' ? 'col' : kind === 'gap' ? 'gap' : sum ? 'sum' : null;
   const key = prefix ? `prompt.${prefix}${state_}` : `prompt.${state_.toLowerCase()}`;
   return { line: t(key, { name }), button: t('button.feed', { name }) };
 }
@@ -651,13 +661,50 @@ const OP_SIGNS = {
 /** The same signs as plain text, for a collar or a caption. */
 const OP_TEXT = { '+': '+', '-': '−', '×': '×' };
 
-// An answer is a list of *rows* of boxes, and almost always a list of one. A stacked
-// multiplication is the exception: 247 × 38 is answered on three lines — the two partial
-// products and their total — so the model that used to be one flat array of digits is a row
-// each. Everything else became a one-row question rather than gaining a second code path, so
-// there is one set of rules about where a digit lands rather than two that can drift apart.
+// Division is the one sign this game cannot put in those tables, because which one is right is a
+// fact about where a child goes to school rather than about arithmetic: Norwegian classrooms
+// write `456 : 8` and English-speaking ones write `456 ÷ 8`. So it is looked up per language,
+// while the id in the save stays `div:` either way — see divfacts.js.
+const divSign = () => t('sign.divide');
 
-const emptyRow = (width) => ({ width, digits: emptyBoxes(width) });
+const opSign = (op) => (op === '÷' ? `<i class="op">${divSign()}</i>` : OP_SIGNS[op] ?? OP_SIGNS['+']);
+
+const opText = (op) => (op === '÷' ? divSign() : OP_TEXT[op] ?? OP_TEXT['+']);
+
+// An answer is a list of *rows* of boxes, and almost always a list of one. Two things are not.
+// A stacked multiplication is answered on three lines — the two partial products and their
+// total. A long division is answered on three rows for every digit of the answer, and those
+// step across the page rather than stacking under one another, so a row carries `place` (which
+// column its rightmost box sits in) and `line` (which line of the working it is drawn on)
+// alongside its width. Everything else became a one-row question rather than gaining a second
+// code path, so there is one set of rules about where a digit lands rather than two that can
+// drift apart.
+//
+// The rows arrive in *writing* order, not reading order: for a division that means the quotient
+// digit for a step, then its working, then the next step's quotient digit — which is why the
+// cursor can simply walk the list, and why several rows share the `'q'` line at the top.
+
+const emptyRow = ({ width, place = 0, line = 0, flow = 'places' }) => ({
+  width,
+  place,
+  line,
+  flow,
+  digits: emptyBoxes(width),
+});
+
+/**
+ * Whether a row holds an ordinary number rather than a set of places.
+ *
+ * A column sum's answer row is places: the digit worked out for the ones column belongs in the
+ * ones box and nowhere else, so it is filled ones-first and a digit never moves once it is
+ * written. A long division's working rows are not places — they are numbers that happen to be
+ * written under particular columns — so a child writes ten as a one and then a nought, and the
+ * row fills left to right and settles to the right, exactly as the inline strip does.
+ */
+const flowsAsNumber = (row) => row?.flow === 'number';
+
+/** The row the child is writing in at this moment. */
+const activeRow = (c) => c?.rows?.[c.cursor?.row ?? c.row ?? 0] ?? null;
 
 /** One row's digits, with blanks contributing nothing. */
 const rowText = (row) => (row?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
@@ -705,6 +752,13 @@ function nextBox(c) {
     const digits = c.rows[0].digits;
     return digits[0] === null ? { row: 0, index: digits.length - 1 } : null;
   }
+  // A row that holds a number fills the same way an inline strip does: the digits shuffle right
+  // and the newest always lands in the last box, so that is where the cursor sits. Once the row
+  // is full it takes no more, rather than quietly pushing the first digit out of the end.
+  const row = activeRow(c);
+  if (flowsAsNumber(row) && c.cursor) {
+    return row.digits[0] === null ? { row: c.cursor.row, index: row.digits.length - 1 } : null;
+  }
   return c.cursor;
 }
 
@@ -733,7 +787,15 @@ function stepCursor(c, at) {
 let promptShape = null;
 
 const shapeKey = (c) =>
-  [c.layout, c.width, c.rows.map((r) => r.width).join('.'), c.carries.length, writingWanted()].join('|');
+  [
+    c.layout,
+    c.width,
+    // Where a row sits is as much a part of the shape as how wide it is: two divisions with the
+    // same row widths can still want their working in different columns.
+    c.rows.map((r) => `${r.width}@${r.place}:${r.line}`).join('.'),
+    c.carries.length,
+    writingWanted(),
+  ].join('|');
 
 const slotMarkup = (row, r) =>
   row.digits.map(
@@ -760,9 +822,16 @@ function buildPrompt() {
   // A stacked question's columns are finger-sized, and five of them will not fit beside the
   // pet — so the card lays itself out differently and the working goes underneath. Only the
   // stack moves; the clock, the inline sums and the times tables are untouched.
-  el.promptCard.classList.toggle('is-stacked', current.layout === 'column');
+  el.promptCard.classList.toggle('is-stacked', current.stacked);
   const slots = current.rows.map((row, r) => slotMarkup(row, r));
-  if (current.layout === 'column' && current.shown.op === '×') {
+  if (current.layout === 'divide') {
+    // The stack owns where every row goes; this only hands it the boxes. Ones-first out of the
+    // answer strip, because that is the order the rest of the game keeps digits in.
+    el.promptSum.innerHTML = dividedMarkup(current.shown, {
+      sign: divSign(),
+      rows: current.rows.map((row, r) => ({ ...row, slots: [...slots[r]].reverse() })),
+    });
+  } else if (current.layout === 'column' && current.shown.op === '×') {
     el.promptSum.innerHTML = stackedMulMarkup(current.shown, {
       width: current.width,
       rows: current.rows.map((row, r) => ({
@@ -786,7 +855,7 @@ function buildPrompt() {
   } else {
     const { op, a, b } = current.shown;
     const strip = `<span class="ans-slots">${slots[0].join('')}</span>`;
-    el.promptSum.innerHTML = `${a}${OP_SIGNS[op] ?? OP_SIGNS['+']}${b}<i class="op">=</i>${strip}`;
+    el.promptSum.innerHTML = `${a}${opSign(op)}${b}<i class="op">=</i>${strip}`;
   }
   attachCarryPads();
 }
@@ -963,7 +1032,12 @@ function pushDigit(digit) {
   const at = nextBox(current);
   if (!at) return;
   const row = current.rows[at.row];
-  if (current.stacked) {
+  if (flowsAsNumber(row)) {
+    // Left to right, settling right — and the cursor stays put, because the next digit lands in
+    // the same box and pushes this one along. The child says when the row is done.
+    row.digits = [...row.digits.slice(1), Number(digit)];
+    current.row = at.row;
+  } else if (current.stacked) {
     row.digits[at.index] = Number(digit);
     current.cursor = stepCursor(current, at);
     current.row = current.cursor?.row ?? at.row;
@@ -984,7 +1058,7 @@ function clearAnswer() {
   // Adding's stand-in for waggling the clock hands: starting the answer over is the tell
   // that the child was not sure, and `qualityOf` reads it the same way.
   if (written) current.clears += 1;
-  current.rows = current.rows.map((row) => emptyRow(row.width));
+  current.rows = current.rows.map(emptyRow);
   current.carries = blankCarries(current);
   current.row = 0;
   current.cursor = current.stacked ? onesBox(current, 0) : null;
@@ -1035,6 +1109,22 @@ function backspaceAnswer() {
     renderAnswer();
     return;
   }
+  // A row of number rows undoes its own shuffle: the digits slide back to the right and the
+  // last one written falls off the end. Walking the cursor backwards would rub out the box the
+  // digit happens to be sitting in, which for a number is not where it was written.
+  if (flowsAsNumber(activeRow(current))) {
+    // Skipping rows the child left empty, so backspace on a fresh row reaches the one above.
+    let at = current.cursor?.row ?? current.row;
+    while (at >= 0 && current.rows[at].digits.every((d) => d === null)) at -= 1;
+    if (at < 0) return;
+    const row = current.rows[at];
+    row.digits = [null, ...row.digits.slice(0, -1)];
+    current.row = at;
+    current.cursor = onesBox(current, at);
+    audio.play('grab');
+    renderAnswer();
+    return;
+  }
   // Backwards along the way the cursor came, so what is rubbed out is what was written last —
   // and the cursor lands on the box it emptied, ready to take the digit that should be there.
   const back = backCursor(current);
@@ -1071,7 +1161,9 @@ let lastDrawn = null;
 function syncWrittenAnswer() {
   if (!current?.rows?.length) return;
   const row = current.rows[current.row] ?? current.rows[0];
-  if (current.stacked) {
+  // A number row is read the inline way even inside a stack — left to right, empties skipped —
+  // because that is what it is: a number written across two boxes, not two places.
+  if (current.stacked && !flowsAsNumber(row)) {
     row.digits = writeSlots.map((slot) => slot.digit);
   } else {
     const written = writeSlots
@@ -1281,7 +1373,7 @@ el.writeClear.addEventListener('click', () => {
   // Starting the whole answer over *is* hesitation, unlike putting a misreading right.
   if (current.rows.some((row) => row.digits.some((d) => d !== null))) current.clears += 1;
   current.carries = blankCarries(current);
-  current.rows = current.rows.map((row) => emptyRow(row.width));
+  current.rows = current.rows.map(emptyRow);
   current.row = 0;
   resetWriting();
   syncWrittenAnswer();
@@ -1419,14 +1511,17 @@ function askNext() {
     // Turning a *difference* round would not be the same question at all.
     shown: sum ? shownForm(question) : question,
     layout,
-    stacked: layout === 'column',
+    // Both written layouts hold their digits where they are put rather than shuffling them
+    // along, because *where* a digit sits is the whole of what they are teaching.
+    stacked: layout === 'column' || layout === 'divide',
     width,
     rows: rows.map(emptyRow),
     row: 0,
-    // Where the next digit lands, for a question written in columns: the ones of the top row,
-    // because that is where the work starts. An inline answer has no cursor — its digits
-    // shuffle left and the newest lands on the right.
-    cursor: layout === 'column' ? { row: 0, index: rows[0] - 1 } : null,
+    // Where the next digit lands, for a question that is written out: the ones of the first
+    // row, because that is where the work starts. For a division the first row is the first
+    // quotient digit, which is exactly where a child's pencil goes. An inline answer has no
+    // cursor — its digits shuffle left and the newest lands on the right.
+    cursor: layout === 'column' || layout === 'divide' ? { row: 0, index: rows[0].width - 1 } : null,
     // One row of scratch per run down the columns: one for a sum, one per partial product for a
     // multiplication, none at all for anything written on a single line. Never read, never graded.
     carries: Array.from({ length: sum ? math.carryRows(item, question) : 0 }, () =>
@@ -1510,6 +1605,18 @@ const MATH_VERDICTS = {
   mulForgotColCarry: 'teach.mulColForgotCarry',
   mulOnlyOnes: 'teach.mulColOnlyOnes',
   mulAddedInstead: 'teach.mulColAddedInstead',
+  divGaveDividend: 'teach.divGaveDividend',
+  divGaveDivisor: 'teach.divGaveDivisor',
+  divTookAway: 'teach.divTookAway',
+  divMultiplied: 'teach.divMultiplied',
+  divNeighbour: 'teach.divNeighbour',
+  divForgotBringDown: 'teach.divForgotBringDown',
+  divIgnoredRemainder: 'teach.divIgnoredRemainder',
+  divZeroStep: 'teach.divZeroStep',
+  divDroppedRemainder: 'teach.divDroppedRemainder',
+  divBackwards: 'teach.divBackwards',
+  divMulInstead: 'teach.divMulInstead',
+  divSubInstead: 'teach.divSubInstead',
 };
 
 /**
@@ -1525,6 +1632,32 @@ function sumTeachLine(result) {
   const question = current.shown;
   const named = MATH_VERDICTS[result.verdict];
   const opening = (result.nearMiss ? t('teach.nearMiss') : '') + (named ? `${t(named)} ` : '');
+  if (current.layout === 'divide') {
+    const { a, b } = question;
+    const rest = a % b;
+    // What was left over is named when there was any, because "and two left over" is half of
+    // what the answer to that question is.
+    return opening + t(rest ? 'teach.divColRest' : 'teach.divColPlain', {
+      a,
+      b,
+      quotient: Math.floor(a / b),
+      rest,
+    });
+  }
+  if (question.op === '÷') {
+    const { a, b } = question;
+    const answer = a / b;
+    // A division closes on the product it is the flip side of — "you know 7 × 8 = 56, so
+    // 56 ÷ 8 is 7". That is a sentence about something already mastered rather than a new rule
+    // to hold, exactly as a difference closes on its addition partner. Only inside the deck the
+    // game teaches, though: past that there is no partner to point at and the plain sentence is
+    // the honest one.
+    if (b <= 10 && answer <= 10) {
+      const { a: small, b: large } = math.divfacts.partnerOf({ a, b });
+      return opening + t('teach.divFamily', { a, b, answer, small, large });
+    }
+    return opening + t('teach.divPlain', { a, b, answer });
+  }
   if (current.layout === 'column' && question.op === '×') {
     return opening + t('teach.mulColPlain', {
       a: question.a,
@@ -1905,7 +2038,37 @@ async function correctSum(target, result) {
   el.feedback.className = 'feedback teach';
   const still = reduceMotion();
   el.tenframeHost.hidden = false;
-  if (current.layout === 'column' && question.op === '×') {
+  if (current.layout === 'divide') {
+    // The long division's walkthrough, and it starts at the step the grader says went wrong.
+    // Everything above it is drawn already finished: a child who got the first two steps right
+    // does not need to watch them again, and a three-digit answer worked through in full is
+    // nine rows on every miss.
+    const instant = still || Boolean(state.settings.walkInstant);
+    const step = stepFor(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED);
+    const opts = { from: stepOfRow(result.row ?? 0), sign: divSign() };
+    el.tenframeHost.innerHTML = divideWalkHtml(question, {
+      ...opts,
+      step: instant ? 0 : step,
+      title: t.spokenQuestion(question),
+    });
+    await wait(instant ? 1200 + current.width * 300 : divideWalkDuration(question, { ...opts, step }));
+  } else if (question.op === '÷') {
+    // Dots dealt into groups, a round at a time — "one each, and one each again" — which is the
+    // dividing counterpart of the array and takes its pace from the same setting, for the same
+    // reason: how long a child needs to watch is a fact about the child.
+    //
+    // Only where it is a picture worth drawing. The rung that divides by whole tens reaches four
+    // hundred and fifty, and four hundred and fifty dots is not a picture, it is a wall — so
+    // there the sentence stands on its own.
+    const instant = still || Boolean(state.settings.walkInstant);
+    const step = stepFor(state.settings.walkSpeed ?? DEFAULT_WALK_SPEED) * ROUND_STEP_SCALE;
+    const { a, b } = question;
+    const markup = shareSvg(a, b, { step: instant ? 0 : step, title: t.spokenQuestion(question) });
+    el.tenframeHost.innerHTML = markup;
+    el.tenframeHost.hidden = !markup;
+    if (!markup) await wait(1600);
+    else await wait(instant ? 1200 + Math.floor(a / b) * 120 : shareDuration(a, b, step));
+  } else if (current.layout === 'column' && question.op === '×') {
     // The stacked multiplication's walkthrough, and it walks *one row* — the first that went
     // wrong, which the grader named. The rest of the stack is drawn finished: a child who got
     // the ones row right does not need to watch it done again, and 247 × 38 worked through in
@@ -2106,7 +2269,7 @@ function penCollar(item, digits) {
       ? escape(t(`skill.${item.skill}`))
       : item.gap
         ? `${item.a} × ? = ${item.a * item.b}`
-        : `${item.a} ${OP_TEXT[item.op] ?? OP_TEXT['+']} ${item.b}`;
+        : `${item.a} ${opText(item.op)} ${item.b}`;
     return `<span class="collar-sum">${label}</span>`;
   }
   return `${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}`;

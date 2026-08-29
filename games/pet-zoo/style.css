@@ -887,6 +887,209 @@ main {
   to   { opacity: 1; transform: none; }
 }
 
+/* -------------------------------------------------------- long division */
+
+/* The same idea as the stacked sum — one grid column per place, so everything written under a
+   digit stays under it — turned the other way up. A column sum has one answer row at the
+   bottom; a division has three rows for every digit of its answer, marching down and to the
+   right, and the whole point of the layout is that a product lands under the number it was
+   taken from. So the grid is per *line* here rather than one grid for the whole stack: the
+   lines are independent, and only their columns have to agree.
+
+   The columns are the dividend's. Nothing is ever wider — a product cannot pass the number it
+   came out of — so the stack never grows sideways however long the working gets. */
+.divwalk {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* The same finger-sized column the stacked sum uses, and for the same reason: a tap on an
+     answer box is how the cursor is moved down the working. Stated the same way so the two
+     layouts come out the same size on the same phone. */
+  /* The head line is the widest thing here and it is nearly twice as wide as the working: the
+     dividend, then the sign and the divisor, and then a box for every digit of the answer. So
+     the column is sized against *that* — twice the places plus a couple for the sign — rather
+     than against the stack underneath, which is how the first version of this ran off the side
+     of the card at three digits. */
+  --dw-col: clamp(26px, calc((100vw - 7rem) / (var(--dw-cols, 2) * 2 + 2)), 44px);
+  /* Shorter than the stacked sum's 44px boxes, and it has to be. A three-digit division is six
+     rows of working under the question — twice the tallest multiplication — and at a full
+     fingertip each the stack would run off the bottom of a phone before the child had written
+     anything. Still comfortably tappable, which is what the height is for: a tap on a box is
+     how the cursor is moved around the working. */
+  --dw-touch: max(36px, calc(var(--dw-col) * 0.8));
+  /* A shade smaller than the stacked sum, for the same reason. */
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--pz-accent);
+  text-align: center;
+}
+
+.dw-line {
+  display: grid;
+  grid-template-columns: repeat(var(--dw-cols, 2), var(--dw-col));
+  align-items: center;
+  /* Boxes that touch read as one wide box, which would say the two-digit number in them was a
+     single number rather than two columns of working. The gap is what keeps them countable. */
+  gap: 0.14rem 0.2rem;
+}
+
+/* The head line carries the question itself — the dividend, the sign, the divisor, an equals —
+   and then the boxes the answer goes in, both of which sit outside the places. */
+.dw-head {
+  grid-template-columns: repeat(var(--dw-cols, 2), var(--dw-col)) auto auto;
+}
+
+.dw-cell {
+  min-width: 1.15em;
+  padding: 0 0.05em;
+  line-height: 1.15;
+}
+
+/* The working is working: present, and a shade quieter than the question it came out of and
+   the answer it is building towards. Exactly what `.cw-partial` does for a partial product. */
+.dw-line:not(.dw-head) .dw-cell {
+  color: var(--pz-ink-soft);
+}
+
+.dw-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1em;
+  padding: 0 0.15em;
+  white-space: nowrap;
+}
+
+.dw-op,
+.dw-eq {
+  color: var(--pz-ink-soft);
+  font-weight: 600;
+  font-style: normal;
+  padding: 0 0.12em;
+}
+
+.dw-quotient {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+/* A rule sits under the subtraction it was taken across and nowhere else, which is why it is
+   given grid columns rather than being stretched end to end the way a column sum's is. */
+.dw-ruleline {
+  min-height: 0.5rem;
+  margin: 0.06rem 0 0.14rem;
+}
+
+/* Darker than the stacked sum's rule, and deliberately. There the rule runs the whole width and
+   there is nothing to confuse it with; here it is one or two columns long and every box above it
+   already has an underline of its own, so at the same weight the working reads as a stack of
+   underlines rather than as a subtraction. */
+.dw-rule {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--pz-ink-soft);
+  align-self: center;
+}
+
+/* The answer boxes, and the boxes the working is written into. The same tile the stacked sum
+   uses, because they are the same thing: somewhere to put a digit, big enough to tap, with an
+   underline that says which one the next digit is going in. */
+.dw-line .slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+  min-height: var(--dw-touch);
+  border-radius: 10px 10px 4px 4px;
+  background: var(--pz-card-2);
+  /* Lighter than the stacked sum's, so that the rule ruled under a subtraction is plainly a
+     heavier line than the boxes it is ruled under. */
+  border-bottom: 2px solid var(--pz-line);
+  color: var(--pz-ink);
+}
+
+/* The quotient is the answer rather than working, so its boxes keep the full colour. They sit
+   on the head line rather than in a place, so they are sized to a digit and a finger instead of
+   to a column — nothing has to line up underneath them. */
+.dw-quotient .slot {
+  min-width: max(30px, calc(var(--dw-col) * 0.85));
+  min-height: max(40px, var(--dw-touch));
+}
+
+.dw-line .slot.is-next {
+  border-bottom-color: var(--pz-accent);
+}
+
+.dw-line .slot.is-empty::after {
+  content: '\00a0';
+}
+
+/* The walkthrough. Nothing lights up and nothing is crossed out: the working simply happens,
+   a step at a time, in the order a child would write it — the answer digit, then what it takes
+   away, then what is left with the next digit down beside it. */
+.divwalk.is-walk .dw-mark {
+  animation: cw-land 0.4s ease-out backwards;
+  animation-delay: var(--dw-delay, 0s);
+}
+
+.divwalk.is-walk .dw-quotient .dw-mark {
+  animation-name: cw-carry;
+}
+
+.divwalk.is-walk .dw-rule.dw-mark {
+  animation: dw-rule 0.35s ease-out backwards;
+  animation-delay: var(--dw-delay, 0s);
+}
+
+/* The rule is drawn rather than dropped in — it is a line being ruled under a subtraction,
+   and it reads as one if it arrives from the left. */
+@keyframes dw-rule {
+  from { opacity: 0; transform: scaleX(0); transform-origin: left center; }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------------- sharing out */
+
+/* The dividing counterpart of the array: dots dealt into groups a round at a time, one to each
+   group, with whatever will not go round left standing apart. Same vocabulary as the array and
+   the ten-frame deliberately — the same colour of dot, the same drop, the same
+   delay-as-custom-property — so the three pictures read as three things the game says rather
+   than three things it was taught to say. */
+.sharedots {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 240px;
+  margin: 0 auto;
+}
+
+.sh-dot {
+  fill: var(--pz-accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tf-drop 0.3s ease-out backwards;
+  animation-delay: var(--sh-delay, 0s);
+}
+
+/* The ones that could not go round. Not faded out — they are still there, which is the whole
+   point of a remainder — but plainly not part of anybody's share. */
+.sh-spare {
+  fill: var(--pz-warm);
+}
+
+/* How many each group ended up with, which is the answer. */
+.sh-count {
+  fill: var(--pz-good);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  animation: ar-fade 0.28s ease-out backwards;
+  animation-delay: var(--sh-delay, 0s);
+}
+
 /* ------------------------------------------------------------------- clock */
 
 .clock-wrap {
@@ -2475,6 +2678,13 @@ body.in-habitat .zoo-bar {
   .colwalk.is-walking .cw-lit,
   .colwalk.is-walking .cw-lands,
   .colwalk.is-walking .cw-mark {
+    animation: none;
+  }
+
+  .sh-dot,
+  .sh-count,
+  .divwalk.is-walk .dw-mark,
+  .divwalk.is-walk .dw-rule.dw-mark {
     animation: none;
   }
 
