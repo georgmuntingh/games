@@ -703,8 +703,12 @@ const emptyRow = ({ width, place = 0, line = 0, flow = 'places' }) => ({
  */
 const flowsAsNumber = (row) => row?.flow === 'number';
 
-/** The row the child is writing in at this moment. */
-const activeRow = (c) => c?.rows?.[c.cursor?.row ?? c.row ?? 0] ?? null;
+/** Which row the child is writing in at this moment. The cursor knows, except in handwriting
+ *  mode, where there is no cursor and the pads themselves are parked on a row. */
+const activeRowIndex = (c) => c?.cursor?.row ?? c?.row ?? 0;
+
+/** And the row itself. */
+const activeRow = (c) => c?.rows?.[activeRowIndex(c)] ?? null;
 
 /** One row's digits, with blanks contributing nothing. */
 const rowText = (row) => (row?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
@@ -863,6 +867,15 @@ function buildPrompt() {
 /** Put the current digits into the boxes already on screen, and say where the cursor is. */
 function paintAnswer() {
   const next = writingWanted() ? null : nextBox(current);
+  // Marked even in handwriting mode, where there is no cursor to show: the pads serve one row
+  // at a time and which row they belong to is exactly the thing that needs saying.
+  //
+  // Long division only. Every other question in the game is answered on one line, where a row
+  // to highlight would be the whole answer; the stacked multiplication has three, and could
+  // take the same treatment, but it is not asking for it — its rows are read as a stack rather
+  // than walked through in an order.
+  const rowLit = current.layout === 'divide' && current.rows.length > 1;
+  const live = activeRowIndex(current);
   for (const box of el.promptSum.querySelectorAll('.slot')) {
     const row = current.rows[Number(box.dataset.row)];
     const i = Number(box.dataset.i);
@@ -873,6 +886,10 @@ function paintAnswer() {
       'is-next',
       Boolean(next) && !current.focus && next.row === Number(box.dataset.row) && next.index === i
     );
+    // And the whole row it belongs to. A long division is answered on up to thirteen boxes
+    // spread down nine lines, and one underlined box among them is easy to lose — so the row
+    // being worked on lifts as a whole and the next box is picked out inside it.
+    box.classList.toggle('is-live', rowLit && Number(box.dataset.row) === live);
   }
   paintCarries();
   renderWriteTools();

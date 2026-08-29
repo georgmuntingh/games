@@ -1018,8 +1018,19 @@ main {
   min-height: max(40px, var(--dw-touch));
 }
 
+/* The row being worked on. A division is answered on up to thirteen boxes spread down nine
+   lines, and a single underlined box among them is easy to lose — so the whole row lifts, and
+   the box the next digit lands in is picked out inside it. In handwriting mode there is no
+   cursor at all and this is the only thing saying which row the pads are serving. */
+.dw-line .slot.is-live {
+  background: color-mix(in srgb, var(--pz-accent) 14%, var(--pz-card-2));
+  border-bottom-color: color-mix(in srgb, var(--pz-accent) 45%, var(--pz-line));
+}
+
+/* After `.is-live`, so the next box keeps its own underline inside a lifted row. */
 .dw-line .slot.is-next {
   border-bottom-color: var(--pz-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pz-accent) 32%, transparent);
 }
 
 .dw-line .slot.is-empty::after {
