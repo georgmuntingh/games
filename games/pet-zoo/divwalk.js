@@ -64,6 +64,13 @@ const digitCells = (value, width, classes = '', delay = null) => {
   return [...text].map((ch) => cell(ch === ' ' ? '' : ch, classes, delay));
 };
 
+/**
+ * The sign and the divisor, as one thing. They are one thing to read — ": 4" is "shared between
+ * four" — and one thing to point at: the caller lights it whenever the divisor is an ingredient
+ * of the row being written, which is most of them.
+ */
+const by = (b, sign) => `<span class="dw-by" data-by><i class="dw-op">${sign}</i>${b}</span>`;
+
 /** The rule drawn under a subtraction, spanning exactly the columns it was taken across. */
 const ruleFor = (cols, row, delay = null) => {
   const { start, end } = spanOf(cols, row);
@@ -112,7 +119,7 @@ export function dividedMarkup({ a, b }, { rows = [], sign = '÷' } = {}) {
   return `
     <div class="divwalk" style="--dw-cols:${cols}">
       <div class="dw-line dw-head" style="--dw-cols:${cols}">
-        ${top}<span class="dw-tail"><i class="dw-op">${sign}</i>${b}<i class="dw-eq">=</i></span>
+        ${top}<span class="dw-tail">${by(b, sign)}<i class="dw-eq">=</i></span>
         <span class="dw-quotient">${quotient}</span>
       </div>
       ${working}
@@ -168,7 +175,7 @@ export function divideWalkHtml({ a, b }, { step = stepFor(DEFAULT_WALK_SPEED), t
     <div class="divwalk is-walk" style="--dw-cols:${cols}" role="img" aria-label="${title}">
       <div class="dw-line dw-head" style="--dw-cols:${cols}">
         ${digitsOf(a).map((d) => cell(d, 'dw-digit')).join('')}
-        <span class="dw-tail"><i class="dw-op">${sign}</i>${b}<i class="dw-eq">=</i></span>
+        <span class="dw-tail">${by(b, sign)}<i class="dw-eq">=</i></span>
         <span class="dw-quotient">${quotient}</span>
       </div>
       ${working}
@@ -184,3 +191,30 @@ export function divideWalkDuration({ a, b }, { step = stepFor(DEFAULT_WALK_SPEED
 
 /** Which step of the working a wrong row belongs to — three rows to a step, in writing order. */
 export const stepOfRow = (row) => Math.floor(Math.max(0, row) / BEATS_PER_STEP);
+
+/**
+ * What one row of the working is made from — the ingredients for the number about to be written
+ * into it. A different pair every row, which is much of the difficulty of the method:
+ *
+ *   the answer digit   how many of the divisor fit into the digits being divided, so those
+ *                      digits and the divisor
+ *   the product        that answer digit multiplied by the divisor, so the digit just written
+ *                      and the divisor — and *not* the number being divided, which takes no
+ *                      part in the multiplication
+ *   what is left       the subtraction is the two rows standing directly above it and needs no
+ *                      pointing at; what is easy to miss is which digit comes down next, so
+ *                      that one is named instead
+ *
+ * `row` is a row from `rowShape`. The answer says which digits of the number being divided are
+ * in play, whether the divisor is, and which step's already-written answer digit is being leaned
+ * on — `null` for none.
+ */
+export function ingredientsFor(a, b, row) {
+  const none = { digits: [], divisor: false, quotientStep: null };
+  if (!row) return none;
+  if (row.kind === 'quotient') return { digits: stepDigits(a, b, row.step), divisor: true, quotientStep: null };
+  if (row.kind === 'product') return { digits: [], divisor: true, quotientStep: row.step };
+  // What is left, and then the next digit down beside it — which belongs to the step after this
+  // one. The last row has no step after it and so names nothing.
+  return { ...none, digits: stepDigits(a, b, row.step + 1) };
+}

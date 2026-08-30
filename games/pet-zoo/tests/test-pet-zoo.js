@@ -108,7 +108,7 @@ import * as mathDivide from '../subjects/math/divide.js';
 import { mulWalkHtml, stackedMulMarkup } from '../column.js';
 import { ALL_VERDICTS, gradeDivide } from '../subjects/math/grade.js';
 import { arrayPlan, arraySvg } from '../array.js';
-import { dividedMarkup, divideWalkHtml, spanOf, stepOfRow, walkCols } from '../divwalk.js';
+import { dividedMarkup, divideWalkHtml, ingredientsFor, spanOf, stepOfRow, walkCols } from '../divwalk.js';
 import { sharePlan, shareSvg } from '../share.js';
 import {
   columnWalkHtml,
@@ -4722,6 +4722,61 @@ test('each step takes exactly the digits it should from the number being divided
         seen.push(...run);
       });
       assertEqual(seen.join(','), digits.map((_, i) => i).join(','), `${a} : ${b} does not use every digit once`);
+    }
+  }
+});
+
+test('every row says what it is made from, and never more than that', () => {
+  // What the prompt lights up beside the row being written. Getting this wrong would point a
+  // child at the wrong two numbers, which is worse than pointing at none.
+  const rows = mathDivide.rowShape(3, 3); // 661 : 4 — three digits in, three out
+  const of = (i) => ingredientsFor(661, 4, rows[i]);
+
+  // The answer digit: how many fours fit into the digit being divided. That digit, and the four.
+  assertEqual(of(0).digits.join(''), '0');
+  assertEqual(of(0).divisor, true, 'you cannot divide without the divisor');
+  assertEqual(of(0).quotientStep, null, 'nothing has been written to lean on yet');
+
+  // The product: the answer digit just written, times the divisor — and *not* the number being
+  // divided, which takes no part in the multiplication.
+  assertEqual(of(1).digits.join(''), '', 'the number being divided is not an ingredient here');
+  assertEqual(of(1).divisor, true);
+  assertEqual(of(1).quotientStep, 0, 'it is that step’s own answer digit that gets multiplied');
+
+  // What is left: the subtraction is the two rows right above it, so what gets named is the one
+  // thing that is easy to miss — which digit comes down next.
+  assertEqual(of(2).digits.join(''), '1', 'the next digit along comes down');
+  assertEqual(of(2).divisor, false, 'nothing is divided on this row');
+  assertEqual(of(2).quotientStep, null);
+
+  // And the last row of all has no step after it, so it names nothing at all.
+  const last = rows[rows.length - 1];
+  assertEqual(last.kind, 'remainder');
+  assertEqual(ingredientsFor(661, 4, last).digits.length, 0, 'there is nothing left to come down');
+
+  // A short first step takes two digits, and both are ingredients of the first answer digit.
+  const short = mathDivide.rowShape(1, 2); // 24 : 4 — two digits in, one out
+  assertEqual(ingredientsFor(24, 4, short[0]).digits.join(''), '01', 'the two and the four together');
+
+  // Across every question the rungs can ask: an ingredient is only ever a digit that exists, and
+  // the divisor is wanted on exactly the rows that use it.
+  for (let b = 2; b <= 9; b += 1) {
+    for (let a = 10; a <= 999; a += 1) {
+      const shape = mathDivide.rowShape(mathDivide.divSteps(a, b).length, mathDivide.digitsOf(a).length);
+      const width = mathDivide.digitsOf(a).length;
+      for (const row of shape) {
+        const used = ingredientsFor(a, b, row);
+        assert(
+          used.digits.every((i) => i >= 0 && i < width),
+          `${a} : ${b} pointed at a digit that is not there`
+        );
+        assertEqual(used.divisor, row.kind !== 'remainder', `${a} : ${b} ${row.kind} wants the divisor`);
+        assertEqual(
+          used.quotientStep,
+          row.kind === 'product' ? row.step : null,
+          `${a} : ${b} ${row.kind} leans on the wrong answer digit`
+        );
+      }
     }
   }
 });

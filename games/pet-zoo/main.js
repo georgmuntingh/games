@@ -53,7 +53,13 @@ import {
   walkSpeedAt,
   walkSpeedIndex,
 } from './column.js';
-import { dividedMarkup, divideWalkDuration, divideWalkHtml, stepDigits, stepOfRow } from './divwalk.js';
+import {
+  dividedMarkup,
+  divideWalkDuration,
+  divideWalkHtml,
+  ingredientsFor,
+  stepOfRow,
+} from './divwalk.js';
 import { ROUND_STEP_SCALE, shareDuration, shareSvg } from './share.js';
 import { remember } from './ink/memory.js';
 import { createInkPad } from './ink/pad.js';
@@ -684,11 +690,16 @@ const opText = (op) => (op === '÷' ? divSign() : OP_TEXT[op] ?? OP_TEXT['+']);
 // digit for a step, then its working, then the next step's quotient digit — which is why the
 // cursor can simply walk the list, and why several rows share the `'q'` line at the top.
 
-const emptyRow = ({ width, place = 0, line = 0, flow = 'places' }) => ({
+const emptyRow = ({ width, place = 0, line = 0, flow = 'places', kind = null, step = null }) => ({
   width,
   place,
   line,
   flow,
+  // What this row of a division *is* — the answer digit, the product taken away, or what is
+  // left — and which step of the working it belongs to. Null for every other question, which
+  // has one row and nothing to say about it.
+  kind,
+  step,
   digits: emptyBoxes(width),
 });
 
@@ -709,6 +720,21 @@ const activeRowIndex = (c) => c?.cursor?.row ?? c?.row ?? 0;
 
 /** And the row itself. */
 const activeRow = (c) => c?.rows?.[activeRowIndex(c)] ?? null;
+
+/**
+ * The ingredients for the row being worked on, as things on screen: `ingredientsFor` knows which
+ * numbers the method needs, and this turns the step it names into the row that holds it.
+ */
+function ingredientsOf(c, at) {
+  const found = ingredientsFor(c.shown.a, c.shown.b, c?.rows?.[at]);
+  return {
+    ...found,
+    row:
+      found.quotientStep === null
+        ? -1
+        : c.rows.findIndex((entry) => entry.kind === 'quotient' && entry.step === found.quotientStep),
+  };
+}
 
 /** One row's digits, with blanks contributing nothing. */
 const rowText = (row) => (row?.digits ?? []).map((d) => (d === null ? '' : d)).join('');
@@ -891,14 +917,18 @@ function paintAnswer() {
     // being worked on lifts as a whole and the next box is picked out inside it.
     box.classList.toggle('is-live', rowLit && Number(box.dataset.row) === live);
   }
-  // And in the number being divided, the digits this step is actually taking — one, or two where
-  // the first digit was too small to divide on its own. Working out which of them is in play is
-  // most of the difficulty of the method, and on paper a child keeps their place by putting a
-  // finger on it. This is that finger.
+  // And what the row is made *from*. Working out which numbers go into the next thing you write
+  // is most of the difficulty of long division — it is a different pair every row, and they are
+  // scattered across the page — so the ingredients light up together with the row that needs
+  // them. On paper a child does this with a finger; this is that finger.
   if (rowLit) {
-    const taking = stepDigits(current.shown.a, current.shown.b, stepOfRow(live));
+    const used = ingredientsOf(current, live);
     for (const digit of el.promptSum.querySelectorAll('[data-dpos]')) {
-      digit.classList.toggle('is-live', taking.includes(Number(digit.dataset.dpos)));
+      digit.classList.toggle('is-used', used.digits.includes(Number(digit.dataset.dpos)));
+    }
+    el.promptSum.querySelector('[data-by]')?.classList.toggle('is-used', used.divisor);
+    for (const box of el.promptSum.querySelectorAll('.slot')) {
+      box.classList.toggle('is-used', Number(box.dataset.row) === used.row);
     }
   }
   paintCarries();
