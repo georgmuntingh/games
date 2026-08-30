@@ -1226,6 +1226,13 @@ function nextWriteRow() {
 function renderWriteTools() {
   const stack = writingWanted() && current?.rows?.length > 1;
   el.writeNext.hidden = !stack;
+  // The button stands in the same row as the pads, so its width comes out of theirs — but only
+  // where there is room for it. A long division is written one or two boxes at a time and has
+  // room to spare; the widest multiplication row is five, and five pads and a button do not fit
+  // across a phone. Pads squeezed small enough to make them fit are pads a child cannot write
+  // in, so past three the button wraps underneath instead and the pads keep their size.
+  const beside = stack && (current.rows[current.row]?.width ?? 0) <= 3;
+  el.answerWrite.classList.toggle('has-next', beside);
   if (!stack) return;
   el.writeNext.disabled =
     current.row + 1 >= current.rows.length || !isRowComplete(current.rows[current.row]);

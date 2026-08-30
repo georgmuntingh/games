@@ -372,6 +372,20 @@ main {
   --pads: 2;
 }
 
+/* How wide the way-on button is, and — separately — how much of the row it is taking *from the
+   pads*. The two differ: when it wraps underneath it is still its full width, but it is no
+   longer standing in the pads' way, so nothing is reserved and they get the whole line back. */
+.write-wrap {
+  --next-w: 58px;
+  --next-take: 0px;
+  --next-gap: 0px;
+}
+
+.write-wrap.has-next {
+  --next-take: var(--next-w);
+  --next-gap: 0.55rem;
+}
+
 .write-box {
   display: flex;
   flex-direction: column;
@@ -379,8 +393,85 @@ main {
   gap: 0.3rem;
 }
 
+/* The pads and the way on to the next row, side by side, the button centred against them: at
+   the top of a 140px pad it reads as floating off on its own rather than as belonging to the
+   thing beside it. */
+.write-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  width: 100%;
+  /* So the button drops underneath rather than off the side on the widest rows, where
+     `has-next` is off and no width has been reserved for it. */
+  flex-wrap: wrap;
+}
+
+/* Icon over label, and narrow: it is standing in the same row as up to five writing pads on a
+   phone, and every pixel it takes is a pixel of pad. */
+.write-next {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 0.15rem;
+  width: var(--next-w);
+  padding: 0.35rem 0.2rem;
+  border: 1px solid var(--pz-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--pz-ink-soft);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  text-align: center;
+  /* Square-ish with the pads it stands beside, so the row reads as one thing. */
+  min-height: 56px;
+  cursor: pointer;
+}
+
+.write-next[hidden] {
+  display: none;
+}
+
+/* Live, it is the obvious next thing to do — so it takes the accent rather than staying the
+   quiet grey of Undo and Clear, which are things a child only reaches for when something went
+   wrong. */
+.write-next:not(:disabled) {
+  border-color: var(--pz-accent-soft);
+  color: var(--pz-accent);
+}
+
+.write-next:not(:disabled):active {
+  background: var(--pz-accent-soft);
+}
+
+/* Disabled until the row has something in it. Dimmed rather than hidden: a control that came
+   and went would be one a child had to find again every row. */
+.write-next:disabled {
+  opacity: 0.45;
+}
+
+.write-next-icon {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.write-next-label {
+  /* Two short words on a narrow button: let them stack rather than squeezing the button wider.
+     "Neste rad" and "Next row" both break happily in the middle. */
+  display: block;
+  overflow-wrap: anywhere;
+}
+
 .write-pad {
-  width: clamp(64px, calc((100vw - 3.5rem - (var(--pads, 2) - 1) * 0.7rem) / var(--pads, 2)), 140px);
+  width: clamp(52px, calc((100vw - 3.5rem - var(--next-take, 0px) - var(--next-gap, 0px) - (var(--pads, 2) - 1) * 0.7rem) / var(--pads, 2)), 140px);
   aspect-ratio: 1;
   border: 2px dashed var(--pz-line);
   border-radius: 14px;
