@@ -64,6 +64,29 @@ export function divSteps(a, b) {
 }
 
 /**
+ * Which digits of the number being divided a step actually takes, as indices from the left.
+ *
+ * One, normally: the next digit comes down and joins whatever was left over. Two on the first
+ * step of a `shortFirst` question, where the leading digit had nothing in it to divide and the
+ * step had to reach for the one beside it — `456 : 8` begins by taking the four *and* the five.
+ *
+ * Read off the steps' places rather than re-derived, so it cannot disagree with `divSteps`
+ * about where the working got to: a step's last digit is the one its quotient digit sits over,
+ * and it starts wherever the step before it stopped.
+ */
+export function stepDigits(a, b, k) {
+  const steps = divSteps(a, b);
+  const step = steps[k];
+  if (!step) return [];
+  const n = digitsOf(a).length;
+  const end = n - 1 - step.place;
+  const start = k === 0 ? 0 : n - steps[k - 1].place;
+  const out = [];
+  for (let i = start; i <= end; i += 1) out.push(i);
+  return out;
+}
+
+/**
  * The shape of the working — where every row sits and how wide it is — **in the order the child
  * writes them**: for every step, the quotient digit, then the product taken away, then what is
  * left with the next digit brought down.

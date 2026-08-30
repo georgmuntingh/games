@@ -17,9 +17,11 @@
 // to run and nothing to clean up, and reduced motion simply shows the finished thing.
 
 import { DEFAULT_WALK_SPEED, stepFor } from './column.js';
-import { digitsOf, divRows, divSteps } from './subjects/math/divide.js';
+import { digitsOf, divRows, divSteps, stepDigits } from './subjects/math/divide.js';
 
-export { DEFAULT_WALK_SPEED, stepFor };
+// Re-exported the way column.js re-exports the column arithmetic it draws: main.js asks the
+// renderer about the picture, not the subject module about the sums behind it.
+export { DEFAULT_WALK_SPEED, stepFor, stepDigits };
 
 /** How many columns the stack needs: the dividend's. Everything else is written underneath it,
  *  and nothing is ever wider — a product cannot pass the number it came out of. */
@@ -82,7 +84,11 @@ const ruleFor = (cols, row, delay = null) => {
  */
 export function dividedMarkup({ a, b }, { rows = [], sign = '÷' } = {}) {
   const cols = walkCols(a);
-  const top = digitsOf(a).map((d) => `<span class="dw-cell dw-digit">${d}</span>`).join('');
+  // Positioned, because the caller lights the ones the current step is taking and needs to be
+  // able to find them again without counting cells.
+  const top = digitsOf(a)
+    .map((d, i) => `<span class="dw-cell dw-digit" data-dpos="${i}">${d}</span>`)
+    .join('');
   // Biggest place first, which for the quotient line is also the order they are written in.
   const quotient = rows
     .filter((row) => row.line === 'q')

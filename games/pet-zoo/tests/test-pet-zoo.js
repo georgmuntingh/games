@@ -4694,6 +4694,38 @@ test('the first step takes two digits exactly when the first one is too small', 
   assertEqual(mathDivide.divSteps(846, 8)[0].working, 8);
 });
 
+test('each step takes exactly the digits it should from the number being divided', () => {
+  // What the prompt lights up while the child works, so it has to be right about which digits
+  // are in play: one normally, two on a first step that had to reach for the digit beside it.
+  const taken = (a, b) =>
+    mathDivide.divSteps(a, b).map((_, k) => mathDivide.stepDigits(a, b, k).join('')).join(' ');
+  assertEqual(taken(456, 8), '01 2', 'a short first step takes the four and the five together');
+  assertEqual(taken(56, 8), '01', 'and takes both when that is the whole number');
+  assertEqual(taken(661, 4), '0 1 2', 'otherwise one digit comes down at a time');
+  assertEqual(taken(840, 4), '0 1 2');
+
+  // And structurally, across every question the rungs can ask: the steps tile the number being
+  // divided exactly once, in order, in unbroken runs — and each step's working number really is
+  // built from the digits it claims plus whatever came down from the step before.
+  for (let b = 2; b <= 9; b += 1) {
+    for (let a = 10; a <= 999; a += 1) {
+      const steps = mathDivide.divSteps(a, b);
+      const digits = mathDivide.digitsOf(a);
+      const seen = [];
+      steps.forEach((step, k) => {
+        const run = mathDivide.stepDigits(a, b, k);
+        assert(run.length > 0, `${a} : ${b} step ${k} takes no digit at all`);
+        assert(run.every((i, j) => j === 0 || i === run[j - 1] + 1), `${a} : ${b} step ${k} skipped a digit`);
+        const took = Number(run.map((i) => digits[i]).join(''));
+        const carried = k === 0 ? 0 : steps[k - 1].remainder;
+        assertEqual(step.working, carried * 10 ** run.length + took, `${a} : ${b} step ${k} divides into something else`);
+        seen.push(...run);
+      });
+      assertEqual(seen.join(','), digits.map((_, i) => i).join(','), `${a} : ${b} does not use every digit once`);
+    }
+  }
+});
+
 test('the rows are the working as it is written, in the order it is written', () => {
   // Quotient digit, then what it takes away, then what is left with the next digit down beside
   // it. The last remainder row is the remainder itself, which is why there is no extra box.

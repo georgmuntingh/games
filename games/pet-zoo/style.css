@@ -1018,6 +1018,14 @@ main {
   min-height: max(40px, var(--dw-touch));
 }
 
+/* The digits of the number being divided that this step is taking. Not a box and not an answer,
+   so it is tinted rather than lifted — the same accent as the live row, so the two read as one
+   thing: this bit, and the bit you are writing about it. */
+.dw-head .dw-digit.is-live {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pz-accent) 18%, transparent);
+}
+
 /* The row being worked on. A division is answered on up to thirteen boxes spread down nine
    lines, and a single underlined box among them is easy to lose — so the whole row lifts, and
    the box the next digit lands in is picked out inside it. In handwriting mode there is no

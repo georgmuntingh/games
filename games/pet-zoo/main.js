@@ -53,7 +53,7 @@ import {
   walkSpeedAt,
   walkSpeedIndex,
 } from './column.js';
-import { dividedMarkup, divideWalkDuration, divideWalkHtml, stepOfRow } from './divwalk.js';
+import { dividedMarkup, divideWalkDuration, divideWalkHtml, stepDigits, stepOfRow } from './divwalk.js';
 import { ROUND_STEP_SCALE, shareDuration, shareSvg } from './share.js';
 import { remember } from './ink/memory.js';
 import { createInkPad } from './ink/pad.js';
@@ -890,6 +890,16 @@ function paintAnswer() {
     // spread down nine lines, and one underlined box among them is easy to lose — so the row
     // being worked on lifts as a whole and the next box is picked out inside it.
     box.classList.toggle('is-live', rowLit && Number(box.dataset.row) === live);
+  }
+  // And in the number being divided, the digits this step is actually taking — one, or two where
+  // the first digit was too small to divide on its own. Working out which of them is in play is
+  // most of the difficulty of the method, and on paper a child keeps their place by putting a
+  // finger on it. This is that finger.
+  if (rowLit) {
+    const taking = stepDigits(current.shown.a, current.shown.b, stepOfRow(live));
+    for (const digit of el.promptSum.querySelectorAll('[data-dpos]')) {
+      digit.classList.toggle('is-live', taking.includes(Number(digit.dataset.dpos)));
+    }
   }
   paintCarries();
   renderWriteTools();
