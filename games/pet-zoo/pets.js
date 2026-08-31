@@ -126,13 +126,30 @@ export const speciesOf = (item) =>
  * the association being built is "Vaffel eats at quarter past four", one sentence in one
  * language. A pet the child has renamed themselves keeps that name in both.
  */
+// The name pool was forty-eight names long for as long as this game has had pets, and both the
+// starting point and the wrap were taken modulo its length — so widening the pool would have
+// moved every species' starting point and renamed every pet in every zoo already saved. Hence
+// this number, pinned: the first forty-eight names of a species are still drawn from exactly
+// the first forty-eight names of the pool, in exactly the order they always were.
+const LEGACY_NAMES = 48;
+
+/**
+ * Walking the pool from a per-species starting point means no two pets of the same species can
+ * share a name — the case where a repeat is actually confusing, since they are the ones sitting
+ * next to each other looking alike.
+ *
+ * Once the ladder grew past forty-eight items on one species there were not enough names to go
+ * round, so a species' forty-ninth pet and beyond take theirs from the block appended after the
+ * original forty-eight, which is a range no existing pet has ever been named out of.
+ */
 export const nameFrom = ({ species, index }, lang = DEFAULT_LANGUAGE) => {
   const pool = NAMES[lang] ?? NAMES[DEFAULT_LANGUAGE];
-  // Walking the pool from a per-species starting point means no two pets of the same
-  // species can share a name — the case where a repeat is actually confusing, since they
-  // are the ones sitting next to each other looking alike.
-  const offset = hash(`n${species}`) % pool.length;
-  return pool[(offset + index) % pool.length];
+  const legacy = Math.min(LEGACY_NAMES, pool.length);
+  const offset = hash(`n${species}`) % legacy;
+  const at = Math.max(0, Math.floor(index));
+  if (at < legacy) return pool[(offset + at) % legacy];
+  const spare = pool.length - legacy;
+  return spare > 0 ? pool[legacy + ((offset + at - legacy) % spare)] : pool[(offset + at) % pool.length];
 };
 
 export const defaultName = (h, m, lang = DEFAULT_LANGUAGE) =>

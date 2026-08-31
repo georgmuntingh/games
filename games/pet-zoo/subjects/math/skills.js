@@ -18,6 +18,7 @@
 // of this is testable.
 
 import { mulSteps } from './columns.js';
+import { digitsOf as divDigits, divSteps, quotientOf, remainderOf, rowShape } from './divide.js';
 
 export const SKILL_PREFIX = 'skill:';
 
@@ -162,6 +163,27 @@ const SKILLS = [
       const a = between(rnd, 11, 99);
       if (shape === 'ten') return { op: '×', a, b: 10 };
       return { op: '×', a, b: between(rnd, 2, 9) * 10 };
+    },
+  },
+  {
+    skill: 'div10',
+    tier: 43,
+    column: false,
+    // 990 ÷ 10 is 99, so two boxes — and two for every question on the rung, including
+    // 480 ÷ 60, which is what stops the strip saying how big the answer is going to be.
+    width: 2,
+    shapes: ['ten', 'tens'],
+    make(rnd, shape) {
+      // Dividing by a whole ten, where the digits stay exactly as they were and a zero comes
+      // off the end. The mirror of `tensx`, and the observation the whole of the written method
+      // rests on: met here on its own, before it has to be used inside something bigger.
+      if (shape === 'ten') {
+        const q = between(rnd, 2, 99);
+        return { op: '÷', a: q * 10, b: 10 };
+      }
+      const q = between(rnd, 2, 9);
+      const b = between(rnd, 2, 9) * 10;
+      return { op: '÷', a: q * b, b };
     },
   },
 ];
@@ -345,10 +367,12 @@ const columnMul = ({ skill, tier, digits, other, shapes }) => ({
   // One row per digit of the multiplier, each a place wider than the last because it carries
   // its own zeros, and then the total. A single-digit multiplier has nothing to add up, so its
   // answer is the one row.
-  rows:
-    other > 1
-      ? [...Array.from({ length: other }, (_, place) => digits + 1 + place), digits + other]
-      : [digits + other],
+  // Every one of them right-aligned under the ones, because a partial product carries its own
+  // zeros rather than being indented — so they all sit at `place` 0, one to a line.
+  rows: (other > 1
+    ? [...Array.from({ length: other }, (_, place) => digits + 1 + place), digits + other]
+    : [digits + other]
+  ).map((width, line) => ({ width, place: 0, line })),
   shapes,
   make(rnd, shape) {
     return makeColumnMul(rnd, shape, digits, other);
@@ -370,6 +394,82 @@ function makeColumnMul(rnd, shape, digits, other) {
   // Unreachable in practice — every declared shape is exercised by a test — but a generator
   // that could return nothing would be a generator that could hang the game.
   return { op: '\u00d7', a: 10 ** (digits - 1) + 1, b: other > 1 ? 11 : 2 };
+}
+
+/* -------------------------------------------------------- long division */
+
+// The other three column methods are worked ones-first and pass what will not fit to the left.
+// Division goes the other way: it starts at the biggest place and passes what is left over to
+// the right, into the digit that comes down to meet it. Everything below follows from that.
+
+/**
+ * Which case a division turned out to be. Read off the worked steps rather than guessed at, in
+ * priority order, so every question lands on exactly one case and a rung can be finished.
+ */
+export function shapeOfDiv(a, b) {
+  const steps = divSteps(a, b);
+  if (!steps.length) return 'noExchange';
+  const digits = steps.map((step) => step.digit);
+  // A zero in the quotient outranks everything else: the column comes to nothing, the answer
+  // still needs a digit written in it, and leaving it out is the classic mistake of the method.
+  const zeroAt = digits.findIndex((digit, i) => i > 0 && digit === 0);
+  if (zeroAt >= 0) return zeroAt === digits.length - 1 ? 'zeroEnd' : 'zeroInside';
+  // Something left over at the end is a different question from anything left over on the way,
+  // so it is named for what the child has to *write down* rather than for what they did.
+  const carried = steps.slice(0, -1).filter((step) => step.remainder > 0).length;
+  if (steps[steps.length - 1].remainder > 0) {
+    return carried ? 'exchangeThenRemainder' : 'remainderOnly';
+  }
+  // The leading digit had nothing in it to divide, so the first step took two digits and the
+  // quotient is shorter than the number it came out of.
+  if (divDigits(a)[0] < Math.abs(b)) return 'shortFirst';
+  if (carried >= 2) return 'exchangeTwice';
+  return carried ? 'exchange' : 'noExchange';
+}
+
+/**
+ * A division skill, described by the size of the numbers rather than by a generator: how many
+ * digits it divides into, how many the answer has, and whether anything is left over.
+ *
+ * `quotient` is fixed per rung and that is load-bearing. The working is written on three rows
+ * per quotient digit, so a rung whose answers varied in length would have a stack that varied
+ * in height — and the height would say how long the answer was going to be before the child
+ * had divided anything. Every generator below is therefore asked for a quotient of exactly the
+ * declared length and the numbers are built up from it, rather than drawn and hoped over.
+ */
+const columnDiv = ({ skill, tier, digits, quotient, exact, shapes }) => ({
+  skill,
+  tier,
+  column: true,
+  divide: true,
+  digits,
+  quotient,
+  // The answer strip is the quotient; the working is laid out by `rowShape`, which is also what
+  // the walkthrough draws against — one description of where the rows go, not two that can drift.
+  width: quotient,
+  rows: rowShape(quotient, digits),
+  shapes,
+  make(rnd, shape) {
+    return makeColumnDiv(rnd, shape, digits, quotient, exact);
+  },
+});
+
+function makeColumnDiv(rnd, shape, digits, quotient, exact) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    // Never one: "84 : 1" is not a question about a method, it is a question about whether the
+    // child is paying attention. Whole tens are tier 43's own question, met there on their own.
+    const b = between(rnd, 2, 9);
+    const q = randomDigits(rnd, quotient);
+    const rest = exact ? 0 : between(rnd, 1, b - 1);
+    const a = q * b + rest;
+    if (divDigits(a).length !== digits) continue;
+    if (quotientOf(a, b) !== q || remainderOf(a, b) !== rest) continue;
+    if (shapeOfDiv(a, b) !== shape) continue;
+    return { op: '÷', a, b };
+  }
+  // Unreachable in practice — every declared shape is exercised by a test — but a generator
+  // that could return nothing would be a generator that could hang the game.
+  return { op: '÷', a: 2 * 10 ** (digits - 1), b: 2 };
 }
 
 SKILLS.push(
@@ -416,6 +516,43 @@ SKILLS.push(
     digits: 3,
     other: 2,
     shapes: ['carryBoth', 'carryOut', 'zeroInside'],
+  }),
+  columnDiv({ skill: 'div21', tier: 44, digits: 2, quotient: 2, exact: true, shapes: ['noExchange'] }),
+  columnDiv({ skill: 'div21x', tier: 45, digits: 2, quotient: 2, exact: true, shapes: ['exchange'] }),
+  // The one rung whose answer is shorter than the number it came out of, which is why it gets a
+  // rung: 56 : 8 is seven, not oh-seven, and the leading nothing is where children stall.
+  columnDiv({ skill: 'div21s', tier: 46, digits: 2, quotient: 1, exact: true, shapes: ['shortFirst'] }),
+  columnDiv({
+    skill: 'div31',
+    tier: 47,
+    digits: 3,
+    quotient: 3,
+    exact: true,
+    shapes: ['noExchange', 'exchange', 'exchangeTwice'],
+  }),
+  columnDiv({
+    skill: 'div31z',
+    tier: 48,
+    digits: 3,
+    quotient: 3,
+    exact: true,
+    shapes: ['zeroInside', 'zeroEnd'],
+  }),
+  columnDiv({
+    skill: 'div21r',
+    tier: 49,
+    digits: 2,
+    quotient: 2,
+    exact: false,
+    shapes: ['remainderOnly', 'exchangeThenRemainder'],
+  }),
+  columnDiv({
+    skill: 'div31r',
+    tier: 50,
+    digits: 3,
+    quotient: 3,
+    exact: false,
+    shapes: ['remainderOnly', 'exchangeThenRemainder'],
   })
 );
 
@@ -450,17 +587,29 @@ export const widthOf = (skill) => BY_SKILL.get(skill)?.width ?? 2;
 export const isColumn = (skill) => Boolean(BY_SKILL.get(skill)?.column);
 
 /**
- * The widths of the rows a skill is answered in, ones-first within each. Every skill has at
- * least one; only a stacked multiplication with a two-digit multiplier has more, and there the
- * rows are the two partial products and their total.
+ * The rows a skill is answered in, **in the order they are written**, each `{ width, place,
+ * line }`: how many boxes, which column its rightmost box sits in, and which line of the stack
+ * it is drawn on. Ones-first within a row, as everywhere.
+ *
+ * Almost every skill is answered on one line and gets a single entry. A stacked multiplication
+ * has one per partial product and one for the total, all right-aligned under the ones. A
+ * division has three per quotient digit and they step across the page, which is what `place`
+ * exists for.
  */
-export const rowsOf = (skill) => BY_SKILL.get(skill)?.rows ?? [widthOf(skill)];
+export const rowsOf = (skill) =>
+  BY_SKILL.get(skill)?.rows ?? [{ width: widthOf(skill), place: 0, line: 0 }];
 
-/** Whether a skill is worked as a stack of partial products rather than a single answer. */
+/** Whether a skill is worked as a stack of rows rather than a single answer. */
 export const isMultiRow = (skill) => rowsOf(skill).length > 1;
 
-/** How many digits the number being multiplied has — what `shapeOfMul` classifies against. */
+/** Whether a skill is a long division, which is written and walked differently from the rest. */
+export const isDivide = (skill) => Boolean(BY_SKILL.get(skill)?.divide);
+
+/** How many digits the number being multiplied — or divided into — has. */
 export const digitsOf = (skill) => BY_SKILL.get(skill)?.digits ?? 0;
+
+/** How many digits the answer to a division has, which fixes the height of its stack. */
+export const quotientDigitsOf = (skill) => BY_SKILL.get(skill)?.quotient ?? 0;
 
 /** Whether a stored or imported record really describes a skill this build teaches. */
 export const valid = (itemId, item) => owns(itemId) && item?.skill === parse(itemId).skill;
@@ -479,7 +628,15 @@ export function generate(skill, { shape = null, seed = 1 } = {}) {
   const rnd = rngFrom(seed);
   const wanted = def.shapes.includes(shape) ? shape : pick(rnd, def.shapes);
   const made = def.make(rnd, wanted);
-  return { ...made, skill, shape: actualShape(def, made, wanted), column: def.column };
+  return {
+    ...made,
+    skill,
+    shape: actualShape(def, made, wanted),
+    column: def.column,
+    // Stated on the question rather than looked up later, so the renderer and the grader read
+    // the same field and cannot disagree about which of the two stacked layouts this is.
+    divide: Boolean(def.divide),
+  };
 }
 
 /**
@@ -494,6 +651,7 @@ function actualShape(def, made, wanted) {
 }
 
 function shapeOfColumn(def, made) {
+  if (made.op === '\u00f7') return shapeOfDiv(made.a, made.b);
   if (made.op === '\u00d7') return shapeOfMul(made.a, made.b);
   if (made.op === '-') return shapeOfSub(made.a, made.b);
   return shapeOfAdd(made.a, made.b, def.width - 1);

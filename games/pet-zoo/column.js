@@ -96,6 +96,14 @@ const opSign = (op) => (op === '-' ? '\u2212' : op === '\u00d7' ? '\u00d7' : '+'
 const cell = (content, classes = '', style = '') =>
   `<span class="cw-cell ${classes}"${style ? ` style="${style}"` : ''}>${content}</span>`;
 
+/**
+ * A digit of one of the two numbers being worked on, tagged with the place it stands in — so
+ * the caller can light the ones the column being written is made from without counting cells.
+ * The same idea as `data-dpos` on a long division's dividend.
+ */
+const digitCell = (content, place) =>
+  `<span class="cw-cell" data-place="${place}">${content}</span>`;
+
 // Ones-first everywhere in the arithmetic, left-to-right everywhere in the markup. This is the
 // one place the two orders meet, and getting it wrong is how a carry ends up over the wrong
 // column, so it is done once, here, rather than at each call site.
@@ -116,10 +124,10 @@ export function stackedMarkup({ op, a, b }, { slots = [], carries = [], width = 
   return `
     <div class="colwalk" style="--cw-cols:${cols}">
       ${carries.length ? `<div class="cw-row cw-carries">${leftToRight(padTo(carries, cols)).join('')}</div>` : ''}
-      <div class="cw-row cw-top">${leftToRight(blank(top, aLen)).map((d) => cell(d)).join('')}</div>
-      <div class="cw-row cw-bottom"><span class="cw-op">${opSign(op)}</span>${leftToRight(blank(bottom, bLen))
-        .map((d) => cell(d))
-        .join('')}</div>
+      <div class="cw-row cw-top">${leftToRight(blank(top, aLen).map(digitCell)).join('')}</div>
+      <div class="cw-row cw-bottom"><span class="cw-op">${opSign(op)}</span>${leftToRight(
+        blank(bottom, bLen).map(digitCell)
+      ).join('')}</div>
       <div class="cw-rule"></div>
       <div class="cw-row cw-answer">${leftToRight(padTo(slots, cols)).join('')}</div>
     </div>`;
@@ -156,12 +164,12 @@ export function stackedMulMarkup({ a, b }, { rows = [], width = null } = {}) {
   return `
     <div class="colwalk is-mul" style="--cw-cols:${cols}">
       ${carryRow(partials[0]?.carries)}
-      <div class="cw-row cw-top">${leftToRight(blank(top, String(Math.abs(a)).length)).map((d) => cell(d)).join('')}</div>
+      <div class="cw-row cw-top">${leftToRight(
+        blank(top, String(Math.abs(a)).length).map(digitCell)
+      ).join('')}</div>
       <div class="cw-row cw-bottom"><span class="cw-op">${opSign('\u00d7')}</span>${leftToRight(
-        blank(bottom, String(Math.abs(b)).length)
-      )
-        .map((d) => cell(d))
-        .join('')}</div>
+        blank(bottom, String(Math.abs(b)).length).map(digitCell)
+      ).join('')}</div>
       <div class="cw-rule"></div>
       ${partials
         .map((partial, i) => (i === 0 ? '' : carryRow(partial.carries)) + answerRow(partial.slots, ' cw-partial'))
@@ -175,6 +183,64 @@ const padTo = (list, len) => {
   while (out.length < len) out.push('<span class="cw-cell"></span>');
   return out.slice(0, len);
 };
+
+/**
+ * What the box being written is made from.
+ *
+ * The counterpart of `ingredientsFor` in divwalk.js, and the difference between them is the
+ * difference between the two families of method. A long division works a whole *row* out at
+ * once, so its ingredients belong to the row. A column sum works a *column* at a time — each
+ * box is its own little sum, made from the two digits stacked above it and whatever came in
+ * from next door — so its ingredients belong to the box, and change as the cursor moves along.
+ *
+ *   +  and  −   the two digits in that column, and its carry or borrow: `addSteps` and
+ *               `subSteps` both fold the one that came in into the digit they produce, so it is
+ *               an ingredient in the full sense, not a note in the margin
+ *   ×  partial  the digit of the multiplier this row belongs to, and the digit of the
+ *               multiplicand standing over the box — allowing for the row's own shift, which is
+ *               why the box over a partial product's trailing zero cites nothing above it
+ *   ×  total    the partial products' own digits in that column, because that is all the last
+ *               line is: those rows added up
+ *
+ * Everything here is worked in *places*, counting from the ones, because that is the only
+ * coordinate the whole stack agrees on. The boxes do not: a row's `data-i` counts from the
+ * left, so it depends on how wide that row is, and the rows of a multiplication are not all the
+ * same width. Hence `widths` — one per answer row — and hence the total line citing a different
+ * box index in each partial product while pointing at the same column.
+ *
+ * `carry.index` comes back as a place, because the scratch row really is indexed from the ones;
+ * `slots[].i` comes back as a box index, because that is what `data-i` is.
+ */
+export function columnIngredients({ op, a, b }, { row = 0, index = 0, widths = [] } = {}) {
+  const none = { top: null, bottom: null, carry: null, slots: [] };
+  const width = widths[row] ?? 0;
+  if (!width) return none;
+  const place = width - 1 - index;
+  const within = (n, at) => (at >= 0 && at < String(Math.abs(n)).length ? at : null);
+
+  if (op !== '\u00d7') {
+    return { ...none, top: within(a, place), bottom: within(b, place), carry: { row: 0, index: place } };
+  }
+  // The last line of a stacked multiplication is the partial products added up — so what it is
+  // made from is those rows, in this column, and nothing from the question at all. A one-row
+  // multiplication has no total: the single row *is* the product.
+  if (widths.length > 1 && row === widths.length - 1) {
+    const slots = [];
+    for (let r = 0; r < widths.length - 1; r += 1) {
+      const i = widths[r] - 1 - place;
+      if (i >= 0 && i < widths[r]) slots.push({ row: r, i });
+    }
+    return { ...none, slots };
+  }
+  return {
+    ...none,
+    // Each partial product carries its own zeros, so the box in this column of row `row` is
+    // where the multiplicand's digit `row` places to the right of it lands.
+    top: within(a, place - row),
+    bottom: within(b, row),
+    carry: { row, index: place },
+  };
+}
 
 /**
  * The walkthrough. `step` is how long each column waits behind the one before it, in seconds;

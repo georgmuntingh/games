@@ -12,8 +12,12 @@
 // can be tested by construction rather than by hand-computed examples.
 
 import * as columns from './columns.js';
+import * as divide from './divide.js';
+import { DIV_FACT_VERDICTS, grade as gradeDivFact } from './divfacts.js';
 import { grade as gradeFact } from './facts.js';
 import { ALL_TIMES_VERDICTS, grade as gradeTimes } from './times.js';
+
+export { DIV_FACT_VERDICTS };
 
 /** Every verdict a fact can come back with. Exported so the language test can insist each one
  *  has a sentence to say, in both languages. */
@@ -64,10 +68,36 @@ export const MUL_COLUMN_VERDICTS = [
   'wrong',
 ];
 
+// Long division's own, for the same reason. "You forgot the carry" and "you forgot to bring the
+// next digit down" are both a child losing something between two columns, but the sentences go
+// in opposite directions — one to the left, one to the right — and saying either over the other
+// method would teach the wrong thing.
+export const DIVIDE_VERDICTS = [
+  'correct',
+  'blank',
+  'offByOne',
+  'placeValueOff',
+  'divForgotBringDown',
+  'divIgnoredRemainder',
+  'divZeroStep',
+  'divDroppedRemainder',
+  'divBackwards',
+  'divMulInstead',
+  'divSubInstead',
+  'wrong',
+];
+
 // The one list the language test walks, so a new verdict without a sentence fails there rather
 // than showing a child a raw key. The times tables declare their own beside their grader.
 export const ALL_VERDICTS = [
-  ...new Set([...FACT_VERDICTS, ...COLUMN_VERDICTS, ...ALL_TIMES_VERDICTS, ...MUL_COLUMN_VERDICTS]),
+  ...new Set([
+    ...FACT_VERDICTS,
+    ...COLUMN_VERDICTS,
+    ...ALL_TIMES_VERDICTS,
+    ...MUL_COLUMN_VERDICTS,
+    ...DIV_FACT_VERDICTS,
+    ...DIVIDE_VERDICTS,
+  ]),
 ];
 
 // Tried in order, first match wins, so the list is also a statement about which explanation is
@@ -98,10 +128,14 @@ const WRONG_WAYS = {
  */
 export function grade(question, answer) {
   // A stacked multiplication is both a `×` and a column, and it is the column that decides how
-  // it is marked — so this order matters. Below it, `×` goes to the times grader before the
-  // fact grader, which reads any operator that is not a minus as a plus and would otherwise
+  // it is marked — so this order matters. Below it, `×` and `÷` go to their own graders before
+  // the fact grader, which reads any operator that is not a minus as a plus and would otherwise
   // happily tell a child that 7 × 8 is fifteen.
-  if (question?.column) return question.op === '×' ? gradeMulColumn(question, answer) : gradeColumn(question, answer);
+  if (question?.column) {
+    if (question.op === '÷') return gradeDivide(question, answer);
+    return question.op === '×' ? gradeMulColumn(question, answer) : gradeColumn(question, answer);
+  }
+  if (question?.op === '÷') return gradeDivFact(question, answer);
   if (question?.op === '×') return gradeTimes(question, answer);
   return gradeFact(question ?? {}, answer);
 }
@@ -226,6 +260,105 @@ export function gradeMulColumn({ a, b }, answer) {
   // Out by exactly a power of ten: the digits were right and one of them landed in the wrong
   // column, which is a different lesson from getting the arithmetic wrong.
   if ([10, 100, 1000, 10000].includes(Math.abs(slip))) return result('placeValueOff');
+  return result('wrong');
+}
+
+/* ------------------------------------------------------------ long division */
+
+// Tried in order, first match wins. Each runs a whole mistaken method over the question and asks
+// whether it produces the quotient the child ended up with — the same testable-by-construction
+// property the addition, subtraction and multiplication lists above have.
+// Note which famous mistake is *not* here: leaving a zero out of the quotient, so 618 : 6 comes
+// out as 13. It cannot happen in this game. The quotient is written a digit to a box and the
+// answer cannot be submitted with a box empty, so a child who skips the zero runs out of digits
+// with a box still open and has to go back and look. The template teaches it instead of the
+// correction having to. What *is* reachable at that step is writing the wrong digit into the
+// zero's box, and that is `divZeroStep` below.
+const DIV_WRONG_WAYS = [
+  ['divDroppedRemainder', divide.droppedRemainder],
+  ['divBackwards', divide.dividedBackwards],
+  ['divMulInstead', divide.dividedMultipliedInstead],
+  ['divSubInstead', divide.dividedSubtractedInstead],
+];
+
+/**
+ * A long division, which is answered on a stack of rows: for every step the quotient digit, then
+ * the product taken away, then what is left with the next digit brought down. `answer` is one
+ * string of digits per row, in that order, ones-first within each.
+ *
+ * Every row has to be right. A child whose quotient is correct but whose working does not
+ * support it has not done the method — and a tick beside a stack that does not add up would
+ * teach exactly the wrong lesson about what the working is for.
+ */
+export function gradeDivide({ a, b }, answer) {
+  const want = divide.divRows(a, b);
+  const steps = divide.divSteps(a, b);
+  const answers = Array.isArray(answer) ? answer : [answer];
+  const values = want.map((_, i) => rowValue(answers[i]));
+  const target = divide.quotientOf(a, b);
+
+  if (values.some((value) => value === null)) {
+    return { verdict: 'blank', correct: false, nearMiss: false, delta: 0, rows: [], row: 0, line: 'q', columns: [] };
+  }
+
+  const rows = want.map((row, i) => values[i] === row.value);
+  const row = rows.indexOf(false);
+  // The answer as the child actually wrote it, read off the quotient line alone: the working is
+  // where the method is checked, but the *answer* is what the wrong-way runs are matched against.
+  const wrote = Number(
+    want.map((entry, i) => (entry.kind === 'quotient' ? values[i] : null)).filter((d) => d !== null).join('')
+  );
+
+  const result = (verdict) => ({
+    verdict,
+    correct: verdict === 'correct',
+    // A slip of one is a miscount. Everything else here is a whole method carried out wrongly,
+    // and softening it would say "nearly" about something that was not nearly.
+    nearMiss: verdict === 'offByOne',
+    delta: wrote - target,
+    rows,
+    // Which row went wrong first, and which line of the stack it is drawn on — so the
+    // walkthrough can light the one place it actually went astray and leave the rest alone.
+    row: row === -1 ? want.length - 1 : row,
+    line: want[row === -1 ? want.length - 1 : row].line,
+    columns: row === -1 ? [] : digitsRight(want[row].value, values[row]),
+  });
+
+  if (row === -1) return result('correct');
+
+  // The answer itself gone astray: a whole wrong method, named by running it.
+  if (wrote !== target) {
+    for (const [verdict, run] of DIV_WRONG_WAYS) {
+      // A wrong way that happens to give the right answer is not a mistake, it is a coincidence
+      // — 242 : 2 has no column that needs turning round — so it is skipped rather than reported.
+      if (run(a, b) !== target && wrote === run(a, b)) return result(verdict);
+    }
+  }
+
+  // And the three that live in one step rather than in the whole method.
+  const entry = want[row];
+  // The step whose working number is smaller than the divisor, so the answer there is nothing.
+  // Writing a digit into it anyway is the whole of what tier 48 is about, and it is much the
+  // more useful thing to say than "that number is wrong".
+  if (entry.kind === 'quotient' && entry.value === 0) return result('divZeroStep');
+  if (entry.kind === 'remainder') {
+    const step = steps[entry.step];
+    // Subtracted correctly and then stopped: the remainder is written, but the digit that was
+    // supposed to come down beside it never did.
+    if (entry.step < steps.length - 1 && values[row] === step.remainder) {
+      return result('divForgotBringDown');
+    }
+    // Nothing written where something was left over — the leftover rubbed out rather than kept.
+    if (entry.step === steps.length - 1 && step.remainder > 0 && values[row] === 0) {
+      return result('divIgnoredRemainder');
+    }
+  }
+
+  const slip = values[row] - entry.value;
+  if (Math.abs(slip) === 1) return result('offByOne');
+  // Out by exactly a power of ten: the digits were right and one of them landed in the wrong
+  // column, which is a different lesson from getting the arithmetic wrong.
+  if ([10, 100, 1000].includes(Math.abs(slip))) return result('placeValueOff');
   return result('wrong');
 }
 

@@ -63,7 +63,28 @@
           <div id="tenframe-host" class="tenframe-host" hidden></div>
 
           <div id="answer-write" class="write-wrap" hidden>
-            <div id="write-boxes" class="write-boxes"></div>
+            <!-- The pads, and — for an answer written on more than one line — the way on to the
+                 next one, standing beside them rather than down in the tools. A child working
+                 down a nine-row division reaches for it after every row, and a button that far
+                 from where they are writing is a button they stop using. -->
+            <div class="write-row">
+              <div id="write-boxes" class="write-boxes"></div>
+              <button
+                id="write-next"
+                type="button"
+                class="write-next"
+                data-i18n-aria-label="answer.nextRow"
+                hidden
+              >
+                <!-- Down and back to the left: what a line break is, and what Enter does on the
+                     keyboard, which is the same move by another route. -->
+                <svg class="write-next-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M18 5v9H8" />
+                  <path d="M12 10l-4 4 4 4" />
+                </svg>
+                <span class="write-next-label" data-i18n="answer.nextRow">Neste rad</span>
+              </button>
+            </div>
             <div id="write-picker" class="write-picker" hidden>
               <p id="write-picker-title" class="write-picker-title" data-i18n="answer.fixTitle">
                 Hvilket tall var det?
@@ -76,12 +97,6 @@
               </button>
               <button id="write-clear" type="button" class="write-tool" data-i18n="answer.clear">
                 Tøm
-              </button>
-              <!-- Only for an answer written on more than one line: a stacked multiplication.
-                   The pads serve one row at a time, and this is how a child says that row is
-                   done and the next one is theirs. -->
-              <button id="write-next" type="button" class="write-tool" data-i18n="answer.nextRow" hidden>
-                Neste rad
               </button>
             </div>
           </div>

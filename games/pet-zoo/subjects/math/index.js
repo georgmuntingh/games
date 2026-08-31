@@ -1,7 +1,7 @@
 // Maths — "Matte" — the second thing this zoo teaches, stated in the shape every subject
 // states itself in.
 //
-// One subject, thirty-seven rungs, and three quite different kinds of item behind one interface:
+// One subject, fifty-one rungs, and four quite different kinds of item behind one interface:
 //
 //   tiers 0–10   facts.js    things to *know*: sixty-six sums and a hundred and twenty-one
 //                            differences, each one its own question, its own egg, its own pet.
@@ -13,6 +13,12 @@
 //   tiers 31–36  skills.js   and back to methods: multiplying with the numbers stacked, up to
 //                            three digits by two, which is the first thing here whose answer
 //                            is written on more than one line.
+//   tiers 37–42  divfacts.js things to know one last time: a hundred divisions, both ways round,
+//                            because how many eights fit in fifty-six and how many sevens do
+//                            are two different things to know.
+//   tiers 43–50  skills.js   and long division, which is the only method here that is worked
+//                            from the biggest place downwards and passes what is left over to
+//                            the *right*, into the digit that comes down to meet it.
 //
 // The scheduler, the store and the answer loop never learn which is which. They ask this
 // module — `owns`, `parse`, `idOf`, `tierOf`, `tierItems`, `valid`, `grade` — and it dispatches.
@@ -21,6 +27,8 @@
 // not about the curriculum, and importing it here would close a cycle
 // (srs → subjects → pets → srs). main.js keeps deciding species, exactly as it does today.
 
+import * as divfacts from './divfacts.js';
+import { quotientOf } from './divide.js';
 import * as facts from './facts.js';
 import * as skills from './skills.js';
 import * as times from './times.js';
@@ -34,7 +42,7 @@ export const id = 'math';
 // its own ids bare. The subject's *name* is free to change; the keys of somebody's zoo are not.
 export const prefix = 'add:';
 
-export { facts, skills, times };
+export { divfacts, facts, skills, times };
 
 /* --------------------------------------------------------------------- the ladder */
 
@@ -58,6 +66,8 @@ export const GROUPS = [
   { id: 'times', tiers: [19, 20, 21, 22, 23, 24] },
   { id: 'gap', tiers: [25, 26, 27, 28, 29, 30] },
   { id: 'colmul', tiers: [31, 32, 33, 34, 35, 36] },
+  { id: 'divfacts', tiers: [37, 38, 39, 40, 41, 42] },
+  { id: 'coldiv', tiers: [43, 44, 45, 46, 47, 48, 49, 50] },
 ];
 
 export const TIERS = GROUPS.flatMap((group) => group.tiers.map((tier) => ({ id: tier, group: group.id })));
@@ -66,9 +76,13 @@ export const LAST_TIER = TIERS[TIERS.length - 1].id;
 
 export const groupOfTier = (tierId) => GROUPS.find((group) => group.tiers.includes(tierId))?.id ?? 'plus';
 
-/** Every item on one rung, in teaching order. Facts, then skills, then the times tables. */
+/** Every item on one rung, in teaching order. Each deck owns a band of the ladder and says so
+ *  itself, so a rung is looked up rather than guessed at from its number. */
 export const tierItems = (tierId) => {
   if (tierId <= facts.LAST_FACT_TIER) return facts.factTierItems(tierId);
+  if (tierId >= divfacts.FIRST_DIV_TIER && tierId <= divfacts.LAST_DIV_TIER) {
+    return divfacts.divTierItems(tierId);
+  }
   if (tierId > times.LAST_TIMES_TIER) return skills.skillTierItems(tierId);
   if (tierId >= times.FIRST_TIMES_TIER) return times.timesTierItems(tierId);
   return skills.skillTierItems(tierId);
@@ -86,24 +100,39 @@ export const isSkill = (payload) => Boolean(payload?.skill);
 /** A product or a missing factor — the two halves of the times deck, both written with a `×`. */
 export const isTimes = (payload) => payload?.op === '×';
 
-export const owns = (itemId) => facts.owns(itemId) || skills.owns(itemId) || times.owns(itemId);
+/** A division *fact*. Checked after `isSkill`, because a long division is written with the same
+ *  sign and is not a fact at all — it is a method whose numbers are made up fresh each time. */
+export const isDivFact = (payload) => !isSkill(payload) && payload?.op === '÷';
 
-export const parse = (itemId) => facts.parse(itemId) ?? skills.parse(itemId) ?? times.parse(itemId);
+export const owns = (itemId) =>
+  facts.owns(itemId) || skills.owns(itemId) || times.owns(itemId) || divfacts.owns(itemId);
+
+export const parse = (itemId) =>
+  facts.parse(itemId) ?? skills.parse(itemId) ?? times.parse(itemId) ?? divfacts.parse(itemId);
 
 export const idOf = (payload) =>
-  isSkill(payload) ? skills.idOf(payload) : isTimes(payload) ? times.idOf(payload) : facts.idOf(payload);
+  isSkill(payload)
+    ? skills.idOf(payload)
+    : isDivFact(payload)
+      ? divfacts.idOf(payload)
+      : isTimes(payload)
+        ? times.idOf(payload)
+        : facts.idOf(payload);
 
 export const tierOf = (payload) =>
   isSkill(payload)
     ? skills.tierOf(payload)
-    : isTimes(payload)
-      ? times.tierOf(payload)
-      : facts.tierOf(payload);
+    : isDivFact(payload)
+      ? divfacts.tierOf(payload)
+      : isTimes(payload)
+        ? times.tierOf(payload)
+        : facts.tierOf(payload);
 
 /** Whether a stored or imported record really describes something this game teaches. */
 export const valid = (itemId, item) => {
   if (skills.owns(itemId)) return skills.valid(itemId, item);
   if (times.owns(itemId)) return times.valid(itemId, item);
+  if (divfacts.owns(itemId)) return divfacts.valid(itemId, item);
   return facts.valid(itemId, item);
 };
 
@@ -149,6 +178,10 @@ export function shapeFor(item) {
  */
 export function instanceOf(item) {
   if (isSkill(item)) return skills.generate(item.skill, { shape: shapeFor(item), seed: seedOf(item) });
+  if (isDivFact(item)) {
+    const fact = divfacts.factById(idOf(item));
+    return fact ? { op: '÷', a: fact.a, b: fact.b, column: false, divide: false } : null;
+  }
   if (isTimes(item)) {
     const fact = times.factById(idOf(item));
     return fact ? { op: '×', a: fact.a, b: fact.b, gap: Boolean(fact.gap), column: false } : null;
@@ -158,12 +191,16 @@ export function instanceOf(item) {
 }
 
 /**
- * How the question is drawn: inline like `7 + 8 =`, stacked in columns with a rule, or — for a
- * missing factor — inline with the answer strip standing *inside* the equation rather than
- * after it.
+ * How the question is drawn: inline like `7 + 8 =`, stacked in columns with a rule, written
+ * out as a long division, or — for a missing factor — inline with the answer strip standing
+ * *inside* the equation rather than after it.
+ *
+ * A long division is a column question and then some: it has a rule and its digits line up in
+ * places, but it is written across rather than down and its working marches to the right, so it
+ * gets a layout of its own rather than a branch inside `column`.
  */
 export const layoutOf = (question) =>
-  question?.column ? 'column' : question?.gap ? 'gap' : 'inline';
+  question?.divide ? 'divide' : question?.column ? 'column' : question?.gap ? 'gap' : 'inline';
 
 /* --------------------------------------------------------------------- answering */
 
@@ -181,30 +218,41 @@ export const FACT_ANSWER_WIDTH = 2;
 export const answerWidth = (payload) =>
   isSkill(payload)
     ? skills.widthOf(payload.skill)
-    : isTimes(payload)
-      ? times.widthOf(payload)
-      : FACT_ANSWER_WIDTH;
+    : isDivFact(payload)
+      ? divfacts.widthOf(payload)
+      : isTimes(payload)
+        ? times.widthOf(payload)
+        : FACT_ANSWER_WIDTH;
 
 /**
- * The rows an answer is written on, ones-first within each, as widths.
+ * The rows an answer is written on, **in the order they are written**, each `{ width, place,
+ * line }`: how many boxes, which column its rightmost box sits in, and which line of the
+ * working it is drawn on. Ones-first within a row, as everywhere.
  *
  * Almost everything this subject teaches is answered on one line and gets a single-entry list.
- * A stacked multiplication with a two-digit multiplier is the exception: its answer is the two
- * partial products and their total, and the rows are a property of the *skill*, never of the
- * numbers drawn, for the same reason the width always has been.
+ * Two things are not. A stacked multiplication is answered on its partial products and their
+ * total, all sitting under the ones. A long division is answered on three rows per step — the
+ * quotient digit, the product taken away, and what is left with the next digit brought down —
+ * and those step *across* the page rather than stacking under one another, which is what
+ * `place` is for and why every row now carries one.
+ *
+ * As with the width, a property of the *item*, never of the numbers drawn: a stack that grew
+ * with the answer would say how long the answer was going to be.
  */
 export const answerRows = (payload) =>
-  isSkill(payload) ? skills.rowsOf(payload.skill) : [answerWidth(payload)];
+  isSkill(payload) ? skills.rowsOf(payload.skill) : [{ width: answerWidth(payload), place: 0, line: 0 }];
 
 /**
  * How many rows of carry boxes the question offers, and how wide.
  *
  * A column sum has one, as it always has. A stacked multiplication has one per partial product
  * — each is its own run down the multiplicand, with its own carries. Everything else has none:
- * there is no working to write beside `7 + 8`.
+ * there is no working to write beside `7 + 8`, and a long division has no scratch row because
+ * its working *is* the answer — every step of it is written into boxes and marked.
  */
 export const carryRows = (payload, question) => {
   if (!question?.column) return 0;
+  if (question.op === '÷') return 0;
   if (question.op !== '×') return 1;
   return String(Math.abs(question.b)).length;
 };
@@ -212,7 +260,12 @@ export const carryRows = (payload, question) => {
 /** Digits in the answer to one question — what `answerWidth` must never be allowed to fall below. */
 export const answerDigits = (question) => {
   if (!question) return 0;
-  const value = isTimes(question) ? times.answerOf(question) : facts.answerOf(question);
+  const value =
+    question.op === '÷'
+      ? quotientOf(question.a, question.b)
+      : isTimes(question)
+        ? times.answerOf(question)
+        : facts.answerOf(question);
   return String(Math.abs(value)).length;
 };
 
@@ -222,8 +275,14 @@ export const paceScale = 1.6;
 
 /** And a column sum, worked one column at a time, is slower again. */
 export const paceOf = (item) => {
+  // Three rows for every digit of the answer, and the answer can be three digits long — the
+  // longest piece of writing this game asks for by some way.
+  if (isSkill(item) && skills.isDivide(item.skill)) return 5.0;
   if (isSkill(item) && skills.isMultiRow(item.skill)) return 4.0; // two partial products and a total
   if (isSkill(item) && skills.isColumn(item.skill)) return 2.6;
+  // A division fact is hunted rather than recalled, exactly as a missing factor is — a child
+  // runs up the table until they find it, and that takes longer than saying a product.
+  if (isDivFact(item)) return 2.0;
   // A missing factor is hunted rather than recalled — a child runs up the table until they
   // find it, and that takes longer than saying a product they know. Without this the
   // scheduler would read every one of those answers as a hesitant one.
