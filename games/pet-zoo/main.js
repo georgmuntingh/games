@@ -723,6 +723,23 @@ const activeRowIndex = (c) => c?.cursor?.row ?? c?.row ?? 0;
 const activeRow = (c) => c?.rows?.[activeRowIndex(c)] ?? null;
 
 /**
+ * The box a child writing by hand is working on. There is no cursor in handwriting mode — every
+ * pad of a row is live at once — so the column has to be inferred, and the honest inference is
+ * the one nearest the ones that still wants a digit. A column method is worked ones-first, so
+ * that is the column due next; and if a child has filled one out of order it is still the one
+ * left outstanding. Null once the row is full, which is when there is no column left to be on.
+ */
+function pendingBox(c) {
+  if (!c?.stacked || !c.rows?.length) return null;
+  const at = c.row ?? 0;
+  const row = c.rows[at] ?? c.rows[0];
+  for (let i = row.digits.length - 1; i >= 0; i -= 1) {
+    if (row.digits[i] === null) return { row: at, index: i };
+  }
+  return null;
+}
+
+/**
  * The ingredients for the row being worked on, as things on screen: `ingredientsFor` knows which
  * numbers the method needs, and this turns the step it names into the row that holds it.
  */
@@ -746,12 +763,12 @@ function divideIngredients(c, at) {
  *   a column method   works a column at a time, so it points at what the *box* needs — the two
  *                     digits stacked over it, its carry, or the rows being added up
  *
- * `next` is the box about to be filled, and it is null in handwriting mode, where the pads serve
- * a whole row and there is no one column to point at. A stacked multiplication still has
- * something to say there — which digit of the multiplier the row belongs to — so that much
- * survives; the rest waits until there is a cursor to hang it on.
+ * `at` is the box being worked on — the cursor where there is one, and otherwise the column a
+ * child writing by hand is due to fill. It is null only when a row is already full, and then a
+ * stacked multiplication still has something to say — which digit of the multiplier the row
+ * belongs to — while the rest waits for a column to point at.
  */
-function usedNow(c, next) {
+function usedNow(c, at) {
   const empty = { dpos: [], divisor: false, top: null, bottom: null, carry: null, slots: [] };
   if (c.layout === 'divide') {
     const found = divideIngredients(c, activeRowIndex(c));
@@ -759,11 +776,11 @@ function usedNow(c, next) {
   }
   if (c.layout !== 'column') return empty;
   const widths = c.rows.map((row) => row.width);
-  if (!next) {
+  if (!at) {
     const found = columnIngredients(c.shown, { row: c.row, index: 0, widths });
     return { ...empty, bottom: widths.length > 1 ? found.bottom : null };
   }
-  return { ...empty, ...columnIngredients(c.shown, { row: next.row, index: next.index, widths }) };
+  return { ...empty, ...columnIngredients(c.shown, { row: at.row, index: at.index, widths }) };
 }
 
 /** One row's digits, with blanks contributing nothing. */
@@ -930,8 +947,9 @@ function paintAnswer() {
   // alone, because there a row is the whole answer and lighting it says nothing.
   const rowLit = Boolean(current.stacked && current.rows.length > 1);
   const live = activeRowIndex(current);
-  // And what that row, or the box inside it, is made from.
-  const used = usedNow(current, next);
+  // And what that row, or the box inside it, is made from. Typing and tapping have a cursor to
+  // read the column off; handwriting does not, so it falls back to the column still due.
+  const used = usedNow(current, next ?? pendingBox(current));
   const citesSlot = (row, i) =>
     used.slots.some((slot) => slot.row === row && (slot.i === undefined || slot.i === i));
   for (const box of el.promptSum.querySelectorAll('.slot')) {
