@@ -747,6 +747,10 @@ main {
   --cw-col: clamp(34px, calc((100vw - 5rem) / (var(--cw-cols, 2) + 1)), 52px);
   /* And the shorter side of anything touched, which is the number a finger actually needs. */
   --cw-touch: max(44px, var(--cw-col));
+  /* A carry box is smaller than an answer box on purpose: it is a note in the margin, not part
+     of the sum, and the size says so before the dashed border and the warm colour do. Not much
+     smaller — it is still written in, so it stays inside what a fingertip can find. */
+  --cw-scratch: max(34px, calc(var(--cw-col) * 0.74));
   grid-template-columns: auto repeat(var(--cw-cols, 2), var(--cw-col));
   gap: 0.18rem 0.32rem;
   /* Fixed rather than relative, because this is drawn in two quite different places — inside
@@ -800,10 +804,17 @@ main {
      read is not much of a note to have written. */
   font-size: 0.8em;
   color: var(--pz-warm);
-  min-height: var(--cw-touch);
+  min-height: var(--cw-scratch);
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Narrower than its column as well as shorter, and centred in it, so the row of carry boxes
+   reads as a row of small notes above the sum rather than as another row of answer boxes. */
+.cw-carrybox {
+  width: var(--cw-scratch);
+  justify-self: center;
 }
 
 .cw-carrybox {

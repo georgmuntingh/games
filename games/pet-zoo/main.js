@@ -1056,6 +1056,24 @@ function clearCarryPads() {
   carryPads.length = 0;
 }
 
+/**
+ * Rub the ink out of the carry boxes, leaving the pads themselves in place: they are the same
+ * boxes, they are simply empty now.
+ *
+ * The invariant this exists to keep is that carry *ink* and carry *data* go together. Almost
+ * everywhere that is free: a new question rebuilds the prompt, which builds the pads again on
+ * fresh boxes, so nothing can survive. Starting an answer over is the one path that empties the
+ * data without rebuilding anything — the shape has not changed, so there is nothing to redraw —
+ * and there the strokes would otherwise sit on top of boxes the game had already forgotten.
+ *
+ * `pad.clear()` does not run the settle handler, so the "there is ink here" mark has to come off
+ * by hand; that handler is for a child lifting the pen, not for the game wiping the slate.
+ */
+function clearCarryInk() {
+  for (const pad of carryPads) pad.clear();
+  for (const host of el.promptSum.querySelectorAll('.cw-carrypad')) host.classList.remove('has-ink');
+}
+
 function attachCarryPads() {
   clearCarryPads();
   if (!writingWanted() || current.shown.op !== '×') return;
@@ -1190,6 +1208,10 @@ function clearAnswer() {
   if (written) current.clears += 1;
   current.rows = current.rows.map(emptyRow);
   current.carries = blankCarries(current);
+  // The scratch ink goes with the scratch digits. Nothing reads a carry box, so a stroke left
+  // behind here would not make an answer wrong — it would just be a note about a sum the child
+  // is no longer doing, sitting over the sum they are.
+  clearCarryInk();
   current.row = 0;
   current.cursor = current.stacked ? onesBox(current, 0) : null;
   current.focus = null;
