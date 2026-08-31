@@ -931,12 +931,50 @@ main {
   color: var(--pz-ink);
 }
 
-.cw-answer .slot.is-next {
-  border-bottom-color: var(--pz-accent);
-}
-
 .cw-answer .slot.is-empty::after {
   content: '\00a0';
+}
+
+/* The ingredients of the box being written: the two digits stacked over the column, the carry
+   coming into it, and — on the last line of a multiplication — the partial products being added
+   up. The same tint as the long division's, because it is the same idea, and the same accent as
+   the live row, so the whole thing reads as one sentence: these numbers, into this box. */
+.cw-top .cw-cell.is-used,
+.cw-bottom .cw-cell.is-used,
+.cw-answer .slot.is-used:not(.is-live) {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pz-accent) 18%, transparent);
+}
+
+/* The row being written, where an answer has more than one — the partial products of a stacked
+   multiplication, as for a long division's working. */
+.cw-answer .slot.is-live {
+  background: color-mix(in srgb, var(--pz-accent) 14%, var(--pz-card-2));
+  border-bottom-color: color-mix(in srgb, var(--pz-accent) 45%, var(--pz-line));
+}
+
+/* After `.is-live`, so the box the next digit lands in keeps its own underline inside a lit
+   row — the same order the long division's boxes are in. */
+.cw-answer .slot.is-next {
+  border-bottom-color: var(--pz-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pz-accent) 32%, transparent);
+}
+
+/* The carry is an ingredient in the full sense — `addSteps` and `partialStep` both fold what
+   came in from next door into the digit they produce — so its box lights with the rest. Kept
+   below `.is-on` and `.is-focus` in the file so a carry that is written, or has the cursor in
+   it, still says so first. */
+.cw-carrybox.is-used {
+  background: color-mix(in srgb, var(--pz-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--pz-accent) 40%, var(--pz-line));
+}
+
+.cw-carrybox.is-used.is-on {
+  border-color: var(--pz-warm);
+}
+
+.cw-carrybox.is-used.is-focus {
+  border-color: var(--pz-accent);
 }
 
 /* The walkthrough. Each column lights, its digit lands, and the carry lifts into the box

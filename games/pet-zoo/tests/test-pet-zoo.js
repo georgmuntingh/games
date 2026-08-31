@@ -105,7 +105,7 @@ import * as mathColumns from '../subjects/math/columns.js';
 import * as mathTimes from '../subjects/math/times.js';
 import * as mathDivFacts from '../subjects/math/divfacts.js';
 import * as mathDivide from '../subjects/math/divide.js';
-import { mulWalkHtml, stackedMulMarkup } from '../column.js';
+import { columnIngredients, mulWalkHtml, stackedMulMarkup } from '../column.js';
 import { ALL_VERDICTS, gradeDivide } from '../subjects/math/grade.js';
 import { arrayPlan, arraySvg } from '../array.js';
 import { dividedMarkup, divideWalkHtml, ingredientsFor, spanOf, stepOfRow, walkCols } from '../divwalk.js';
@@ -4605,6 +4605,114 @@ test('a stack of working is given longer than a single line of it', () => {
     'a three-row multiplication is not given longer than a column sum'
   );
   assert(addSubject.paceOf({ skill: 'colx21c' }) <= addSubject.paceOf({ skill: 'colx32' }));
+});
+
+describe('maths — what each box is made from');
+
+test('a column sum points at the column, not at the row', () => {
+  // A column method works a column at a time — each box is its own little sum, made from the
+  // two digits stacked over it and whatever came in from next door — so the ingredients belong
+  // to the box and change as the cursor moves along. The carry counts: `addSteps` folds what
+  // came in into the digit it produces, so it is an ingredient in the full sense.
+  //
+  // Note the two coordinates. A box is addressed by `data-i`, counting from the *left*, so it
+  // depends on how wide the row is; everything else is a place, counting from the ones. 990 +
+  // 533 is answered in four boxes, so its ones box is index 3.
+  const at = (q, index) => columnIngredients(q, { index, widths: [4] });
+  const sum = { op: '+', a: 990, b: 533 };
+  assertEqual(
+    JSON.stringify(at(sum, 3)),
+    JSON.stringify({ top: 0, bottom: 0, carry: { row: 0, index: 0 }, slots: [] }),
+    'the ones box is made from the ones of both numbers'
+  );
+  assertEqual(at(sum, 2).top, 1, 'and the box beside it from the tens');
+  assertEqual(at(sum, 2).bottom, 1);
+  assertEqual(at(sum, 2).carry.index, 1, 'with the carry coming into that column, not another');
+  // The box the carry runs out into has no digits above it — only the carry itself.
+  assertEqual(at(sum, 0).top, null, 'there is no thousands digit to point at');
+  assertEqual(at(sum, 0).bottom, null);
+  assertEqual(at(sum, 0).carry.index, 3);
+
+  const difference = { op: '-', a: 837, b: 278 };
+  const sub = (index) => columnIngredients(difference, { index, widths: [3] });
+  assertEqual([0, 1, 2].map((i) => `${sub(i).top}${sub(i).bottom}`).join(' '), '22 11 00');
+  assertEqual(sub(0).slots.length, 0, 'nothing already written is leaned on');
+});
+
+test('a stacked multiplication points at the digit pair, shift and all', () => {
+  // 47 × 38 is answered on rows three, four and four boxes wide, so the same column is a
+  // different box index in each of them — which is the whole reason places are the coordinate.
+  const widths = [3, 4, 4];
+  const q = { op: '×', a: 47, b: 38 };
+  const at = (row, index) => columnIngredients(q, { row, index, widths });
+
+  // The ones row: the multiplier's ones digit all the way along, and the multiplicand digit
+  // standing over each box in turn.
+  assertEqual([2, 1, 0].map((i) => at(0, i).bottom).join(''), '000', 'the same multiplier digit down the row');
+  assertEqual([2, 1].map((i) => at(0, i).top).join(''), '01', 'and the multiplicand digit over the box');
+  assertEqual(at(0, 0).top, null, 'nothing above the box the carry runs out into');
+
+  // The tens row is written with its own zero on the end, so everything above it shifts a place
+  // — and the box over that zero is made from nothing at all up there.
+  assertEqual(at(1, 3).top, null, 'the shift zero comes from no digit');
+  assertEqual(at(1, 3).bottom, 1, 'but it is still the tens of the multiplier that owns the row');
+  assertEqual([2, 1].map((i) => at(1, i).top).join(''), '01', 'the multiplicand, shifted one place');
+
+  // And the last line is the partial products added up, so that is all it points at — in the
+  // same *column* of each, which is a different box in the narrower row.
+  const total = at(2, 1); // place 2
+  assertEqual(total.top, null);
+  assertEqual(total.bottom, null, 'the question takes no part in adding the rows up');
+  assertEqual(total.carry, null, 'the final addition has no carry row of its own');
+  assertEqual(
+    JSON.stringify(total.slots),
+    JSON.stringify([{ row: 0, i: 0 }, { row: 1, i: 1 }]),
+    'the same column, and so a different box index in the shorter row'
+  );
+  // The widest column of all reaches past the first partial product entirely.
+  assertEqual(JSON.stringify(at(2, 0).slots), JSON.stringify([{ row: 1, i: 0 }]));
+
+  // A single-digit multiplier has one row, and that row *is* the product — not a total.
+  const short = columnIngredients({ op: '×', a: 47, b: 8 }, { row: 0, index: 1, widths: [3] });
+  assertEqual(short.bottom, 0, 'the only multiplier digit there is');
+  assertEqual(short.slots.length, 0, 'there is nothing to add up');
+});
+
+test('no box is ever made from a digit that is not there', () => {
+  // Across every question the column rungs can generate. A cited place must exist in the number
+  // it belongs to, a cited carry must sit inside the scratch row the question actually has, and
+  // a cited box must be in the same column as the one being written.
+  for (const skill of ['col+2c', 'col+3', 'col-2b', 'col-3', 'colx21c', 'colx31c', 'colx22', 'colx32']) {
+    const widths = addSubject.answerRows({ skill }).map((row) => row.width);
+    for (const shape of mathSkills.shapesOf(skill)) {
+      for (let seed = 1; seed <= 40; seed += 1) {
+        const q = mathSkills.generate(skill, { shape, seed });
+        const carries = addSubject.carryRows({ skill }, q);
+        for (let row = 0; row < widths.length; row += 1) {
+          for (let index = 0; index < widths[row]; index += 1) {
+            const place = widths[row] - 1 - index;
+            const used = columnIngredients(q, { row, index, widths });
+            const inside = (n, at) => at === null || (at >= 0 && at < String(n).length);
+            assert(inside(q.a, used.top), `${skill} ${q.a}·${q.b} pointed past the top number`);
+            assert(inside(q.b, used.bottom), `${skill} ${q.a}·${q.b} pointed past the bottom number`);
+            if (used.carry) {
+              assert(used.carry.row < carries, `${skill} cited a carry row that is not drawn`);
+              assertEqual(used.carry.index, place, `${skill} cited a carry from another column`);
+            }
+            for (const slot of used.slots) {
+              assert(slot.row < widths.length, `${skill} leaned on a row that is not there`);
+              assert(slot.i >= 0 && slot.i < widths[slot.row], `${skill} leaned on a box off the end of its row`);
+              assertEqual(
+                widths[slot.row] - 1 - slot.i,
+                place,
+                `${skill} leaned on a box in another column`
+              );
+            }
+          }
+        }
+      }
+    }
+  }
 });
 
 describe('maths — the division facts');

@@ -41,6 +41,7 @@ import {
 import { fillDuration, fillPlan, tenFrameSvg } from './tenframe.js';
 import { arrayDuration, arraySvg, ROW_STEP_SCALE } from './array.js';
 import {
+  columnIngredients,
   columnWalkHtml,
   DEFAULT_WALK_SPEED,
   stackedMarkup,
@@ -725,7 +726,7 @@ const activeRow = (c) => c?.rows?.[activeRowIndex(c)] ?? null;
  * The ingredients for the row being worked on, as things on screen: `ingredientsFor` knows which
  * numbers the method needs, and this turns the step it names into the row that holds it.
  */
-function ingredientsOf(c, at) {
+function divideIngredients(c, at) {
   const found = ingredientsFor(c.shown.a, c.shown.b, c?.rows?.[at]);
   return {
     ...found,
@@ -734,6 +735,35 @@ function ingredientsOf(c, at) {
         ? -1
         : c.rows.findIndex((entry) => entry.kind === 'quotient' && entry.step === found.quotientStep),
   };
+}
+
+/**
+ * Everything on screen that the thing being written is made from, in one shape the painter can
+ * walk. The two families answer it differently and both land here:
+ *
+ *   a long division   works a whole row out at once, so it points at what the *row* needs — the
+ *                     digits being divided, the divisor, an answer digit already written
+ *   a column method   works a column at a time, so it points at what the *box* needs — the two
+ *                     digits stacked over it, its carry, or the rows being added up
+ *
+ * `next` is the box about to be filled, and it is null in handwriting mode, where the pads serve
+ * a whole row and there is no one column to point at. A stacked multiplication still has
+ * something to say there — which digit of the multiplier the row belongs to — so that much
+ * survives; the rest waits until there is a cursor to hang it on.
+ */
+function usedNow(c, next) {
+  const empty = { dpos: [], divisor: false, top: null, bottom: null, carry: null, slots: [] };
+  if (c.layout === 'divide') {
+    const found = divideIngredients(c, activeRowIndex(c));
+    return { ...empty, dpos: found.digits, divisor: found.divisor, slots: found.row >= 0 ? [{ row: found.row }] : [] };
+  }
+  if (c.layout !== 'column') return empty;
+  const widths = c.rows.map((row) => row.width);
+  if (!next) {
+    const found = columnIngredients(c.shown, { row: c.row, index: 0, widths });
+    return { ...empty, bottom: widths.length > 1 ? found.bottom : null };
+  }
+  return { ...empty, ...columnIngredients(c.shown, { row: next.row, index: next.index, widths }) };
 }
 
 /** One row's digits, with blanks contributing nothing. */
@@ -893,15 +923,17 @@ function buildPrompt() {
 /** Put the current digits into the boxes already on screen, and say where the cursor is. */
 function paintAnswer() {
   const next = writingWanted() ? null : nextBox(current);
-  // Marked even in handwriting mode, where there is no cursor to show: the pads serve one row
-  // at a time and which row they belong to is exactly the thing that needs saying.
-  //
-  // Long division only. Every other question in the game is answered on one line, where a row
-  // to highlight would be the whole answer; the stacked multiplication has three, and could
-  // take the same treatment, but it is not asking for it — its rows are read as a stack rather
-  // than walked through in an order.
-  const rowLit = current.layout === 'divide' && current.rows.length > 1;
+  // The row being worked on, wherever an answer has more than one — a long division's working
+  // and a stacked multiplication's partial products alike. Marked even in handwriting mode,
+  // where there is no cursor to show: the pads serve one row at a time and which row they
+  // belong to is exactly the thing that needs saying. A question answered on one line is left
+  // alone, because there a row is the whole answer and lighting it says nothing.
+  const rowLit = Boolean(current.stacked && current.rows.length > 1);
   const live = activeRowIndex(current);
+  // And what that row, or the box inside it, is made from.
+  const used = usedNow(current, next);
+  const citesSlot = (row, i) =>
+    used.slots.some((slot) => slot.row === row && (slot.i === undefined || slot.i === i));
   for (const box of el.promptSum.querySelectorAll('.slot')) {
     const row = current.rows[Number(box.dataset.row)];
     const i = Number(box.dataset.i);
@@ -916,20 +948,29 @@ function paintAnswer() {
     // spread down nine lines, and one underlined box among them is easy to lose — so the row
     // being worked on lifts as a whole and the next box is picked out inside it.
     box.classList.toggle('is-live', rowLit && Number(box.dataset.row) === live);
+    box.classList.toggle('is-used', citesSlot(Number(box.dataset.row), i));
   }
-  // And what the row is made *from*. Working out which numbers go into the next thing you write
-  // is most of the difficulty of long division — it is a different pair every row, and they are
-  // scattered across the page — so the ingredients light up together with the row that needs
-  // them. On paper a child does this with a finger; this is that finger.
-  if (rowLit) {
-    const used = ingredientsOf(current, live);
-    for (const digit of el.promptSum.querySelectorAll('[data-dpos]')) {
-      digit.classList.toggle('is-used', used.digits.includes(Number(digit.dataset.dpos)));
-    }
-    el.promptSum.querySelector('[data-by]')?.classList.toggle('is-used', used.divisor);
-    for (const box of el.promptSum.querySelectorAll('.slot')) {
-      box.classList.toggle('is-used', Number(box.dataset.row) === used.row);
-    }
+  // And the ingredients themselves, wherever they live: in the number being divided, in the
+  // sign and divisor beside it, or in the two numbers stacked above a column. Working out which
+  // of them go into the next thing you write is much of the difficulty of every one of these
+  // methods — on paper a child does it with a finger, and this is that finger.
+  const place = (node) => Number(node.dataset.place);
+  for (const digit of el.promptSum.querySelectorAll('[data-dpos]')) {
+    digit.classList.toggle('is-used', used.dpos.includes(Number(digit.dataset.dpos)));
+  }
+  el.promptSum.querySelector('[data-by]')?.classList.toggle('is-used', used.divisor);
+  for (const digit of el.promptSum.querySelectorAll('.cw-top [data-place]')) {
+    digit.classList.toggle('is-used', place(digit) === used.top);
+  }
+  for (const digit of el.promptSum.querySelectorAll('.cw-bottom [data-place]')) {
+    digit.classList.toggle('is-used', place(digit) === used.bottom);
+  }
+  for (const box of el.promptSum.querySelectorAll('[data-carry]')) {
+    const here =
+      Boolean(used.carry) &&
+      Number(box.dataset.carry) === used.carry.row &&
+      Number(box.dataset.carryI) === used.carry.index;
+    box.classList.toggle('is-used', here);
   }
   paintCarries();
   renderWriteTools();
@@ -1107,11 +1148,25 @@ function pushDigit(digit) {
   renderAnswer();
 }
 
+/**
+ * Start the whole answer over. The one implementation of it: the keypad's Clear, the button
+ * beside the writing pads and the typing path all come here, because there used to be two of
+ * these and only one of them put the cursor back — so the boxes emptied while the highlight
+ * stayed on the row the child had reached.
+ *
+ * Everything that says "where we are" goes back to the beginning together: the digits, the
+ * scratch carries, the row, the cursor, and — in handwriting mode — the pads themselves, which
+ * have to be rebuilt because the row they were serving may have been a different width.
+ */
 function clearAnswer() {
   if (locked || !current || !isSum(current)) return;
   const written = current.rows.some((row) => row.digits.some((d) => d !== null));
   const scratched = current.carries.some((row) => row.some((d) => d !== null));
-  if (!written && !scratched) return;
+  // Ink counts as something to clear even before it has been read as a digit: a child who
+  // scribbled and thought better of it has something on the screen to get rid of, and an early
+  // return here would leave it sitting there.
+  const inked = writingWanted() && writeSlots.some((slot) => !slot.pad.isEmpty);
+  if (!written && !scratched && !inked) return;
   // Adding's stand-in for waggling the clock hands: starting the answer over is the tell
   // that the child was not sure, and `qualityOf` reads it the same way.
   if (written) current.clears += 1;
@@ -1121,6 +1176,9 @@ function clearAnswer() {
   current.cursor = current.stacked ? onesBox(current, 0) : null;
   current.focus = null;
   audio.play('grab');
+  // Back to the first row's pads, which is both a clear and a resize: `syncPadsToRow` rebuilds
+  // them when the row it is going to is a different width from the one just left.
+  if (writingWanted()) syncPadsToRow();
   renderAnswer();
 }
 
@@ -1433,14 +1491,7 @@ el.writeNext.addEventListener('click', () => {
 });
 
 el.writeClear.addEventListener('click', () => {
-  if (locked || !current) return;
-  // Starting the whole answer over *is* hesitation, unlike putting a misreading right.
-  if (current.rows.some((row) => row.digits.some((d) => d !== null))) current.clears += 1;
-  current.carries = blankCarries(current);
-  current.rows = current.rows.map(emptyRow);
-  current.row = 0;
-  resetWriting();
-  syncWrittenAnswer();
+  clearAnswer();
 });
 
 // The carry boxes. Never read, never graded — see `carryMarkup` — so they are handled here,
