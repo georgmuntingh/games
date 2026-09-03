@@ -826,3 +826,202 @@ export function motesMarkup(c, seed, count = 12) {
 }
 
 export { n as round2 };
+
+/* ------------------------------------------------------------------ weather */
+
+// One sky over the whole zoo, drawn the same way the motes are: a seeded scatter with the
+// motion handed to CSS through custom properties, so a still frame is deterministic and a
+// child who has asked for less movement simply gets that frame. weather.js decides *which*
+// weather; everything below only knows how to draw one.
+//
+// The house rule bites hardest here. Weather may tint a habitat and it may fill the air, but
+// it may not hide the pet: the falling layers stay thin and translucent, the fog bank sits on
+// the horizon rather than over the walk line, and the wash that carries the mood is capped in
+// weather.js and halved again at night.
+
+/** How far above the horizon weather starts, so a cropped scene still shows it falling. */
+const FALL_TOP = -8;
+
+/**
+ * What hangs in the sky. Overcast banks for the grey ones, a bank on the horizon for fog,
+ * an arc for the rainbow, and nothing at all for clear — a clear day is the sky the habitat
+ * already had.
+ */
+export function weatherSkyMarkup(sky, seed, uid) {
+  const rnd = rndFrom(seed + 131);
+  if (sky === 'clouds') {
+    // Heavier and lower than the fair-weather clouds in skyMarkup, and wide enough to run
+    // off both edges: an overcast sky has no gaps in it to crop to. It runs off the *top*
+    // too, which is why the whole weather layer is drawn inside a clip frame — see the defs
+    // in habitatSvg.
+    return Array.from({ length: 5 }, (_, i) => {
+      const x = n(-16 + i * 52 + rnd() * 22);
+      const y = n(6 + rnd() * 22);
+      const s = n(1 + rnd() * 0.9);
+      return `<g transform="translate(${x} ${y}) scale(${s})" fill="#8e97ab" opacity="${n(0.5 + rnd() * 0.28)}">
+        <ellipse cx="0" cy="0" rx="19" ry="7" />
+        <circle cx="-8" cy="-3" r="8" />
+        <circle cx="7" cy="-4.4" r="9.6" />
+        <circle cx="17" cy="-1" r="6.4" />
+      </g>`;
+    }).join('');
+  }
+  if (sky === 'bank') {
+    // Fog reads from the distance going soft, not from the field going dark, so the bank
+    // sits on the horizon and the whole of it is above the walk line.
+    return `
+      <rect x="0" y="${n(HORIZON - 26)}" width="200" height="34"
+            fill="url(#${uid}-fogbank)" class="hab-fog" />
+      ${Array.from({ length: 4 }, (_, i) => {
+        const y = n(HORIZON - 18 + i * 7 + rnd() * 4);
+        const rx = n(48 + rnd() * 40);
+        return `<ellipse class="hab-fog" cx="${n(30 + rnd() * 140)}" cy="${y}" rx="${rx}" ry="${n(4 + rnd() * 3)}"
+          fill="#eef2f8" opacity="${n(0.3 + rnd() * 0.22)}" style="--fog-delay:${n(rnd() * 9)}s" />`;
+      }).join('')}`;
+  }
+  if (sky === 'arc') {
+    // Seven bands, drawn as one stroked arc each so the whole thing is a handful of nodes.
+    // It stands off to one side: a rainbow through the middle would arch over the pet, and
+    // the middle of the field belongs to the pet.
+    const bands = ['#ff8f8f', '#ffbe72', '#ffe97e', '#8fdc92', '#82c8f0', '#8f9ce8', '#c191e0'];
+    return `<g class="hab-rainbow" opacity="0.62">${bands
+      .map(
+        (colour, i) =>
+          `<path d="M${n(6 + i * 2.2)} ${HORIZON} a ${n(58 - i * 2.2)} ${n(50 - i * 2.2)} 0 0 1 ${n(
+            (58 - i * 2.2) * 2
+          )} 0" fill="none" stroke="${colour}" stroke-width="2.3" stroke-linecap="round" />`
+      )
+      .join('')}</g>`;
+  }
+  return '';
+}
+
+/** The gradient a fog bank needs. Returned separately so it can go in the habitat's defs. */
+export const fogGradient = (uid) => `
+  <linearGradient id="${uid}-fogbank" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#eef2f8" stop-opacity="0" />
+    <stop offset="0.45" stop-color="#eef2f8" stop-opacity="0.62" />
+    <stop offset="1" stop-color="#eef2f8" stop-opacity="0.12" />
+  </linearGradient>`;
+
+/**
+ * What falls. Each piece carries its own delay, column and duration as custom properties and
+ * is animated by one CSS rule — the motes' idiom, for the motes' reason: 46 raindrops on a
+ * rAF loop would be 46 more things to step every frame in a scene that already steps a pet,
+ * a ball and four treats.
+ *
+ * `fall` is the spec from weather.js, or null for a weather that drops nothing.
+ */
+export function weatherFallMarkup(fall, seed) {
+  if (!fall) return '';
+  const rnd = rndFrom(seed + 271);
+  const [durMin, durMax] = fall.dur;
+  return Array.from({ length: fall.count }, () => {
+    const x = n(rnd() * 200);
+    const delay = n(rnd() * durMax);
+    const dur = n(durMin + rnd() * (durMax - durMin));
+    // `--fall-still` is where this piece sits when nothing is animating. Without it a
+    // reduced-motion habitat would draw its whole shower at cy = FALL_TOP, in a line above
+    // the sky, which is to say not at all — see the reduced-motion block in style.css.
+    const still = n(18 + rnd() * 108);
+    const style =
+      `--fall-delay:${delay}s; --fall-dur:${dur}s; ` +
+      `--fall-sway:${n(2 + rnd() * 5)}px; --fall-still:${still}px`;
+    if (fall.kind === 'drop') {
+      const len = n(4 + rnd() * 4);
+      return `<line class="hab-drop" x1="${x}" y1="${FALL_TOP}" x2="${n(x - 1.4)}" y2="${n(FALL_TOP + len)}"
+        stroke="#cfe0f4" stroke-width="0.9" stroke-linecap="round" opacity="0.72" style="${style}" />`;
+    }
+    if (fall.kind === 'flake') {
+      return `<circle class="hab-flake" cx="${x}" cy="${FALL_TOP}" r="${n(0.7 + rnd() * 1)}"
+        fill="#ffffff" opacity="${n(0.66 + rnd() * 0.3)}" style="${style}" />`;
+    }
+    // Deliberately smaller and harder-edged than a flake. Falling, the bounce tells them
+    // apart; standing still — which is how a reduced-motion habitat draws them — only the
+    // size and the rim do.
+    return `<circle class="hab-hail" cx="${x}" cy="${FALL_TOP}" r="${n(0.8 + rnd() * 0.5)}"
+      fill="#f4f8ff" stroke="#93a8c4" stroke-width="0.4" opacity="0.95" style="${style}" />`;
+  }).join('');
+}
+
+/**
+ * What the weather leaves on the ground. Its opacity is driven from outside by `--soak`, so
+ * the heartbeat can deepen a puddle without redrawing the habitat.
+ *
+ * Puddles and drifts sit *behind* everything the pet has to reach, and none of them is drawn
+ * across the middle of the walk line, so nothing a child needs to pick up ends up underneath
+ * a wet patch.
+ */
+export function weatherGroundMarkup(kind, c, seed) {
+  if (kind === 'clear' || kind === 'cloudy') return '';
+  const rnd = rndFrom(seed + 419);
+  if (kind === 'snow') {
+    // A settled band rather than scattered patches: snow covers, it does not spot.
+    return `
+      <path d="M0 ${n(WALK_Y + 2)}
+               C 44 ${n(WALK_Y - 4)}, 118 ${n(WALK_Y + 5)}, 200 ${n(WALK_Y - 2)}
+               L200 120 L0 120 Z" fill="#ffffff" opacity="0.45" />
+      ${Array.from({ length: 7 }, () => {
+        const x = n(rnd() * 200);
+        const y = n(HORIZON + 8 + rnd() * 22);
+        return `<ellipse cx="${x}" cy="${y}" rx="${n(6 + rnd() * 9)}" ry="${n(1.4 + rnd() * 1.4)}"
+          fill="#ffffff" opacity="0.5" />`;
+      }).join('')}`;
+  }
+  if (kind === 'hail') {
+    return Array.from({ length: 11 }, () => {
+      const x = n(rnd() * 200);
+      const y = n(WALK_Y - 2 + rnd() * 18);
+      return `<circle cx="${x}" cy="${y}" r="${n(0.8 + rnd() * 0.6)}" fill="#eef4fc" opacity="0.85" />`;
+    }).join('');
+  }
+  // rain, fog and the morning after a rainbow all leave the same thing: standing water.
+  return Array.from({ length: 6 }, () => {
+    const x = n(14 + rnd() * 172);
+    const y = n(WALK_Y - 4 + rnd() * 20);
+    const rx = n(5 + rnd() * 8);
+    return `<g opacity="${n(0.55 + rnd() * 0.3)}">
+      <ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${n(rx * 0.26)}" fill="${c.water}" opacity="0.5" />
+      <ellipse cx="${n(x - rx * 0.2)}" cy="${n(y - rx * 0.06)}" rx="${n(rx * 0.5)}" ry="${n(rx * 0.1)}"
+        fill="${c.waterLight}" opacity="0.55" />
+    </g>`;
+  }).join('');
+}
+
+/**
+ * The umbrella. Not a shop piece — it comes with the weather and goes with it, which is why
+ * it lives here rather than in FURNITURE and costs nothing.
+ *
+ * Drawn to the same contract as everything else in the kit: base at (0, 0), growing into -y.
+ *
+ * The one piece in the habitat taller than the pet, and it has to be. Bought furniture tops
+ * out around 22 units because it stands *beside* a pet; this stands *over* one, and a pet is
+ * PET_FOOT.y — near 40 — tall. Which leaves almost no room: see UMBRELLA_PEAK below for the
+ * two centimetres of it there were.
+ */
+export const UMBRELLA = (c) => `
+  <ellipse cx="0" cy="-0.6" rx="7.4" ry="2.2" fill="${c.groundRim}" opacity="0.5" />
+  <path d="M-0.8 -1 L-0.8 -34 L0.8 -34 L0.8 -1 Z" fill="${c.wood}" />
+  <path d="M-0.8 -2.6 q-2.8 0 -2.8 -2.6" fill="none" stroke="${c.wood}" stroke-width="1.3"
+        stroke-linecap="round" />
+  <path d="M-15 -33 q3.6 -11 15 -11 q11.4 0 15 11 Z" fill="${c.accent}" />
+  <path d="M-15 -33 q3.7 -3.3 7.5 -3.3 q3.8 0 7.5 3.3 q3.7 -3.3 7.5 -3.3 q3.8 0 7.5 3.3"
+        fill="none" stroke="${c.bloom}" stroke-width="1.1" stroke-linejoin="round" />
+  <path d="M-7.5 -33 q1.5 -9.4 7.5 -11 q6 1.6 7.5 11" fill="${c.bloom}" opacity="0.55" />
+  <circle cx="0" cy="-44.7" r="0.9" fill="${c.wood}" />`;
+
+/** How wide the umbrella stands, for the spot finder. */
+export const UMBRELLA_HALF_WIDTH = 15;
+
+/**
+ * How tall it is, in two numbers, because both of them are load-bearing and neither is
+ * obvious from reading the path.
+ *
+ * `UMBRELLA_PEAK` is the top of the canopy, and it has to clear a pet: at PET_SIZE the
+ * tallest topper reaches about 42 above the walk line, which is nearly twice what any bought
+ * piece is allowed. `UMBRELLA_TOP` adds the finial, and it is what the safe box caps — the
+ * box starts at y = 50 and the walk line is at 96, so nothing may stand more than 46 tall and
+ * still be whole on a wide screen. The gap between 44 and 46 is the whole room there was.
+ */
+export const UMBRELLA_PEAK = 44;
+export const UMBRELLA_TOP = 45.6;

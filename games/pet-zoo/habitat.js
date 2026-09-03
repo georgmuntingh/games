@@ -40,10 +40,17 @@ import {
   SCENERY,
   skyMarkup,
   TREATS,
+  UMBRELLA,
+  UMBRELLA_HALF_WIDTH,
   VIEW,
   WALK_Y,
+  fogGradient,
+  weatherFallMarkup,
+  weatherGroundMarkup,
+  weatherSkyMarkup,
 } from './habitat-parts.js';
 import { hash, portraitOf, SPECIES, speciesFor, traitIndexFor } from './pets.js';
+import { shelters, veilFor, WEATHERS } from './weather.js';
 import { itemById as shopItemById, MAX_DECOR, sanitizeDecor, slotOf } from './shop.js';
 
 export { HORIZON, PET_FOOT, PET_SIZE, ROAM, SAFE, VIEW, WALK_Y };
@@ -385,6 +392,50 @@ export function backdropSpotFor(layout, groundSpots = furnitureSpotsFor(layout))
   return n(best);
 }
 
+/**
+ * Where the umbrella stands when it rains.
+ *
+ * Derived like every other spot in here, and for the same reason — the same pet shelters in
+ * the same corner on every device, with nothing stored to say so. What makes it its own scan
+ * rather than a third furniture spot is that it must clear the bought pieces too: the
+ * umbrella arrives free, so it may never turn up on top of something the child saved for.
+ *
+ * Clamped into ROAM rather than merely into the safe box, because unlike a hammock this is
+ * somewhere the pet has to be able to *walk to*. A shelter it cannot reach is a worse thing
+ * to draw than no shelter at all.
+ */
+export function shelterSpotFor(habitat) {
+  const taken = [
+    habitat.props.nest.x,
+    habitat.props.larder.x,
+    habitat.props.ball.x,
+    habitat.home.x,
+    ...(habitat.furniture ?? []).map((f) => f.x),
+  ];
+  // The *pole* is what has to be reachable, so it goes anywhere in the roam band; the canopy
+  // is free to overhang it, the way scenery overhangs the edges of the field, and still lands
+  // inside the safe box at either end — ROAM inset from SAFE by more than a canopy's width.
+  const lo = ROAM.x0;
+  const hi = ROAM.x1;
+  let best = lo;
+  let bestScore = -Infinity;
+  for (let x = lo; x <= hi; x += 2) {
+    // Out of the middle, like every other spot: a pet that already idles under the umbrella
+    // never has to run for it, and the walk to shelter is the whole of what a child sees
+    // happen when the rain starts.
+    if (x >= CENTRE_KEEP.x0 && x <= CENTRE_KEEP.x1) continue;
+    const gap = Math.min(...taken.map((b) => Math.abs(b - x)));
+    // Clearance up to a point, then nearness: past a full piece's width there is nothing
+    // left to gain by standing further off, and a shorter dash through the rain is better.
+    const score = Math.min(gap, FURNITURE_GAP) - Math.abs(x - 100) * 0.1;
+    if (score > bestScore) {
+      bestScore = score;
+      best = x;
+    }
+  }
+  return n(best);
+}
+
 /** Bigger reads as nearer, and nearer reads as lower. Depth for free, and never wrong. */
 export const sceneryY = (scale) => n(HORIZON + 10 + (scale - 0.5) * 40);
 
@@ -490,6 +541,13 @@ export function habitatFrom({ key, species, index, hour }) {
     y: n(WALK_Y + dy),
   }));
 
+  const props = {
+    nest: { x: layout.nest, y: WALK_Y },
+    ball: { x: layout.ball, y: WALK_Y },
+    larder: { x: layout.larder, y: WALK_Y, kind: biome.larder, treat: biome.treat, spots: larderSpots },
+  };
+  const home = { x: homeSpotFor(layout, ROAM), y: WALK_Y };
+
   return {
     id: key,
     species,
@@ -497,12 +555,8 @@ export function habitatFrom({ key, species, index, hour }) {
     light,
     palette: paletteFor(species, biomeId, light.phase),
     scenery,
-    props: {
-      nest: { x: layout.nest, y: WALK_Y },
-      ball: { x: layout.ball, y: WALK_Y },
-      larder: { x: layout.larder, y: WALK_Y, kind: biome.larder, treat: biome.treat, spots: larderSpots },
-    },
-    home: { x: homeSpotFor(layout, ROAM), y: WALK_Y },
+    props,
+    home,
     roam: { ...ROAM },
     // Filled in by habitatOf from what the child has actually bought. A generated habitat
     // owns nothing, which is why 144 of them still cost no bytes.
@@ -510,6 +564,9 @@ export function habitatFrom({ key, species, index, hour }) {
     backdrop: null,
     spots: furnitureSpotsFor(layout),
     backdropSpot: backdropSpotFor(layout),
+    // Where an umbrella would go if it rained. Recomputed by habitatOf once the bought
+    // furniture is in, since it has to stand clear of that too.
+    shelter: { x: shelterSpotFor({ props, home, furniture: [] }), y: WALK_Y },
     seed,
   };
 }
@@ -531,11 +588,13 @@ export const habitatFor = (h, m) =>
  */
 export function habitatOf(item) {
   const generated = habitatFrom({ ...portraitOf(item), hour: item.h });
-  const base = {
+  const withFurniture = {
     ...generated,
     furniture: furnitureFor(generated, item?.decor),
     backdrop: backdropFor(generated, item?.decor),
   };
+  // After the furniture, never before: the umbrella's whole job is to stand clear of it.
+  const base = { ...withFurniture, shelter: { x: shelterSpotFor(withFurniture), y: WALK_Y } };
   const over = item?.habitat;
   if (!over || typeof over !== 'object') return base;
   return {
@@ -585,11 +644,19 @@ const piece = (id, x, y, scale, flip, colors) => {
  * assertable in a test. The pet, the ball and the treats are *not* in here: they are
  * retained nodes the scene puts into `.hab-actors`, because they have to move.
  */
-export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } = {}) {
+export function habitatSvg(
+  habitat,
+  { uid = 'h', label = '', sleeping = false, weather = null, soak = 0 } = {}
+) {
   const c = habitat.palette;
   const phase = PHASES[habitat.light.phase] ?? PHASES.noon;
   const rnd = rndFrom(habitat.seed + 3);
   const biome = BIOMES[habitat.biome] ?? BIOMES.meadow;
+  // No weather is the default, and it draws exactly the habitat this function drew before
+  // weather existed — which is what lets every habitat test go on asserting on this markup.
+  const sky = WEATHERS[weather] ?? null;
+  const shelter = sky && shelters(weather) ? habitat.shelter ?? null : null;
+  const wetMarkup = sky ? weatherGroundMarkup(weather, c, habitat.seed) : '';
 
   const back = habitat.scenery.filter((s) => s.y <= WALK_Y);
   const front = habitat.scenery.filter((s) => s.y > WALK_Y);
@@ -613,11 +680,26 @@ export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } 
       <stop offset="0" stop-color="${phase.glow}" stop-opacity="0.85" />
       <stop offset="1" stop-color="${phase.glow}" stop-opacity="0" />
     </radialGradient>
+    ${sky?.sky === 'bank' ? fogGradient(uid) : ''}
+    ${
+      sky
+        ? `<clipPath id="${uid}-frame">
+             <rect x="0" y="0" width="${VIEW.w}" height="${VIEW.h}" />
+           </clipPath>`
+        : ''
+    }
   </defs>
 
   <g class="hab-sky">
     <rect x="0" y="0" width="${VIEW.w}" height="${VIEW.h}" fill="url(#${uid}-sky)" />
     ${skyMarkup(habitat.light.phase, habitat.light.hour24, habitat.seed, uid)}
+    ${
+      sky
+        ? `<g class="hab-weather-sky" clip-path="url(#${uid}-frame)">${
+            weatherSkyMarkup(sky.sky, habitat.seed, uid)
+          }</g>`
+        : ''
+    }
   </g>
 
   <g class="hab-far">${(FAR[biome.far] ?? FAR.hills)(c)}</g>
@@ -633,6 +715,7 @@ export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } 
   <g class="hab-ground">
     ${groundMarkup(c, uid)}
     ${(DETAIL[biome.detail] ?? DETAIL.grass)(c, rnd)}
+    ${wetMarkup ? `<g class="hab-wet" style="--soak:${n(Number(soak) || 0)}">${wetMarkup}</g>` : ''}
   </g>
 
   <g class="hab-back">
@@ -649,6 +732,11 @@ export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } 
     <g transform="translate(${habitat.props.larder.x} ${habitat.props.larder.y})">
       ${(LARDER[habitat.props.larder.kind] ?? LARDER.bush)(c)}
     </g>
+    ${
+      shelter
+        ? `<g class="hab-shelter" transform="translate(${shelter.x} ${shelter.y})">${UMBRELLA(c)}</g>`
+        : ''
+    }
   </g>
 
   <g class="hab-actors"></g>
@@ -657,7 +745,21 @@ export function habitatSvg(habitat, { uid = 'h', label = '', sleeping = false } 
 
   ${glowy ? `<g class="hab-motes">${motesMarkup(c, habitat.seed, sleeping ? 8 : 14)}</g>` : ''}
 
+  ${
+    sky?.fall
+      ? `<g class="hab-fall" clip-path="url(#${uid}-frame)">${
+          weatherFallMarkup(sky.fall, habitat.seed)
+        }</g>`
+      : ''
+  }
+
   <rect class="hab-veil" x="0" y="0" width="${VIEW.w}" height="${VIEW.h}" fill="${phase.veil}" />
+  ${
+    sky
+      ? `<rect class="hab-weather-veil" x="0" y="0" width="${VIEW.w}" height="${VIEW.h}"
+             fill="${veilFor(weather, habitat.light.night)}" />`
+      : ''
+  }
   <rect class="hab-dusk" x="0" y="0" width="${VIEW.w}" height="${VIEW.h}" fill="#1b1930" />
 </svg>`;
 }

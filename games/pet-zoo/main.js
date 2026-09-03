@@ -123,6 +123,7 @@ import { BACKDROP, FURNITURE, YARD_PIECES } from './habitat-parts.js';
 import { habitatOf, habitatSvg } from './habitat.js';
 import { createHabitatScene } from './habitat-scene.js';
 import { yardSvg } from './yard.js';
+import { dayFraction, groundSoak, weatherFor } from './weather.js';
 import { audio } from './audio.js';
 import {
   buzz,
@@ -260,6 +261,23 @@ let limits = session.limitsFor(state.settings.playMinutes);
 // Whether a time may be written as digits. Read at every render rather than cached, so
 // the setting has exactly one home and turning it over repaints from the same state.
 const digitalOn = () => state.settings.showDigital;
+
+/**
+ * Today's sky, and how wet the ground under it has got.
+ *
+ * The whole of the weather's contact with a clock, kept here for the same reason the yard's
+ * hour is: weather.js takes a date stamp and a fraction of a day and knows nothing else, so
+ * every rule in it stays testable without a Date to stub.
+ *
+ * Note which clock this is. A habitat's *light* is the pet's own permanent hour — its home is
+ * always at half past three — but the puddles in it follow the real day, because they are
+ * today's weather rather than the pet's. Two different clocks on purpose.
+ */
+const skyNow = () => {
+  const at = new Date(now());
+  const weather = weatherFor(dayStamp(now()));
+  return { weather, soak: groundSoak(weather, dayFraction(at.getHours(), at.getMinutes())) };
+};
 
 // The question in flight. `dial` is what the child has set the hands to; `reversals`
 // counts how often they changed direction mid-drag, which feeds the SM-2 quality score.
@@ -2354,6 +2372,21 @@ setInterval(() => {
       : String(session.isRunning(state.session) ? session.dayProgress(state.session, tick, limits) : 0)
   );
 
+  // The ground goes on soaking while the child stands in the habitat, and a visit that runs
+  // over midnight gets tomorrow's sky without anyone having to reload.
+  if (scene === 'habitat' && habitatId) {
+    const item = state.items[habitatId];
+    const sky = skyNow();
+    if (item) {
+      const isEgg = item.hatchedAt === null;
+      habitat.setWeather(
+        sky.weather,
+        sky.soak,
+        habitatAria(item, petName(item, t.lang), isEgg, sky.weather)
+      );
+    }
+  }
+
   // A session that ends while the child is standing in a habitat puts *that* pet to sleep
   // in front of them, rather than yanking them out to a nap card they did not ask for.
   // Only on the flip: this runs twice a second, and the bar redraws a collar clock.
@@ -2895,6 +2928,18 @@ function renderHabitatBar(item) {
   return { name, isEgg };
 }
 
+/**
+ * What the habitat announces itself as. The weather is named here and nowhere else: the scene
+ * stays wordless to look at, but a child using a screen reader should not be the only one who
+ * cannot tell it is snowing.
+ */
+function habitatAria(item, name, isEgg, weather) {
+  const home = isEgg
+    ? t('habitat.eggAria', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
+    : t('habitat.aria', { name });
+  return t('habitat.ariaWeather', { home, weather: t(`weather.${weather}`) });
+}
+
 /** Open a pet's home. Free play only — nothing in here writes to the save. */
 function openHabitat(id) {
   const item = state.items[id];
@@ -2902,11 +2947,12 @@ function openHabitat(id) {
   habitatId = id;
   habitatNapping = session.isNapping(state.session, now());
   const { name, isEgg } = renderHabitatBar(item);
+  const sky = skyNow();
   habitat.open(item, {
     napping: habitatNapping,
-    label: isEgg
-      ? t('habitat.eggAria', { species: SPECIES[appearanceOf(item).species]?.name ?? '?' })
-      : t('habitat.aria', { name }),
+    label: habitatAria(item, name, isEgg, sky.weather),
+    weather: sky.weather,
+    soak: sky.soak,
     title: escape(isEgg ? eggTitle(item) : name),
   });
   showScene('habitat');

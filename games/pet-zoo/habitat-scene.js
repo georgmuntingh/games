@@ -25,6 +25,7 @@ import {
   WALK_Y,
 } from './habitat.js';
 import { audio } from './audio.js';
+import { shelters, slows } from './weather.js';
 import { buzz, confetti, heartBurst, pop, reduceMotion, svgEl, wiggle } from './juice.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -33,6 +34,11 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const WALK_SPEED = 27; // habitat units per second, ambling
 const CHASE_SPEED = 47; // and hurrying after a ball
+const DASH_SPEED = 38; // and getting out of the rain: quicker than an amble, slower than a game
+const WET_PACE = 0.72; // how much fog and snow take off an amble
+const SHELTER_MIN = 4000; // how long it waits under the umbrella before wandering out again
+const SHELTER_MAX = 9000;
+const SHELTER_ODDS = 0.65; // how often an idle pet in the rain heads for cover rather than off
 const ARRIVE = 1.6; // close enough to count as there
 const GRAB_RADIUS = 13; // how near the pet must be to pick the ball up
 const MOUTH = { x: 9, y: -25 }; // where a carried ball rides, relative to the pet's feet
@@ -73,6 +79,7 @@ export function createHabitatScene({ host, fx }) {
   let last = 0;
   let napping = false;
   let still = false; // reduced motion: everything happens, nothing drifts
+  let weather = null; // today's sky, or null. Read for behaviour only — the art is habitat.js's
 
   let pet = null; // { wrap, art, x, facing, mood, moodUntil }
   let ball = null; // { wrap, x, y, vx, vy, resting, held, carried }
@@ -187,6 +194,12 @@ export function createHabitatScene({ host, fx }) {
     mind = { state, until: 0, target: clamp(x, habitat.roam.x0, habitat.roam.x1) };
   }
 
+  /** Fog and snow are things a pet dawdles through; rain and hail are things it hurries in. */
+  const pace = () => (slows(weather) ? WET_PACE : 1);
+
+  /** Where the umbrella is, when there is one to stand under. */
+  const shelterSpot = () => habitat?.shelter?.x ?? habitat?.home?.x ?? 100;
+
   function stepMind(dt) {
     if (!pet || napping || mind.state === 'enjoy') return;
 
@@ -209,7 +222,19 @@ export function createHabitatScene({ host, fx }) {
     switch (mind.state) {
       case 'idle':
         if (still) return;
-        if (now() >= mind.until) walkTo(nextWanderTarget(pet.x, habitat.roam, Math.random));
+        if (now() < mind.until) return;
+        // In rain or hail an idle pet mostly makes for the umbrella — mostly, not always,
+        // because a pet that never once potters about in the wet is a pet that looks broken.
+        if (shelters(weather) && Math.random() < SHELTER_ODDS) {
+          walkTo(shelterSpot(), 'dash');
+        } else {
+          walkTo(nextWanderTarget(pet.x, habitat.roam, Math.random));
+        }
+        return;
+      case 'shelter':
+        // Waiting it out. Nothing to step: the pet is standing under the umbrella, and the
+        // fetch check above still outranks this, so a thrown ball gets it out into the rain.
+        if (now() >= mind.until) idleFor(200, 600);
         return;
       case 'eat':
         if (now() >= mind.until) idleFor();
@@ -223,8 +248,14 @@ export function createHabitatScene({ host, fx }) {
         }
       // falls through
       case 'walk':
+      case 'dash':
       case 'chase': {
-        const speed = mind.state === 'walk' ? WALK_SPEED : CHASE_SPEED;
+        const speed =
+          mind.state === 'chase'
+            ? CHASE_SPEED
+            : mind.state === 'dash'
+              ? DASH_SPEED
+              : WALK_SPEED * pace();
         const delta = mind.target - pet.x;
         if (Math.abs(delta) <= ARRIVE) {
           pet.x = mind.target;
@@ -243,6 +274,14 @@ export function createHabitatScene({ host, fx }) {
   }
 
   function arrived() {
+    if (mind.state === 'dash') {
+      mind = {
+        state: 'shelter',
+        until: now() + SHELTER_MIN + Math.random() * (SHELTER_MAX - SHELTER_MIN),
+        target: pet.x,
+      };
+      return;
+    }
     if (mind.state === 'chase' && ball && !ball.held && ball.resting) {
       ball.carried = true;
       ball.resting = false;
@@ -517,15 +556,19 @@ export function createHabitatScene({ host, fx }) {
 
   return {
     /** Put a pet in its habitat. Safe to call over an already-open scene. */
-    open(nextItem, { napping: isNapping = false, label = '', title = '' } = {}) {
+    open(
+      nextItem,
+      { napping: isNapping = false, label = '', title = '', weather: sky = null, soak = 0 } = {}
+    ) {
       this.close();
       item = nextItem;
       napping = isNapping;
       still = reduceMotion();
+      weather = sky;
       habitat = habitatOf(item);
       const uid = `hab${habitat.id.replace(':', '')}`;
 
-      host.innerHTML = habitatSvg(habitat, { uid, label, sleeping: napping });
+      host.innerHTML = habitatSvg(habitat, { uid, label, sleeping: napping, weather: sky, soak });
       root = host.querySelector('svg.habitat');
       actors = root.querySelector('.hab-actors');
       root.classList.toggle('is-night', Boolean(habitat.light.night));
@@ -543,6 +586,13 @@ export function createHabitatScene({ host, fx }) {
       }
       if (item.hatchedAt === null) {
         pet.x = habitat.props.nest.x;
+        place(pet.wrap, pet.x, WALK_Y);
+      }
+      // Reduced motion, the way the rest of this file does it: the thing still happens, it
+      // just doesn't have to be watched happening. A pet that would shelter is already under
+      // the umbrella rather than walking there.
+      if (still && playable && shelters(sky)) {
+        pet.x = shelterSpot();
         place(pet.wrap, pet.x, WALK_Y);
       }
 
@@ -563,6 +613,7 @@ export function createHabitatScene({ host, fx }) {
       actors = null;
       habitat = null;
       item = null;
+      weather = null;
       pet = null;
       ball = null;
       treats = [];
@@ -571,13 +622,36 @@ export function createHabitatScene({ host, fx }) {
       fetchWanted = false;
     },
 
+    /**
+     * The sky moved on. Called from the heartbeat, so it runs twice a second and has to be
+     * cheap in the common case — which it is: the ground deepening is one custom property,
+     * and only an actual change of weather is worth the whole scene.
+     *
+     * Takes the numbers and the label rather than reading a clock or the string table: this
+     * module owns no state, knows no date and does no translating, exactly as it owns no save.
+     * The label matters here — a sky that turns over at midnight has to stop announcing
+     * yesterday's weather along with it.
+     */
+    setWeather(next = null, soak = 0, label = null) {
+      if (!habitat || !root) return;
+      if (next !== weather) {
+        const current = item;
+        const said = label ?? root.getAttribute('aria-label') ?? '';
+        this.open(current, { napping, label: said, title: pet?.title ?? '', weather: next, soak });
+        return;
+      }
+      const wet = root.querySelector('.hab-wet');
+      if (wet) wet.style.setProperty('--soak', String(Number(soak) || 0));
+    },
+
     /** The nap started or ended while the child was standing in here. */
     setNapping(value) {
       const next = Boolean(value);
       if (!habitat || next === napping) return;
       const current = item;
       const label = root?.getAttribute('aria-label') ?? '';
-      this.open(current, { napping: next, label, title: pet?.title ?? '' });
+      const soak = Number(root?.querySelector('.hab-wet')?.style.getPropertyValue('--soak')) || 0;
+      this.open(current, { napping: next, label, title: pet?.title ?? '', weather, soak });
     },
 
     /** After a rename or a language change: the title the pet's art announces itself with. */

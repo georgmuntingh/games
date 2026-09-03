@@ -218,6 +218,7 @@ import {
   FURNITURE_IDS,
   HORIZON,
   orbPoint,
+  PET_FOOT,
   PET_SIZE,
   phaseOfHour,
   PHASE_IDS,
@@ -226,6 +227,9 @@ import {
   SAFE,
   SCENERY_IDS,
   TREAT_IDS,
+  UMBRELLA_HALF_WIDTH,
+  UMBRELLA_PEAK,
+  UMBRELLA_TOP,
   VIEW,
   WALK_Y,
   YARD_PIECES,
@@ -254,6 +258,22 @@ import {
   zooOwns,
 } from '../shop.js';
 import { yardPalette, yardPiecesFor, YARD_SLOTS, yardSvg } from '../yard.js';
+import {
+  dayFraction,
+  DEFAULT_WEATHER,
+  groundSoak,
+  isWeather,
+  NIGHT_VEIL,
+  prevStamp,
+  shelters,
+  slows,
+  veilFor,
+  WEATHER_IDS,
+  WEATHERS,
+  weatherFor,
+  weatherForDay,
+  WEIGHTS,
+} from '../weather.js';
 import {
   canAfford,
   DAY_COINS,
@@ -1410,7 +1430,7 @@ test('neither language is missing a string the other has', () => {
 test('no string is left untranslated — every Norwegian value differs from the English', () => {
   const t = { nb: translator('nb'), en: translator('en') };
   // Bar the handful that are the same word in both, or carry only placeholders.
-  const shared = new Set(['unlock.copy', 'coins.earned', 'shop.statue']);
+  const shared = new Set(['unlock.copy', 'coins.earned', 'shop.statue', 'habitat.ariaWeather']);
   const identical = languageKeys('nb').filter(
     (key) => !shared.has(key) && t.nb(key) === t.en(key)
   );
@@ -2627,6 +2647,280 @@ test('back pay is a pure function of the save, so running it twice cannot pay tw
   const items = { '1:00': { hatchedAt: 1, feeds: 5 } };
   assertEqual(retroGrant(items, 1), retroGrant(items, 1), 'the walk must not mutate the zoo');
   assertEqual(JSON.stringify(items), '{"1:00":{"hatchedAt":1,"feeds":5}}');
+});
+
+/* -------------------------------------------------------------- weather */
+
+describe('weather — one sky over the whole zoo');
+
+// A year and a half of days, walked without a Date: the module never sees one, and neither
+// should the test that holds it to a distribution.
+const walkDays = (from, count) => {
+  const out = [];
+  let stamp = from;
+  for (let i = 0; i < count; i += 1) {
+    out.push(stamp);
+    stamp = nextStamp(stamp);
+  }
+  return out;
+};
+
+// prevStamp's inverse, written out here rather than exported: a test that steps forward with
+// the same arithmetic it is checking backwards would agree with itself about a bug.
+function nextStamp(stamp) {
+  const at = new Date(`${stamp}T12:00:00Z`);
+  return new Date(at.getTime() + 86400000).toISOString().slice(0, 10);
+}
+
+const YEARS = walkDays('2020-01-01', 3000);
+
+test('the same date always gives the same sky, so two devices agree without syncing', () => {
+  for (const stamp of ['2026-09-03', '2019-02-28', '2400-12-31']) {
+    assertEqual(weatherFor(stamp), weatherFor(stamp), `${stamp} is not deterministic`);
+    assertEqual(weatherForDay(stamp), weatherForDay(stamp), `${stamp} is not deterministic`);
+  }
+});
+
+test('every day names a weather this build can actually draw', () => {
+  for (const stamp of YEARS) {
+    assert(isWeather(weatherFor(stamp)), `${stamp} produced a weather that does not exist`);
+  }
+  assert(isWeather(DEFAULT_WEATHER), 'the fallback must itself be real');
+  assert(!isWeather('drizzle') && !isWeather(''), 'and nothing else counts');
+});
+
+test('fair weather is the rule and the rest is the exception', () => {
+  const seen = {};
+  for (const stamp of YEARS) {
+    const kind = weatherForDay(stamp);
+    seen[kind] = (seen[kind] ?? 0) + 1;
+  }
+  for (const [kind, weight] of Object.entries(WEIGHTS)) {
+    const share = ((seen[kind] ?? 0) / YEARS.length) * 100;
+    assertClose(share, weight, 3, `${kind} turns up ${share.toFixed(1)}% of days, not ${weight}%`);
+  }
+  assert(!seen.rainbow, 'a rainbow is earned by yesterday, never rolled for');
+});
+
+test('consecutive days are independent — the sky does not walk through the table', () => {
+  // The reason weather.js scrambles the hash. djb2 on two dates a day apart differs by one,
+  // so without the avalanche this comes out near 100% and the zoo gets a week of snow in a
+  // row. Independent weights predict about 26%.
+  let same = 0;
+  for (let i = 1; i < YEARS.length; i += 1) {
+    if (weatherForDay(YEARS[i]) === weatherForDay(YEARS[i - 1])) same += 1;
+  }
+  const share = (same / (YEARS.length - 1)) * 100;
+  assert(share > 18 && share < 34, `${share.toFixed(1)}% of days repeat yesterday — not independent`);
+});
+
+test('a rainbow only ever follows rain, and stays rare', () => {
+  let bows = 0;
+  for (const stamp of YEARS) {
+    if (weatherFor(stamp) !== 'rainbow') continue;
+    bows += 1;
+    assertEqual(
+      weatherForDay(prevStamp(stamp)),
+      'rain',
+      `${stamp} put a rainbow up after a dry day`
+    );
+  }
+  const share = (bows / YEARS.length) * 100;
+  assert(share > 2 && share < 9, `rainbows on ${share.toFixed(1)}% of days — too ${share > 9 ? 'common' : 'rare'}`);
+});
+
+test('yesterday is arithmetic, not a subtracted day — leap years and year ends included', () => {
+  assertEqual(prevStamp('2026-03-01'), '2026-02-28');
+  assertEqual(prevStamp('2024-03-01'), '2024-02-29', 'a leap year has a 29th');
+  assertEqual(prevStamp('1900-03-01'), '1900-02-28', 'and a century that is not a leap year does not');
+  assertEqual(prevStamp('2000-03-01'), '2000-02-29', 'but a four-hundredth does');
+  assertEqual(prevStamp('2026-01-01'), '2025-12-31');
+  for (const stamp of YEARS.slice(1)) {
+    assertEqual(nextStamp(prevStamp(stamp)), stamp, `${stamp} did not survive a round trip`);
+  }
+});
+
+test('a stamp it cannot read costs a rainbow and nothing else', () => {
+  for (const junk of ['', 'yesterday', '2026-13', null, undefined]) {
+    assertEqual(prevStamp(junk), String(junk), 'rubbish should come back unchanged');
+    assert(isWeather(weatherFor(junk)), 'and still name a real weather');
+  }
+});
+
+describe('weather — the ground remembers, and stores nothing');
+
+test('wet ground builds through the day and then holds', () => {
+  let last = -1;
+  for (let i = 0; i <= 100; i += 1) {
+    const soak = groundSoak('rain', i / 100);
+    assert(soak >= last, `soak went backwards at ${i}%`);
+    assert(soak >= 0 && soak <= 1, `soak of ${soak} is outside 0..1`);
+    last = soak;
+  }
+  assertEqual(groundSoak('rain', 0), 0, 'the day starts dry');
+  assertEqual(groundSoak('rain', 1), 1, 'and ends as wet as it gets');
+});
+
+test('a dry sky never wets the ground, whatever the hour', () => {
+  for (const kind of ['clear', 'cloudy']) {
+    for (let i = 0; i <= 20; i += 1) {
+      assertEqual(groundSoak(kind, i / 20), 0, `${kind} left a puddle`);
+    }
+  }
+  assertEqual(groundSoak('nonsense', 0.5), 0, 'and an unknown weather leaves none either');
+});
+
+test('the day fraction runs midnight to midnight and clamps', () => {
+  assertEqual(dayFraction(0, 0), 0);
+  assertEqual(dayFraction(12, 0), 0.5);
+  assert(dayFraction(23, 59) < 1 && dayFraction(23, 59) > 0.99);
+  assert(dayFraction(-5, -5) >= 0 && dayFraction(99, 99) <= 1, 'rubbish hours must still land in 0..1');
+});
+
+describe('weather — a child can still see their pet');
+
+test('no weather may darken a habitat the way night already has', () => {
+  for (const kind of WEATHER_IDS) {
+    const day = Number(veilFor(kind, false).match(/([\d.]+)\)$/)[1]);
+    const night = Number(veilFor(kind, true).match(/([\d.]+)\)$/)[1]);
+    assertClose(night, day * NIGHT_VEIL, 1e-9, `${kind} does not weaken at night`);
+    assert(day <= 0.25, `${kind} lays on a veil of ${day} — too heavy to see a pet through`);
+  }
+});
+
+test('the falling layers stay thin enough to see through', () => {
+  for (const kind of WEATHER_IDS) {
+    const fall = WEATHERS[kind].fall;
+    if (!fall) continue;
+    assert(fall.count <= 50, `${kind} drops ${fall.count} pieces — a curtain, not weather`);
+    assert(fall.dur[0] > 0 && fall.dur[1] >= fall.dur[0], `${kind} has a nonsense duration`);
+  }
+});
+
+test('a weather habitat still draws its pet, its ball and its larder', () => {
+  const h = habitatFor(4, 15);
+  for (const kind of WEATHER_IDS) {
+    const svg = habitatSvg(h, { uid: 'u', weather: kind, soak: 1 });
+    assert(svg.includes('hab-actors'), `${kind} lost the layer the pet stands in`);
+    assert(svg.includes('hab-back'), `${kind} lost the ball and the larder`);
+    assert(!svg.includes('undefined') && !svg.includes('NaN'), `${kind} drew a hole`);
+  }
+});
+
+describe('weather — drawn over every home there is');
+
+test('a habitat with no weather draws exactly what it drew before weather existed', () => {
+  // The load-bearing one. Every other habitat assertion in this file calls habitatSvg without
+  // a weather, so if this ever stops holding they all start testing something else.
+  for (const h of EVERY_HABITAT.slice(0, 24)) {
+    const bare = habitatSvg(h, { uid: 'u' });
+    assertEqual(bare, habitatSvg(h, { uid: 'u', weather: null }), `${h.id} differs on an explicit null`);
+    assert(!/hab-weather|hab-fall|hab-wet|hab-shelter/.test(bare), `${h.id} drew weather it was not given`);
+  }
+});
+
+test('every weather draws over every biome and every hour without a hole in it', () => {
+  for (const h of EVERY_HABITAT) {
+    for (const kind of WEATHER_IDS) {
+      const svg = habitatSvg(h, { uid: 'u', weather: kind, soak: 0.6 });
+      assert(svg.length > 1500, `${h.id} in ${kind} came out empty`);
+      assert(!svg.includes('undefined'), `${h.id} in ${kind} has an undefined in it`);
+    }
+  }
+});
+
+test('the same day draws the same habitat twice — weather is generated, never stored', () => {
+  const h = habitatFor(4, 15);
+  for (const kind of WEATHER_IDS) {
+    assertEqual(
+      habitatSvg(h, { uid: 'u', weather: kind, soak: 0.4 }),
+      habitatSvg(h, { uid: 'u', weather: kind, soak: 0.4 }),
+      `${kind} is not deterministic`
+    );
+  }
+});
+
+test('a rubbish weather is ignored rather than drawn', () => {
+  const h = habitatFor(4, 15);
+  const bare = habitatSvg(h, { uid: 'u' });
+  for (const junk of ['storm', '', 42, {}]) {
+    assertEqual(habitatSvg(h, { uid: 'u', weather: junk }), bare, `${junk} should have been ignored`);
+  }
+});
+
+describe('weather — somewhere to shelter');
+
+test('only the weathers worth hiding from put an umbrella out', () => {
+  assert(shelters('rain') && shelters('hail'), 'rain and hail are what a pet shelters from');
+  for (const kind of ['clear', 'cloudy', 'fog', 'snow', 'rainbow']) {
+    assert(!shelters(kind), `${kind} should not need an umbrella`);
+  }
+  assert(slows('fog') && slows('snow'), 'and fog and snow are what it dawdles through');
+  assert(!slows('rain') && !slows('clear'), 'while rain is hurried through, not dawdled in');
+
+  const h = habitatFor(4, 15);
+  for (const kind of WEATHER_IDS) {
+    assertEqual(
+      habitatSvg(h, { uid: 'u', weather: kind }).includes('hab-shelter'),
+      shelters(kind),
+      `${kind} drew the wrong thing about umbrellas`
+    );
+  }
+});
+
+test('the umbrella stands clear of everything, in every home, whatever has been bought', () => {
+  const combos = [[], ['stump'], ['house', 'pond'], ['swing', 'feeder'], ['arch', 'windmill']];
+  for (const entry of ALL_ITEMS) {
+    for (const decor of combos) {
+      const h = habitatOf({ h: entry.h, m: entry.m, decor });
+      const x = h.shelter.x;
+      // Reachable: the pet has to be able to walk under it, which is the whole point.
+      assert(x >= ROAM.x0 && x <= ROAM.x1, `${h.id} put the umbrella outside the roam band`);
+      // Whole: the canopy overhangs the roam band but must never be cropped.
+      assert(
+        x - UMBRELLA_HALF_WIDTH >= SAFE.x0 && x + UMBRELLA_HALF_WIDTH <= SAFE.x1,
+        `${h.id} would lose the side of its umbrella on a narrow screen`
+      );
+      // And out of the middle, which belongs to the pet.
+      assert(x < CENTRE_KEEP.x0 || x > CENTRE_KEEP.x1, `${h.id} put the umbrella in the pet's way`);
+      const busy = [
+        h.props.nest.x,
+        h.props.larder.x,
+        h.props.ball.x,
+        h.home.x,
+        ...h.furniture.map((f) => f.x),
+      ];
+      const gap = Math.min(...busy.map((b) => Math.abs(b - x)));
+      assert(gap >= 10, `${h.id} stood its umbrella ${gap} from something with ${decor.length} bought`);
+    }
+  }
+});
+
+test('the umbrella clears the pet, which nothing else in the habitat has to', () => {
+  // Bought furniture stands beside a pet and tops out around 22; this stands over one, so it
+  // is the one piece in the kit squeezed between two hard numbers at once.
+  assert(UMBRELLA_PEAK > PET_FOOT.y, 'a pet would stick out through the top of its own umbrella');
+  assert(WALK_Y - UMBRELLA_TOP >= 50, 'the umbrella is taller than the safe box and gets cropped');
+  assert(UMBRELLA_TOP > UMBRELLA_PEAK, 'the finial sits above the canopy, not under it');
+  for (const id of FURNITURE_IDS) {
+    assert(
+      UMBRELLA_HALF_WIDTH <= FURNITURE_HALF_WIDTH,
+      `an umbrella is wider than ${id}, which the spot finder assumes it is not`
+    );
+  }
+});
+
+test('an umbrella is free — it never touches the shop, the slots or the save', () => {
+  const item = createItem({ h: 4, m: 15, species: 'fizz', reviewClock: 0 });
+  assert(habitatOf(item).shelter, 'every habitat should know where its umbrella would go');
+  assertEqual((item.decor ?? []).length, 0, 'and standing under one must not cost a slot');
+  assertEqual(item.habitat, undefined, 'nor put anything on the pet');
+  assertEqual(sanitizeDecor(['umbrella']).length, 0, 'the umbrella is not a shop id');
+  assertEqual(
+    CATALOG.filter((entry) => entry.id === 'umbrella').length,
+    0,
+    'and it is not for sale'
+  );
 });
 
 describe('the shop — locking, owning and the two-slot cap');
