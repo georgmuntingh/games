@@ -1736,6 +1736,109 @@ body.in-habitat .zoo-bar {
   animation-delay: var(--mote-delay, 0s);
 }
 
+/* ---- weather ------------------------------------------------------------ */
+
+/* Everything that falls is one seeded node with its own delay, column and duration, moved by
+   one rule each. The alternative — stepping 46 raindrops in the scene's rAF loop next to the
+   pet, the ball and four treats — buys nothing a keyframe cannot do, and costs a frame. */
+
+.hab-drop {
+  animation: pz-rain var(--fall-dur, 0.7s) linear infinite;
+  animation-delay: var(--fall-delay, 0s);
+}
+
+.hab-flake {
+  animation: pz-snow var(--fall-dur, 3s) linear infinite;
+  animation-delay: var(--fall-delay, 0s);
+}
+
+.hab-hail {
+  animation: pz-hail var(--fall-dur, 0.4s) cubic-bezier(0.4, 0, 0.9, 0.5) infinite;
+  animation-delay: var(--fall-delay, 0s);
+}
+
+.hab-fog {
+  animation: pz-fog 22s ease-in-out infinite alternate;
+  animation-delay: var(--fog-delay, 0s);
+}
+
+.hab-rainbow {
+  animation: pz-rainbow-in 2.4s ease-out both;
+}
+
+/* Wetness is driven from outside, by the heartbeat, so the ground can go on soaking while a
+   child stands in the habitat without the scene being redrawn around them. */
+.hab-wet {
+  opacity: var(--soak, 0);
+  transition: opacity 1.2s linear;
+}
+
+/* The falling layers sit in front of the pet, which is what makes them read as weather rather
+   than as scenery. Nothing in them may be clicked through to: the ball and the treats are
+   underneath, and a child aiming at a treat must not hit a raindrop. */
+.hab-fall,
+.hab-weather-sky,
+.hab-weather-veil,
+.hab-wet {
+  pointer-events: none;
+}
+
+@keyframes pz-rain {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(136px);
+  }
+}
+
+@keyframes pz-snow {
+  from {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(var(--fall-sway, 4px), 68px);
+  }
+  to {
+    transform: translate(0, 136px);
+  }
+}
+
+@keyframes pz-hail {
+  from {
+    transform: translateY(0);
+  }
+  /* Bounces off the walk line rather than sinking into it — the one thing that tells hail
+     apart from heavy rain at a glance. */
+  88% {
+    transform: translateY(106px);
+  }
+  94% {
+    transform: translateY(100px);
+  }
+  to {
+    transform: translateY(106px);
+  }
+}
+
+@keyframes pz-fog {
+  from {
+    transform: translateX(-6px);
+  }
+  to {
+    transform: translateX(6px);
+  }
+}
+
+@keyframes pz-rainbow-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.62;
+  }
+}
+
 /* Inside the habitat, one CSS px is one viewBox unit — about 3.5 screen px — so these
    numbers are much smaller than they look. */
 .hab-zeds {
@@ -2880,8 +2983,29 @@ body.in-habitat .zoo-bar {
   .hab-mote,
   .hab-z,
   .hab-treat.hab-arrive,
-  .hab-art.hab-return {
+  .hab-art.hab-return,
+  .hab-drop,
+  .hab-flake,
+  .hab-hail,
+  .hab-fog,
+  .hab-rainbow {
     animation: none;
+  }
+
+  /* The weather is still there with the motion off — a still shower, settled snow, a fog bank
+     that holds its place. What stops is the falling, not the weather: a child who has asked
+     for less movement should still be able to see that it is raining.
+
+     Each piece is authored above the sky so it can fall into frame, so with the animation off
+     it has to be put back where it would have been caught mid-shower. */
+  .hab-drop,
+  .hab-flake,
+  .hab-hail {
+    transform: translateY(var(--fall-still, 60px));
+  }
+
+  .hab-wet {
+    transition: none;
   }
 
   /* The habitat still works with the motion off: the ball still travels to where it was
