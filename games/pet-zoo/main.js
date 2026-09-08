@@ -68,6 +68,7 @@ import { recognize } from './ink/recognize.js';
 import * as session from './session.js';
 import {
   appearanceOf,
+  canFeed,
   collarClock,
   eggSvg,
   moodOf,
@@ -120,7 +121,7 @@ import {
   TransferError,
 } from './transfer.js';
 import { BACKDROP, FURNITURE, YARD_PIECES } from './habitat-parts.js';
-import { habitatOf, habitatSvg } from './habitat.js';
+import { habitatOf, habitatSvg, treatSvg } from './habitat.js';
 import { createHabitatScene } from './habitat-scene.js';
 import { yardSvg } from './yard.js';
 import { dayFraction, groundSoak, weatherFor } from './weather.js';
@@ -130,11 +131,13 @@ import {
   confetti,
   flyCoins,
   flyHeart,
+  heartBurst,
   pop,
   reduceMotion,
   setHaptics,
   smokePuff,
   svgEl,
+  wiggle,
 } from './juice.js';
 
 /* ----------------------------------------------------------------- elements */
@@ -187,6 +190,7 @@ const el = {
   wake: $('wake'),
   napToZoo: $('nap-to-zoo'),
   zooGrid: $('zoo-grid'),
+  feedAll: $('feed-all'),
   zooEmpty: $('zoo-empty'),
   habitatScene: $('habitat-scene'),
   habitatHost: $('habitat-host'),
@@ -2476,6 +2480,9 @@ function renderZoo() {
   });
 
   el.zooEmpty.hidden = items.length > 0;
+  // Hidden rather than disabled when there is nobody to feed: a dead control on a zoo of
+  // eggs is a promise the game cannot keep yet.
+  el.feedAll.hidden = !items.some(([, item]) => canFeed(item, { napping }));
   el.zooGrid.innerHTML = items
     .map(([id, item]) => {
       const isEgg = item.hatchedAt === null;
@@ -2496,7 +2503,13 @@ function renderZoo() {
           : name
       );
       const rank = !isEgg && formFor(item.feeds ?? 0) >= 2 ? escape(formLabel(item)) : '';
+      // The pen is a button, so the snack button cannot live inside it — nested interactive
+      // content. It is a sibling in a cell instead, which also keeps the pen to one tab stop
+      // and one accessible name, and leaves `closest('.pen')` in the handlers below meaning
+      // exactly what it meant before: open this home, or rename this pet.
+      const feedable = canFeed(item, { napping });
       return `
+        <div class="pen-cell${isEgg ? ' is-egg-cell' : ''}">
         <button class="pen${isEgg ? ' is-egg' : ''}${resting ? ' is-resting' : ''}" type="button"
           data-id="${id}"${resting ? ` title="${escape(t('zoo.resting', { name }))}"` : ''}>
           <span class="pen-flag">${flag}</span>
@@ -2504,7 +2517,17 @@ function renderZoo() {
           <span class="pen-name">${label}</span>
           ${rank ? `<span class="pen-rank">${rank}</span>` : ''}
           <span class="pen-time">${penCollar(item, digits)}</span>
-        </button>`;
+        </button>
+        ${
+          feedable
+            ? `<button class="pen-feed" type="button" data-id="${id}"
+                 aria-label="${escape(t('zoo.feed', { name }))}">
+                 <svg viewBox="-7 -7 14 14" aria-hidden="true" focusable="false"
+                      >${treatSvg(habitatOf(item).props.larder.treat, habitatOf(item).palette)}</svg>
+               </button>`
+            : ''
+        }
+        </div>`;
     })
     .join('');
 
@@ -2542,6 +2565,108 @@ el.zooGrid.addEventListener('click', (event) => {
   buzz(10);
   openHabitat(pen.dataset.id);
 });
+
+/* ------------------------------------------------------------- feeding */
+
+// A snack in the zoo grid. Deliberately not the habitat's whole meal replayed in a 112px
+// square: a glyph, two chews and some hearts, over in about a second.
+//
+// Cosmetic all the way down. Nothing here reads the save and nothing writes it — in
+// particular the 🍎 a pet may be wearing means "this one is due to be asked", and it goes
+// on meaning that after the pet has been fed. `item.feeds` is a form counter and belongs to
+// the scheduler; a snack is not a lesson and must never touch it.
+const FEED_STAGGER = 150; // between one pen and the next, so a wave reads as a wave
+
+async function feedPen(cell) {
+  if (!cell || cell.dataset.busy) return; // a child hammering the button gets one meal
+  const pet = cell.querySelector('.pet');
+  if (!pet) return;
+  cell.dataset.busy = '1';
+  try {
+    if (session.isNapping(state.session, now())) {
+      // The zoo is asleep. Touching anything earns a stretch, not a snack — the same answer
+      // the habitat gives, so the two screens do not disagree about bedtime.
+      audio.play('stretch');
+      buzz(8);
+      if (!reduceMotion()) wiggle(pet.querySelector('.pet-inner'));
+      await wait(400);
+      return;
+    }
+    const still = reduceMotion();
+    if (!still) {
+      const glyph = cell.querySelector('.pen-feed svg')?.innerHTML ?? '';
+      const snack = document.createElement('span');
+      snack.className = 'pen-snack';
+      snack.innerHTML = `<svg viewBox="-7 -7 14 14" aria-hidden="true">${glyph}</svg>`;
+      cell.append(snack);
+      pet.classList.add('is-chewing');
+    }
+    audio.play('munch', { pitch: 0.98 });
+    buzz(8);
+    await wait(still ? 0 : 300);
+    // renderZoo rebuilds the grid wholesale; if it ran, this cell is no longer on the page.
+    if (!cell.isConnected) return;
+    audio.play('munch', { pitch: 1.12 });
+    await wait(still ? 0 : 340);
+    if (!cell.isConnected) return;
+    cell.querySelector('.pen-snack')?.remove();
+    pet.classList.remove('is-chewing');
+    audio.play('gulp');
+    buzz([10, 40, 10]);
+    pop(pet.querySelector('.pet-inner'));
+    heartBurst(pet, el.fx, { count: 2 });
+    await wait(still ? 0 : 260);
+  } finally {
+    cell.querySelector('.pet')?.classList.remove('is-chewing');
+    cell.querySelector('.pen-snack')?.remove();
+    delete cell.dataset.busy;
+  }
+}
+
+// Bumped by every new wave, so a wave that has been replaced notices and stops rather than
+// interleaving itself with the one that replaced it.
+let wave = 0;
+let feedingAll = false;
+
+/**
+ * Feed the whole zoo, one pen after another. `skippableBeats` is the right shape for this
+ * and the wrong gesture: its skip is a pointerdown on the host, and every pointerdown on
+ * the grid already means "open this home". So: plain waits, and three guards.
+ */
+async function feedEveryone() {
+  if (feedingAll) return;
+  const token = ++wave;
+  feedingAll = true;
+  el.feedAll.disabled = true;
+  try {
+    // The pens actually on screen, taken once up front: a zoo of a hundred pets should not
+    // spend a minute feeding animals nobody has scrolled to.
+    const cells = [...el.zooGrid.querySelectorAll('.pen-cell:not(.is-egg-cell)')].filter((cell) => {
+      const box = cell.getBoundingClientRect();
+      return box.bottom > 0 && box.top < window.innerHeight;
+    });
+    for (const cell of cells) {
+      if (token !== wave || scene !== 'zoo') return;
+      feedPen(cell); // not awaited: the wave is meant to overlap
+      await wait(FEED_STAGGER);
+    }
+    await wait(900);
+  } finally {
+    if (token === wave) {
+      feedingAll = false;
+      el.feedAll.disabled = false;
+    }
+  }
+}
+
+el.zooGrid.addEventListener('click', (event) => {
+  const feed = event.target.closest('.pen-feed');
+  if (!feed) return;
+  event.stopPropagation(); // a snack is not a request to open the home
+  feedPen(feed.closest('.pen-cell'));
+});
+
+el.feedAll.addEventListener('click', feedEveryone);
 
 function renamePet(id) {
   const item = state.items[id];

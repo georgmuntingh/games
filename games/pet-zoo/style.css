@@ -1498,6 +1498,82 @@ main {
   padding: 2rem 1rem;
 }
 
+/* A pen and its snack button. The button cannot sit inside the pen — a pen is a button —
+   so the cell is what holds the two together and gives the snack somewhere to be absolutely
+   positioned against. */
+.pen-cell {
+  position: relative;
+  display: grid;
+}
+
+.pen-feed {
+  position: absolute;
+  /* Bottom left, where .pen-flag is top right: the snack button and the 🍎 mean entirely
+     different things, and they must never be reached for by mistake. */
+  bottom: 0.35rem;
+  left: 0.35rem;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--pz-card);
+  box-shadow: var(--pz-shadow);
+  cursor: pointer;
+}
+
+.pen-feed:active {
+  transform: scale(0.9);
+}
+
+.pen-feed svg {
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+}
+
+/* The mouthful itself, held up beside the pet's mouth rather than over its middle: a treat
+   drawn on a pet's chest reads as a marking it was born with. */
+.pen-snack {
+  position: absolute;
+  left: 68%;
+  top: 34%;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(40, 30, 60, 0.3));
+  animation: pz-snack-in 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.pen-snack svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+@keyframes pz-snack-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -170%) scale(0.3);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -60%) scale(1.15);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.zoo-tools {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 0.7rem;
+}
+
 .pen {
   position: relative;
   padding: 0.6rem 0.4rem 0.5rem;
@@ -1509,6 +1585,10 @@ main {
   box-shadow: var(--pz-shadow);
   text-align: center;
   overflow: hidden;
+}
+
+.pen {
+  width: 100%;
 }
 
 .pen .pet {

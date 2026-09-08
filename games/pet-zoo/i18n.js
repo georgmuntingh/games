@@ -270,6 +270,9 @@ const STRINGS = {
     'zoo.eggTitle': 'A chilly egg',
     'zoo.eggTitleCracks': 'A cracking egg, {n} of {of} cracks',
     'zoo.rename': 'What is this pet called?',
+    'zoo.feed': 'Give {name} a snack',
+    'zoo.feedAll': 'Feed everyone',
+    'zoo.feedAllAria': 'Give every pet a snack',
 
     'habitat.back': 'Back to the zoo',
     'habitat.rename': 'Give this pet a new name',
@@ -284,7 +287,7 @@ const STRINGS = {
     'weather.snow': 'snowing',
     'weather.hail': 'hailing',
     'weather.rainbow': 'a rainbow after the rain',
-    'habitat.hint': 'Throw the ball, share a snack, or stroke {name}.',
+    'habitat.hint': 'Throw the ball, put a snack down anywhere, or stroke {name}.',
     'habitat.eggHint': 'This home is waiting. Feed the clock, and the egg will hatch.',
     'habitat.sleeping': '{name} is fast asleep. Sshh.',
 
@@ -301,6 +304,8 @@ const STRINGS = {
     'howto.4': 'Get one right four times and its egg cracks open into a pet of your own.',
     'howto.5':
       'After a few minutes the pets get sleepy and the game stops. You can still wander the zoo while they nap.',
+    'howto.7':
+      'Put a snack down anywhere in a pet\u2019s home and it will come and eat it. In the zoo, the little button on a pet feeds it, and <b>Feed everyone</b> feeds them all. Snacks are just for fun.',
     'howto.6': 'Grown-ups: press and hold the title for progress.',
 
     'grownups.practise': 'What to practise',
@@ -744,6 +749,9 @@ const STRINGS = {
     'zoo.eggTitle': 'Et kaldt egg',
     'zoo.eggTitleCracks': 'Et egg som slår sprekker, {n} av {of}',
     'zoo.rename': 'Hva heter dette dyret?',
+    'zoo.feed': 'Gi {name} en godbit',
+    'zoo.feedAll': 'Gi alle mat',
+    'zoo.feedAllAria': 'Gi alle dyra en godbit',
 
     'habitat.back': 'Tilbake til dyrehagen',
     'habitat.rename': 'Gi dyret et nytt navn',
@@ -757,7 +765,7 @@ const STRINGS = {
     'weather.snow': 'snø',
     'weather.hail': 'hagl',
     'weather.rainbow': 'regnbue etter regnet',
-    'habitat.hint': 'Kast ballen, gi en godbit, eller klapp {name}.',
+    'habitat.hint': 'Kast ballen, legg en godbit hvor som helst, eller klapp {name}.',
     'habitat.eggHint': 'Dette hjemmet venter. Still klokka riktig, så klekkes egget.',
     'habitat.sleeping': '{name} sover godt. Hysj.',
 
@@ -774,6 +782,8 @@ const STRINGS = {
     'howto.4': 'Klarer du samme klokkeslett fire ganger, sprekker egget til et dyr som blir ditt.',
     'howto.5':
       'Etter noen minutter blir dyrene trøtte, og spillet stopper. Du kan fortsatt gå rundt i dyrehagen mens de sover.',
+    'howto.7':
+      'Legg en godbit hvor som helst hjemme hos et dyr, så kommer det og spiser den. I dyrehagen mater den lille knappen ett dyr, og <b>Gi alle mat</b> mater alle sammen. Godbiter er bare for moro.',
     'howto.6': 'Voksne: hold inne tittelen for å se framgang.',
 
     'grownups.practise': 'Hva som øves på',
