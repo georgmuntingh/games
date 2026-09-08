@@ -628,4 +628,28 @@ export function moodOf(item, now, { napping = false } = {}) {
   return item.dueAt <= now ? 'hungry' : 'happy';
 }
 
+/**
+ * Every mood the art can draw. A superset of what `moodOf` returns: the schedule only ever
+ * asks for five, and `chew` is put on by hand, by whichever scene is watching a pet eat, for
+ * as long as the mouthful lasts.
+ *
+ * Exported so a test can hold the drawings and the schedule to each other, rather than
+ * keeping a list of moods beside them that quietly goes stale.
+ */
+export const MOODS = Object.keys(MOUTHS);
+
+/**
+ * Whether a pet can be offered food at all. Cosmetic through and through — feeding changes
+ * nothing about an item, so this asks about the pet's situation and never about its
+ * schedule. An egg has no mouth yet, and a sleeping zoo is not a buffet; a pet resting
+ * between sessions is merely not being asked questions, which is no reason to go hungry.
+ *
+ * There is deliberately no "already full" here. A pet that refused a second treat would
+ * read to a child as a pet that did not want theirs.
+ */
+export function canFeed(item, { napping = false } = {}) {
+  if (!item || napping) return false;
+  return item.hatchedAt !== null;
+}
+
 export { INK };

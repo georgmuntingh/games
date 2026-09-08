@@ -1,6 +1,13 @@
 // The living half of a habitat. habitat.js decides what a home looks like; this drives it:
 // retained SVG nodes, one requestAnimationFrame loop, and the four things a child can do
-// in there — watch the pet potter about, throw its ball, offer it a treat, and stroke it.
+// in there — watch the pet potter about, throw its ball, feed it, and stroke it.
+//
+// Feeding is the longest of the four, and the only one with a sequence to it: the pet spots
+// the food, walks over, dips its head, takes it apart in three bites and swallows. That is
+// split across two steppers on purpose. `stepMind` owns where the pet is; `stepMeal` owns
+// what its mouth is doing. They meet in exactly two places — the mind treats a mouthful as
+// standing still, and `arrived` hands a finished walk over to the meal — so the chase, the
+// carry and the shelter never had to learn that eating exists.
 //
 // Owns the DOM and the clock. Owns no game state: nothing in here feeds a pet, grades an
 // answer or unlocks anything, and it never writes to the save. Free play, on purpose — the
@@ -14,6 +21,8 @@ import { appearanceOf, eggSvg, petSvg, portraitOf } from './pets.js';
 import {
   ballSvg,
   BALL_R,
+  BITES,
+  biteScale,
   clamp,
   habitatOf,
   habitatSvg,
@@ -21,6 +30,7 @@ import {
   PET_FOOT,
   PET_SIZE,
   stepBall,
+  treatColors,
   treatSvg,
   WALK_Y,
 } from './habitat.js';
@@ -41,6 +51,8 @@ const SHELTER_MAX = 9000;
 const SHELTER_ODDS = 0.65; // how often an idle pet in the rain heads for cover rather than off
 const ARRIVE = 1.6; // close enough to count as there
 const GRAB_RADIUS = 13; // how near the pet must be to pick the ball up
+const FOOD_SPEED = 40; // going to dinner: quicker than an amble, short of a game of fetch
+const FOOD_REACH = 10; // how far short of the food it stops, so dinner is under its nose
 const MOUTH = { x: 9, y: -25 }; // where a carried ball rides, relative to the pet's feet
 const HEAD = { x: 0, y: -30 }; // where a treat has to land to be eaten
 const EAT_RADIUS = 24;
@@ -48,7 +60,12 @@ const THROW_SCALE = 1.05; // pointer speed to ball speed
 const THROW_MAX = 340; // however hard a small arm swings, the ball stays catchable
 const IDLE_MIN = 900;
 const IDLE_MAX = 2600;
-const EAT_MS = 1500;
+const EAT_MS = 1500; // the whole of a reduced-motion meal, which has no sequence to watch
+const NOTICE_MS = 300; // spotting the food and turning to it
+const DIP_MS = 300; // head down, and the food comes up to meet it
+const BITE_MS = 400; // one mouthful; BITES of them make a meal
+const GULP_MS = 300;
+const SAVOUR_MS = 800; // the wiggle and the hearts afterwards
 const HAPPY_MS = 2600;
 const REGROW_MS = 2400;
 const STROKE_STEP = 26; // pointer travel, in screen px, between hearts
@@ -58,6 +75,9 @@ const PURR_MS = 520;
 
 const now = () => performance.now();
 const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
+
+/** The postures where the mouth is busy and the feet are not. `stepMeal` owns their clock. */
+const MEAL_STATES = new Set(['notice', 'dip', 'chew', 'gulp', 'savour', 'eat']);
 
 /** Parse an SVG-string fragment into a live node, so pets.js markup can be retained. */
 function nodeFrom(markup) {
@@ -83,7 +103,8 @@ export function createHabitatScene({ host, fx }) {
 
   let pet = null; // { wrap, art, x, facing, mood, moodUntil }
   let ball = null; // { wrap, x, y, vx, vy, resting, held, carried }
-  let treats = []; // { wrap, x, y, spot, held, falling, vy }
+  let treats = []; // { wrap, x, y, spot, kind, held, falling, dropped, vy }
+  let meal = null; // { treat, taken, nextAt, liftFrom } — the mouthful in progress, if any
   let mind = { state: 'idle', until: 0, target: 0 };
   let stroke = null; // { pointerId, travelled, lastX, lastY, purredAt }
   let drag = null; // { pointerId, kind, node, samples: [] }
@@ -174,14 +195,21 @@ export function createHabitatScene({ host, fx }) {
   function buildTreat(spotIndex) {
     const spot = habitat.props.larder.spots[spotIndex];
     if (!spot) return;
-    // The art lives in an inner group because the arrive/fade animations touch `transform`,
-    // and a CSS transform on the wrapper overrides the attribute that positions it.
+    // Each spot grows its own fruit, so a larder is three things rather than one thing three
+    // times. `dropped` is the flag the whole of feeding hangs on: it is false here and turns
+    // true only where a falling treat lands, so a pet never walks over and eats its larder.
+    const kind = spot.treat ?? habitat.props.larder.treat;
+    // The art lives in an inner group because the arrive animation and the bites touch
+    // `transform`, and a transform on the wrapper overrides the attribute that positions it.
     const wrap = svgEl('g', { class: 'hab-treat hab-grab' });
     wrap.dataset.spot = String(spotIndex);
-    wrap.innerHTML = `<g class="hab-art hab-arrive">${treatSvg(habitat.props.larder.treat, habitat.palette)}</g>`;
+    wrap.innerHTML = `<g class="hab-art hab-arrive">${treatSvg(kind, habitat.palette)}</g>`;
     place(wrap, spot.x, spot.y);
     actors.append(wrap);
-    treats.push({ wrap, x: spot.x, y: spot.y, spot: spotIndex, held: false, falling: false, vy: 0 });
+    treats.push({
+      wrap, x: spot.x, y: spot.y, spot: spotIndex, kind,
+      held: false, falling: false, dropped: false, vy: 0,
+    });
   }
 
   /* -------------------------------------------------------------------- mind */
@@ -200,12 +228,28 @@ export function createHabitatScene({ host, fx }) {
   /** Where the umbrella is, when there is one to stand under. */
   const shelterSpot = () => habitat?.shelter?.x ?? habitat?.home?.x ?? 100;
 
+  // What outranks what, in order:
+  //   1. a mouthful already in progress. Nothing interrupts it but the child taking the food
+  //      back, the nap starting, or the scene closing.
+  //   2. food lying on the ground. It outranks the ball, and it outranks the umbrella — a pet
+  //      that stayed dry while its dinner sat in the rain would read as broken, and coming
+  //      out for it is the same rule a thrown ball already gets.
+  //   3. a ball that has come to rest since it was last thrown.
+  //   4. sheltering, and the amble.
   function stepMind(dt) {
     if (!pet || napping || mind.state === 'enjoy') return;
 
-    if (pet.moodUntil && now() > pet.moodUntil && mind.state !== 'eat') {
+    if (pet.moodUntil && now() > pet.moodUntil && !MEAL_STATES.has(mind.state)) {
       pet.moodUntil = 0;
       setMood(restingMood());
+    }
+
+    if (!meal) {
+      const loose = looseTreat();
+      if (loose) {
+        beginMeal(loose);
+        return;
+      }
     }
 
     // A ball that has come to rest since it was last thrown is a job to be done, and it
@@ -239,6 +283,14 @@ export function createHabitatScene({ host, fx }) {
       case 'eat':
         if (now() >= mind.until) idleFor();
         return;
+      case 'notice':
+      case 'dip':
+      case 'chew':
+      case 'gulp':
+      case 'savour':
+        // Standing still while a mouthful happens. `stepMeal` owns the clock for these; the
+        // mind only has to know the feet are not going anywhere.
+        return;
       case 'carry':
         // The child is allowed to take the ball back out of the pet's mouth. If they have,
         // there is nothing left to deliver.
@@ -249,13 +301,16 @@ export function createHabitatScene({ host, fx }) {
       // falls through
       case 'walk':
       case 'dash':
-      case 'chase': {
+      case 'chase':
+      case 'fetchfood': {
         const speed =
           mind.state === 'chase'
             ? CHASE_SPEED
             : mind.state === 'dash'
               ? DASH_SPEED
-              : WALK_SPEED * pace();
+              : mind.state === 'fetchfood'
+                ? FOOD_SPEED * pace()
+                : WALK_SPEED * pace();
         const delta = mind.target - pet.x;
         if (Math.abs(delta) <= ARRIVE) {
           pet.x = mind.target;
@@ -274,6 +329,12 @@ export function createHabitatScene({ host, fx }) {
   }
 
   function arrived() {
+    // First, so the chase below can never shadow it: a pet that walked to its dinner eats.
+    if (mind.state === 'fetchfood') {
+      if (meal) beginDip();
+      else idleFor();
+      return;
+    }
     if (mind.state === 'dash') {
       mind = {
         state: 'shelter',
@@ -359,7 +420,9 @@ export function createHabitatScene({ host, fx }) {
         if (treat.y >= WALK_Y - 2) {
           treat.y = WALK_Y - 2;
           treat.falling = false;
-          fadeTreat(treat);
+          // Down, and staying down. Food that faded away uneaten was the one thing in this
+          // scene that punished a child for missing; now the pet comes and gets it.
+          treat.dropped = true;
         }
       }
     }
@@ -379,23 +442,186 @@ export function createHabitatScene({ host, fx }) {
     regrowAt.set(treat.spot, now() + REGROW_MS);
   }
 
-  function fadeTreat(treat) {
-    treat.wrap.querySelector('.hab-art')?.classList.add('hab-fade');
-    setTimeout(() => {
-      if (treats.includes(treat)) removeTreat(treat);
-    }, 420);
+  /* ------------------------------------------------------------------- meals */
+
+  /** The nearest thing on the ground that is food and is nobody's yet. */
+  function looseTreat() {
+    if (!pet) return null;
+    return (
+      treats
+        .filter((entry) => entry.dropped && !entry.held && !entry.falling)
+        .sort((a, b) => Math.abs(a.x - pet.x) - Math.abs(b.x - pet.x))[0] ?? null
+    );
   }
 
-  function eatTreat(treat) {
-    const c = habitat.palette;
-    confetti(treat.wrap, fx, { power: 0.45, colors: [c.accent, c.bloom, c.leaf] });
+  // Where a carried ball rides, and where a mouthful sits. The same two lines the ball
+  // physics already used, named now that two things need them.
+  const mouthX = () => pet.x + pet.facing * MOUTH.x;
+  const mouthY = () => WALK_Y + MOUTH.y;
+
+  /** Where to stand to eat something: just short of it, so the food is under the nose. */
+  function standSpot(treat) {
+    const dir = Math.sign(treat.x - pet.x) || pet.facing || 1;
+    return clamp(treat.x - dir * FOOD_REACH, habitat.roam.x0, habitat.roam.x1);
+  }
+
+  /**
+   * The reduced-motion meal: no walk, no chew, no crumbs. The treat is eaten where the pet
+   * is standing — the same answer `returnBall` gives a thrown ball, and for the same reason.
+   */
+  function swallowWhole(treat) {
     audio.play('munch');
+    audio.play('gulp');
     buzz([10, 40, 10]);
     removeTreat(treat);
+    meal = null;
     setMood('happy');
     pet.moodUntil = now() + HAPPY_MS;
     mind = { state: 'eat', until: now() + EAT_MS, target: pet.x };
     pop(pet.art.querySelector('.pet-inner'));
+  }
+
+  /**
+   * Start on a treat. `from` is 'hand' when the child put it straight on the pet's head,
+   * which skips the noticing and the walk — they have already done both.
+   */
+  function beginMeal(treat, { from = 'ground' } = {}) {
+    if (!pet || napping || !treat || !treats.includes(treat)) return;
+    treat.held = false;
+    treat.falling = false;
+    treat.dropped = false; // claimed: nothing else may pick this one up
+    meal = { treat, taken: 0, nextAt: 0, liftFrom: { x: treat.x, y: treat.y } };
+    if (still) {
+      swallowWhole(treat);
+      return;
+    }
+    // A pet cannot carry a ball and a berry at once, and dinner wins. The fetch is not
+    // forgotten, only put down: it is still wanted once the meal is over.
+    if (ball?.carried) dropBall();
+    if (mind.state === 'chase') fetchWanted = true;
+    pet.facing = Math.sign(treat.x - pet.x) || pet.facing;
+    if (from === 'hand') {
+      beginDip();
+      return;
+    }
+    setMood('hungry');
+    audio.play('grab');
+    pop(pet.art.querySelector('.pet-inner'), { power: 0.6 });
+    mind = { state: 'notice', until: now() + NOTICE_MS, target: pet.x };
+  }
+
+  function beginDip() {
+    meal.liftFrom = { x: meal.treat.x, y: meal.treat.y };
+    mind = { state: 'dip', until: now() + DIP_MS, target: pet.x };
+  }
+
+  function beginChew() {
+    setMood('chew');
+    // On the wrap, not the art: `setMood` and `setTitle` both replace the art node, and a
+    // class on a node that is about to be thrown away is a chew that stops halfway.
+    pet.wrap.classList.add('is-chewing');
+    meal.nextAt = now();
+    mind = { state: 'chew', until: 0, target: pet.x };
+  }
+
+  function bite() {
+    meal.taken += 1;
+    const art = meal.treat.wrap.querySelector('.hab-art');
+    const from = biteScale(meal.taken - 1);
+    const to = biteScale(meal.taken);
+    // On `.hab-art`, never on the wrapper: `draw` rewrites the wrapper's transform every
+    // frame, and anything animating there would be overwritten before it was seen.
+    art?.animate(
+      [
+        { transform: `scale(${from})` },
+        { transform: `scale(${(to * 1.08).toFixed(3)})`, offset: 0.4 },
+        { transform: `scale(${to})` },
+      ],
+      { duration: 200, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'forwards' }
+    );
+    confetti(meal.treat.wrap, fx, {
+      power: 0.22,
+      round: 0.7,
+      colors: treatColors(meal.treat.kind, habitat.palette),
+    });
+    audio.play('munch', { pitch: 0.92 + meal.taken * 0.07 });
+    buzz(8);
+    if (meal.taken >= BITES) beginGulp();
+    else meal.nextAt = now() + BITE_MS;
+  }
+
+  function beginGulp() {
+    pet.wrap.classList.remove('is-chewing');
+    removeTreat(meal.treat);
+    audio.play('gulp');
+    buzz([10, 40, 10]);
+    setMood('happy');
+    pet.moodUntil = now() + HAPPY_MS + SAVOUR_MS;
+    mind = { state: 'gulp', until: now() + GULP_MS, target: pet.x };
+  }
+
+  function beginSavour() {
+    pop(pet.art.querySelector('.pet-inner'));
+    wiggle(pet.art.querySelector('.pet-inner'));
+    heartBurst(pet.art, fx, { count: 3 });
+    audio.play('purr');
+    mind = { state: 'savour', until: now() + SAVOUR_MS, target: pet.x };
+  }
+
+  function endMeal() {
+    pet?.wrap.classList.remove('is-chewing');
+    meal = null;
+  }
+
+  /**
+   * The mouth's clock. Runs between the ball and the treats in `tick`, so wherever it puts
+   * the mouthful is where `draw` puts it on screen the same frame.
+   */
+  function stepMeal() {
+    if (!meal || !pet) return;
+    const treat = meal.treat;
+    // The child may take the food back out of the pet's mouth, exactly as they may take the
+    // ball. If they have, there is nothing left to eat.
+    if (treat.held || !treats.includes(treat)) {
+      endMeal();
+      idleFor(200, 600);
+      return;
+    }
+    const at = now();
+    switch (mind.state) {
+      case 'notice':
+        if (at >= mind.until) walkTo(standSpot(treat), 'fetchfood');
+        return;
+      case 'fetchfood':
+        // On its way. `stepMind` is walking the feet; the mouth has nothing to do yet.
+        return;
+      case 'dip': {
+        // The last stretch is the food coming up rather than the pet going down — which is
+        // also how a treat dropped in a far corner, outside the roam band, still gets eaten.
+        const k = 1 - Math.max(0, Math.min(1, (mind.until - at) / DIP_MS));
+        treat.x = meal.liftFrom.x + (mouthX() - meal.liftFrom.x) * k;
+        treat.y = meal.liftFrom.y + (mouthY() - meal.liftFrom.y) * k;
+        if (at >= mind.until) beginChew();
+        return;
+      }
+      case 'chew':
+        treat.x = mouthX();
+        treat.y = mouthY();
+        if (at >= meal.nextAt) bite();
+        return;
+      case 'gulp':
+        if (at >= mind.until) beginSavour();
+        return;
+      case 'savour':
+        if (at >= mind.until) {
+          endMeal();
+          idleFor();
+        }
+        return;
+      default:
+        // Something else took the pet over — the nap, or the scene closing behind us.
+        endMeal();
+    }
   }
 
   /* --------------------------------------------------------------- pointers */
@@ -435,8 +661,14 @@ export function createHabitatScene({ host, fx }) {
 
     const treat = treats.find((entry) => entry.wrap === hit);
     if (treat) {
+      // Taken back out of the pet's mouth: the meal ends at the grab, not a frame later.
+      if (meal?.treat === treat) {
+        endMeal();
+        idleFor(200, 600);
+      }
       treat.held = true;
       treat.falling = false;
+      treat.dropped = false;
       treat.wrap.classList.add('is-held');
       drag = { pointerId: event.pointerId, kind: 'treat', treat, samples: [] };
       audio.play('grab');
@@ -521,8 +753,14 @@ export function createHabitatScene({ host, fx }) {
       treat.held = false;
       treat.wrap.classList.remove('is-held');
       if (dist(treat.x, treat.y, pet.x + HEAD.x, WALK_Y + HEAD.y) <= EAT_RADIUS) {
-        eatTreat(treat);
+        // Put straight on its head: it has already been noticed and walked to.
+        beginMeal(treat, { from: 'hand' });
+      } else if (still) {
+        // Reduced motion: it is already down. The pet eats it next frame, where it stands.
+        treat.y = WALK_Y - 2;
+        treat.dropped = true;
       } else {
+        // Wherever it lands, it stays there, and the pet will come and get it.
         treat.falling = true;
         treat.vy = Math.max(0, vy * 0.3);
       }
@@ -547,6 +785,7 @@ export function createHabitatScene({ host, fx }) {
     last = frameTime;
     stepMind(dt);
     stepBallPhysics(dt);
+    stepMeal();
     stepTreats(dt);
     draw();
     raf = requestAnimationFrame(tick);
@@ -617,6 +856,10 @@ export function createHabitatScene({ host, fx }) {
       pet = null;
       ball = null;
       treats = [];
+      // A meal has to be dropped here or it survives into the next pet's habitat. Both the
+      // nap and a change of weather re-`open`, and `open` closes first — so this one line is
+      // also what stops a mouthful that bedtime or a downpour interrupted.
+      meal = null;
       drag = null;
       stroke = null;
       fetchWanted = false;

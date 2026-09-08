@@ -1723,10 +1723,6 @@ body.in-habitat .zoo-bar {
   animation: pz-treat-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-.hab-art.hab-fade {
-  animation: pz-fade-out 0.42s ease-out both;
-}
-
 .hab-art.hab-return {
   animation: pz-fade-in 0.5s ease-out both;
 }
@@ -1882,16 +1878,6 @@ body.in-habitat .zoo-bar {
   to {
     opacity: 1;
     transform: scale(1);
-  }
-}
-
-@keyframes pz-fade-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-    transform: translateY(4px);
   }
 }
 
@@ -2723,6 +2709,25 @@ body.in-habitat .zoo-bar {
   animation-delay: var(--blink-delay, 0s);
 }
 
+/* A mouth working. One period is BITE_MS's neighbour in habitat-scene.js — change the look
+   of one and look at the other. The class goes on whatever survives a re-render: the
+   habitat's .hab-pet wrap, or a .pet in the zoo grid, which has no wrap to put it on. */
+.is-chewing .pet-face {
+  transform-box: fill-box;
+  transform-origin: 50% 40%;
+  animation: pz-chew 0.34s ease-in-out infinite;
+}
+
+@keyframes pz-chew {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(0.6%) scaleY(0.92);
+  }
+}
+
 /* ------------------------------------------------------------ the egg breaking */
 
 /* Cracks are drawn, not filled — a dark hairline that reads on every species palette. */
@@ -2982,6 +2987,8 @@ body.in-habitat .zoo-bar {
   .pet.arriving .pet-inner,
   .hab-mote,
   .hab-z,
+  .is-chewing .pet-face,
+  .pen-snack,
   .hab-treat.hab-arrive,
   .hab-art.hab-return,
   .hab-drop,
@@ -3008,9 +3015,4 @@ body.in-habitat .zoo-bar {
     transition: none;
   }
 
-  /* The habitat still works with the motion off: the ball still travels to where it was
-     thrown and still comes back, the pet still reacts. It simply stops drifting. */
-  .hab-art.hab-fade {
-    animation-duration: 0.001ms;
-  }
 }
