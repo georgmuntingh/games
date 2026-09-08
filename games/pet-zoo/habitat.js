@@ -39,6 +39,7 @@ import {
   SAFE,
   SCENERY,
   skyMarkup,
+  TREAT_COLORS,
   TREATS,
   UMBRELLA,
   UMBRELLA_HALF_WIDTH,
@@ -123,13 +124,18 @@ const BASE_COLORS = {
 /**
  * Eight open landscapes. Not one of them has a fence, a wall or a gate in it: a habitat
  * is somewhere a pet lives, not somewhere a pet is kept.
+ *
+ * `treats` is the larder's menu, in order. Three of them, because a larder holds three and
+ * a child who has watched a pet eat the same berry forty times has stopped watching. The
+ * first is the biome's own — what `larder.treat` still reports, so nothing that only knows
+ * about one food has to learn about the rest.
  */
 export const BIOMES = {
   meadow: {
     far: 'hills',
     detail: 'grass',
     larder: 'bush',
-    treat: 'berry',
+    treats: ['berry', 'plum', 'clover'],
     scenery: ['tree', 'bush', 'flowers', 'rock'],
     colors: {},
   },
@@ -137,7 +143,7 @@ export const BIOMES = {
     far: 'treeline',
     detail: 'fern',
     larder: 'tree',
-    treat: 'apple',
+    treats: ['apple', 'acorn', 'berry'],
     scenery: ['pine', 'tree', 'mushroom', 'rock'],
     colors: {
       far: '#5f9d55', farDark: '#3f7a41', ground: ['#8cc474', '#5f9c55'], groundNear: '#7ab266',
@@ -148,7 +154,7 @@ export const BIOMES = {
     far: 'hills',
     detail: 'lily',
     larder: 'bush',
-    treat: 'apple',
+    treats: ['pear', 'apple', 'berry'],
     scenery: ['reeds', 'bush', 'flowers', 'rock'],
     colors: {
       far: '#87c69a', farDark: '#63a97e', ground: ['#9ed3a4', '#6fb894'], groundNear: '#8fcc9e',
@@ -159,7 +165,7 @@ export const BIOMES = {
     far: 'sea',
     detail: 'shells',
     larder: 'coral',
-    treat: 'fish',
+    treats: ['fish', 'shrimp', 'seagrape'],
     scenery: ['palm', 'rock', 'bush', 'flowers'],
     colors: {
       far: '#f0dcb0', farDark: '#dcbe94', ground: ['#f6e6bd', '#e6cf9a'], groundNear: '#f2dfb0',
@@ -171,7 +177,7 @@ export const BIOMES = {
     far: 'dunes',
     detail: 'pebbles',
     larder: 'basket',
-    treat: 'melon',
+    treats: ['melon', 'datefruit', 'pricklypear'],
     scenery: ['cactus', 'rock', 'flowers', 'bush'],
     colors: {
       far: '#f2d49a', farDark: '#dcb87c', ground: ['#f8e2ae', '#e8c78c'], groundNear: '#f4dca4',
@@ -183,7 +189,7 @@ export const BIOMES = {
     far: 'peaks',
     detail: 'snow',
     larder: 'basket',
-    treat: 'carrot',
+    treats: ['carrot', 'snowpea', 'frostplum'],
     scenery: ['snowpine', 'snowdrift', 'rock', 'snowpine'],
     colors: {
       far: '#bcd0ea', farDark: '#93aed2', ground: ['#eef5ff', '#cfe0f4'], groundNear: '#e4eeff',
@@ -195,7 +201,7 @@ export const BIOMES = {
     far: 'arch',
     detail: 'spores',
     larder: 'bush',
-    treat: 'glowberry',
+    treats: ['glowberry', 'glowcap', 'sporepod'],
     scenery: ['mushroom', 'crystal', 'rock', 'bush'],
     colors: {
       far: '#6a5a94', farDark: '#4a3f70', ground: ['#8f7fbc', '#6b5c96'], groundNear: '#8474ae',
@@ -207,7 +213,7 @@ export const BIOMES = {
     far: 'cloudbank',
     detail: 'sparkle',
     larder: 'basket',
-    treat: 'starfruit',
+    treats: ['starfruit', 'sunbud', 'dewdrop'],
     scenery: ['cloudpuff', 'crystal', 'flowers', 'cloudpuff'],
     colors: {
       // Kept a clear step darker than any sky: a white ground under a pale dawn leaves
@@ -536,15 +542,19 @@ export function habitatFrom({ key, species, index, hour }) {
     flip: (index + i) % 2 === 1,
   }));
 
-  const larderSpots = (LARDER_SPOTS[biome.larder] ?? LARDER_SPOTS.bush).map(([dx, dy]) => ({
+  // Which fruit hangs where, walked along the same trait index that varies the scenery three
+  // lines above — so two pets of a species do not have their apples in the same two places.
+  const menu = biome.treats?.length ? biome.treats : [biome.treat ?? 'berry'];
+  const larderSpots = (LARDER_SPOTS[biome.larder] ?? LARDER_SPOTS.bush).map(([dx, dy], i) => ({
     x: n(layout.larder + dx),
     y: n(WALK_Y + dy),
+    treat: menu[(index + i) % menu.length],
   }));
 
   const props = {
     nest: { x: layout.nest, y: WALK_Y },
     ball: { x: layout.ball, y: WALK_Y },
-    larder: { x: layout.larder, y: WALK_Y, kind: biome.larder, treat: biome.treat, spots: larderSpots },
+    larder: { x: layout.larder, y: WALK_Y, kind: biome.larder, treat: menu[0], menu, spots: larderSpots },
   };
   const home = { x: homeSpotFor(layout, ROAM), y: WALK_Y };
 
@@ -766,6 +776,20 @@ export function habitatSvg(
 
 /** One treat, ready to be dropped into the actors layer. */
 export const treatSvg = (kind, colors) => (TREATS[kind] ?? TREATS.berry)(colors);
+
+/** And what it sheds when it is bitten, so crumbs are the colour of the thing they came off. */
+export const treatColors = (kind, colors) => (TREAT_COLORS[kind] ?? TREAT_COLORS.berry)(colors);
+
+/** How many mouthfuls one treat is. Three: enough to watch, short of enough to wait through. */
+export const BITES = 3;
+
+/**
+ * How big what is left of a treat looks after `taken` bites. Never reaches zero: the last of
+ * it goes because it is removed, not because it shrank away — a treat that fades to a point
+ * looks dropped, and the pet is supposed to have eaten it.
+ */
+export const biteScale = (taken, bites = BITES) =>
+  Math.max(0, 1 - (Math.min(Math.max(0, taken), bites) / bites) * 0.7);
 
 /** The ball, likewise. */
 export const ballSvg = (colors) => BALL(colors);

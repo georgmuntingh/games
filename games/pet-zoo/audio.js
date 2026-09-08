@@ -126,10 +126,19 @@ const SOUNDS = {
     const p = Math.max(0.15, Math.min(1, power));
     tone(ac, { type: 'sine', freq: 150 + p * 190, endFreq: 90 + p * 90, duration: 0.07 + p * 0.05, gain: 0.03 + p * 0.05 });
   },
-  // Eating a treat: two soft chews, low and quick, with nothing crunchy about them.
-  munch(ac) {
-    tone(ac, { type: 'triangle', freq: 240, endFreq: 170, duration: 0.06, gain: 0.06 });
-    tone(ac, { type: 'triangle', freq: 205, endFreq: 145, duration: 0.07, gain: 0.055, delay: 0.09 });
+  // Eating a treat: two soft chews, low and quick, with nothing crunchy about them. `pitch`
+  // nudges the whole mouthful up or down, the way `bounce` takes a `power` — so three bites
+  // out of one berry are three different mouthfuls rather than the same one three times.
+  munch(ac, { pitch = 1 } = {}) {
+    const p = Math.max(0.7, Math.min(1.4, pitch));
+    tone(ac, { type: 'triangle', freq: 240 * p, endFreq: 170 * p, duration: 0.06, gain: 0.06 });
+    tone(ac, { type: 'triangle', freq: 205 * p, endFreq: 145 * p, duration: 0.07, gain: 0.055, delay: 0.09 });
+  },
+  // And the end of one: a single note falling away, softer than the chews it follows, so a
+  // meal finishes rather than merely stopping.
+  gulp(ac) {
+    tone(ac, { type: 'sine', freq: 300, endFreq: 120, duration: 0.14, gain: 0.05 });
+    tone(ac, { type: 'triangle', freq: 150, endFreq: 95, duration: 0.1, gain: 0.03, delay: 0.06 });
   },
   // Disturbing a sleeping pet: it stretches, it does not wake. A slow yawn up and back.
   stretch(ac) {

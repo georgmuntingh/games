@@ -177,6 +177,8 @@ import {
   speciesForFact,
   factsOfSpecies,
   itemsOfSpecies,
+  canFeed,
+  MOODS,
   portraitOf,
   SPECIES_IDS,
   SPECIES,
@@ -188,6 +190,11 @@ import {
 import {
   BALL_R,
   backdropSpotFor,
+  BITES,
+  biteScale,
+  BIOMES,
+  treatColors,
+  treatSvg,
   BIOME_IDS,
   biomeOfSpecies,
   CENTRE_KEEP,
@@ -229,6 +236,7 @@ import {
   TREAT_IDS,
   UMBRELLA_HALF_WIDTH,
   UMBRELLA_PEAK,
+  TREAT_COLORS,
   UMBRELLA_TOP,
   VIEW,
   WALK_Y,
@@ -313,6 +321,8 @@ import {
   MARKINGS,
   SIGNATURES,
   stageOf,
+  BROW_MOOD,
+  MOUTHS,
   TEXTURES,
   TOPPER_CROWN,
   TOPPERS,
@@ -1564,12 +1574,72 @@ test('a hand-edited play time cannot remove the break', () => {
 
 /* --------------------------------------------------------- appearance */
 
-const MOODS = ['content', 'happy', 'hungry', 'droopy', 'sleep'];
+// Imported rather than listed here: a mood the art can draw but nothing renders in a test
+// is a mood nobody is looking at. See `MOODS` in pets.js.
 const LOUD_KEYS = LOUD_FAMILIES.map(([key]) => key);
 const appearanceKey = (a) =>
   [a.species, a.eyewear, a.hair, a.facialHair, a.markings, a.accessory].join('|');
 const loudKey = (a) => LOUD_KEYS.map((k) => a[k]).join('|');
 const loudCount = (a) => LOUD_KEYS.filter((k) => a[k] !== 'none').length;
+
+describe('pets — the moods the art can draw');
+
+test('every mood has both a mouth and a brow', () => {
+  for (const mood of MOODS) {
+    assert(MOUTHS[mood], `${mood} has no mouth`);
+    assert(BROW_MOOD[mood], `${mood} has no brow, so it silently borrows content's`);
+  }
+});
+
+test('the schedule only ever asks for a mood the art can draw', () => {
+  const items = [
+    { hatchedAt: null, phase: 'learning', lapses: 0, dueAt: 0 },
+    { hatchedAt: 1, phase: 'learning', lapses: 0, dueAt: 0 },
+    { hatchedAt: 1, phase: 'learning', lapses: 2, dueAt: 0 },
+    { hatchedAt: 1, phase: 'graduated', lapses: 0, dueAt: 10 },
+    { hatchedAt: 1, phase: 'graduated', lapses: 0, dueAt: 1000 },
+  ];
+  for (const item of items) {
+    for (const napping of [false, true]) {
+      const mood = moodOf(item, 100, { napping });
+      assert(MOODS.includes(mood), `the schedule asked for ${mood}, which cannot be drawn`);
+    }
+  }
+});
+
+test('chew is a mood the art has but the schedule never reaches', () => {
+  assert(MOODS.includes('chew'), 'a pet eating has no face of its own');
+  const everySchedulerMood = new Set(
+    [
+      { hatchedAt: null, phase: 'learning', lapses: 0, dueAt: 0 },
+      { hatchedAt: 1, phase: 'learning', lapses: 0, dueAt: 0 },
+      { hatchedAt: 1, phase: 'learning', lapses: 2, dueAt: 0 },
+      { hatchedAt: 1, phase: 'graduated', lapses: 0, dueAt: 10 },
+      { hatchedAt: 1, phase: 'graduated', lapses: 0, dueAt: 1000 },
+    ].flatMap((item) => [moodOf(item, 100), moodOf(item, 100, { napping: true })])
+  );
+  assert(!everySchedulerMood.has('chew'), 'the scheduler must never put a pet mid-mouthful');
+});
+
+describe('pets — who may be offered food');
+
+test('an egg has no mouth yet, and a sleeping zoo is not a buffet', () => {
+  const egg = { hatchedAt: null };
+  const pet = { hatchedAt: 1 };
+  assertEqual(canFeed(egg), false, 'an egg cannot eat');
+  assertEqual(canFeed(pet, { napping: true }), false, 'a sleeping pet is not fed');
+  assertEqual(canFeed(pet), true);
+  assertEqual(canFeed(null), false, 'nothing is not a pet');
+});
+
+test('a pet is never too full, and resting is not the same as asleep', () => {
+  // Resting means "not being asked questions just now", which is no reason to go hungry —
+  // and there is deliberately no fullness to run out of: a pet that refused a second treat
+  // would read to a child as a pet that did not want theirs.
+  const resting = { hatchedAt: 1, phase: 'graduated', dueAt: 0 };
+  assertEqual(canFeed(resting), true);
+  for (let i = 0; i < 20; i += 1) assertEqual(canFeed(resting), true, `refused snack ${i}`);
+});
 
 describe('pets — the species look different from each other');
 
@@ -2253,6 +2323,91 @@ test('night is the exception rather than the rule', () => {
   // weighting in lightingFor exists to keep night special *and* to keep the zoo readable.
   assert(nights > 0, 'no pet ever lives at night');
   assert(nights < 144 * 0.3, `${nights} of 144 habitats are dark — too many`);
+});
+
+describe('habitats — the larder holds more than one thing');
+
+test('every biome offers a menu of foods that all exist', () => {
+  for (const [id, biome] of Object.entries(BIOMES)) {
+    assert(Array.isArray(biome.treats), `${id} has no menu`);
+    assert(biome.treats.length >= 2 && biome.treats.length <= 3, `${id} offers ${biome.treats.length}`);
+    assertEqual(new Set(biome.treats).size, biome.treats.length, `${id} lists a food twice`);
+    for (const kind of biome.treats) {
+      assert(TREAT_IDS.includes(kind), `${id} offers ${kind}, which is not drawn`);
+    }
+  }
+});
+
+test('the single-treat shape survives the menu', () => {
+  // Anything that only ever knew about one food still gets the biome's own first one.
+  for (const h of EVERY_HABITAT) {
+    assertEqual(h.props.larder.treat, h.props.larder.menu[0], `${h.id} disagrees with itself`);
+  }
+});
+
+test('each spot on the larder names a food from its own menu', () => {
+  for (const h of EVERY_HABITAT) {
+    for (const spot of h.props.larder.spots) {
+      assert(h.props.larder.menu.includes(spot.treat), `${h.id} grew a ${spot.treat}`);
+    }
+  }
+});
+
+test('a larder is not the same fruit three times over', () => {
+  for (const h of EVERY_HABITAT) {
+    if (h.props.larder.menu.length < 2 || h.props.larder.spots.length < 2) continue;
+    const grown = new Set(h.props.larder.spots.map((spot) => spot.treat));
+    assert(grown.size > 1, `${h.id} grew nothing but ${[...grown][0]}`);
+  }
+});
+
+test('two pets of a species arrange their larder differently', () => {
+  for (const id of SPECIES_IDS) {
+    const times = timesOfSpecies(id);
+    if (times.length < 2) continue;
+    const arrangements = new Set(
+      times.map((time) => {
+        const { h, m } = parseTimeId(time);
+        return habitatFor(h, m).props.larder.spots.map((spot) => spot.treat).join('|');
+      })
+    );
+    assert(arrangements.size > 1, `every ${id} keeps its larder in exactly the same order`);
+  }
+});
+
+test('every treat draws, and sheds the colours it is drawn in', () => {
+  assertEqual(
+    Object.keys(TREAT_COLORS).sort().join(','),
+    [...TREAT_IDS].sort().join(','),
+    'a food was drawn without crumbs, or crumbs without a food'
+  );
+  for (const h of EVERY_HABITAT.slice(0, 24)) {
+    for (const kind of TREAT_IDS) {
+      const markup = treatSvg(kind, h.palette);
+      assert(markup.length > 40, `${kind} drew almost nothing`);
+      for (const hole of ['undefined', 'NaN', '${']) {
+        assert(!markup.includes(hole), `${kind} left a ${hole} in its markup`);
+      }
+      const crumbs = treatColors(kind, h.palette);
+      assert(crumbs.length >= 2 && crumbs.length <= 3, `${kind} sheds ${crumbs.length} colours`);
+      for (const colour of crumbs) {
+        assert(typeof colour === 'string' && colour.startsWith('#'), `${kind} sheds ${colour}`);
+      }
+    }
+  }
+});
+
+test('a treat shrinks bite by bite, and never quite to nothing', () => {
+  assertEqual(biteScale(0), 1, 'an untouched treat is its whole size');
+  let previous = biteScale(0);
+  for (let taken = 1; taken <= BITES; taken += 1) {
+    const size = biteScale(taken);
+    assert(size < previous, `bite ${taken} did not take anything off`);
+    previous = size;
+  }
+  assert(biteScale(BITES) > 0, 'the last of it vanished rather than being eaten');
+  assertEqual(biteScale(99), biteScale(BITES), 'a bite past the last one takes nothing more');
+  assertEqual(biteScale(-3), biteScale(0), 'and neither does a bite before the first');
 });
 
 describe('habitats — everything a child must reach survives the crop');

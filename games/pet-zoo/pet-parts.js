@@ -219,6 +219,7 @@ export const BROW_MOOD = {
   hungry: { rot: -2, dy: -3.5 }, // up and eager
   droopy: { rot: -9, dy: 1.5 }, // inner ends up: crestfallen, never cross
   sleep: { rot: -4, dy: 1 },
+  chew: { rot: 0, dy: -1.5 }, // pleased, and settled: it already got what it asked for
 };
 
 /* --------------------------------------------------------------------- mouths */
@@ -230,6 +231,10 @@ export const MOUTHS = {
            <ellipse cx="50" cy="73" rx="4.5" ry="3.5" fill="#ff9ec0" />`,
   droopy: `<path d="M43 71 C46 65 54 65 57 71" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round" />`,
   sleep: `<path d="M44 68 C47 73 53 73 56 68" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round" />`,
+  // A mouth with something in it. Narrower than `hungry`, which is a beg — this one is
+  // already chewing, and the working of it is a CSS animation rather than a second drawing.
+  chew: `<ellipse cx="50" cy="69" rx="5.2" ry="5.6" fill="${INK}" />
+         <ellipse cx="50" cy="71.4" rx="3.4" ry="2.6" fill="#ff9ec0" />`,
 };
 
 /* ==========================================================================

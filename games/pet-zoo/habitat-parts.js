@@ -472,9 +472,119 @@ export const TREATS = {
     <path d="M0 -4.6 L1.4 -1.4 L4.6 -1.4 L2.1 0.7 L3.1 3.9 L0 2 L-3.1 3.9 L-2.1 0.7 L-4.6 -1.4 L-1.4 -1.4 Z"
           fill="${c.bloom}" />
     <circle cx="0" cy="-0.2" r="1.1" fill="#fff8e0" opacity="0.8" />`,
+  plum: (c) => `
+    <ellipse cx="0" cy="0.2" rx="3.6" ry="4" fill="${c.bloom}" />
+    <path d="M0 -3.8 q0 4 0 7.8" stroke="${c.leafDark}" stroke-width="0.8" opacity="0.4" fill="none" />
+    <circle cx="-1.5" cy="-1.6" r="1" fill="#fff8e0" opacity="0.7" />
+    <path d="M0.4 -3.9 l1 -1.9" stroke="${c.wood}" stroke-width="1" stroke-linecap="round" />`,
+  clover: (c) => `
+    <g fill="${c.leaf}">
+      <circle cx="-2.4" cy="-1.6" r="2.4" />
+      <circle cx="2.4" cy="-1.6" r="2.4" />
+      <circle cx="0" cy="-4.4" r="2.4" />
+    </g>
+    <path d="M0 -1 q0.6 3 -0.4 5.6" stroke="${c.leafDark}" stroke-width="1.1" fill="none" stroke-linecap="round" />`,
+  acorn: (c) => `
+    <path d="M-3.4 -0.6 q3.4 6.6 6.8 0 Z" fill="${c.wood}" />
+    <path d="M-3.8 -0.8 q3.8 -5.6 7.6 0 Z" fill="${c.leafDark}" />
+    <path d="M0 -4.6 l0.2 -1.8" stroke="${c.wood}" stroke-width="1" stroke-linecap="round" />`,
+  pear: (c) => `
+    <circle cx="0" cy="1.6" r="3.4" fill="${c.leaf}" />
+    <circle cx="0" cy="-2" r="2.4" fill="${c.leaf}" />
+    <circle cx="-1.3" cy="0.4" r="1" fill="#fff8e0" opacity="0.7" />
+    <path d="M0 -4.2 l0.4 -2" stroke="${c.wood}" stroke-width="1" stroke-linecap="round" />`,
+  shrimp: (c) => `
+    <path d="M-2.6 2.4 q-2.6 -4.8 1.6 -5.6 q4.2 -0.8 4.6 2.8 q0.2 2.6 -2.4 3 Z" fill="${c.accent}" />
+    <path d="M-2.6 2.4 L-5.8 4 L-5 0.8 Z" fill="${c.bloom}" />
+    <circle cx="2.6" cy="-1.4" r="0.7" fill="#43354f" />
+    <path d="M3 -2.8 q1.8 -1.6 3 -1.2" stroke="${c.accent}" stroke-width="0.8" fill="none" />`,
+  seagrape: (c) => `
+    <g fill="${c.water}">
+      <circle cx="-2.2" cy="1.4" r="2.2" />
+      <circle cx="2.2" cy="1.4" r="2.2" />
+      <circle cx="0" cy="-1.6" r="2.2" />
+    </g>
+    <circle cx="-0.8" cy="-2.4" r="0.8" fill="#ffffff" opacity="0.7" />
+    <path d="M0 -3.6 q0.4 -1.6 2.4 -2.2" stroke="${c.leaf}" stroke-width="1.1" fill="none" stroke-linecap="round" />`,
+  datefruit: (c) => `
+    <ellipse cx="0" cy="0.4" rx="2.6" ry="4.2" fill="${c.wood}" />
+    <path d="M-1.4 -2.6 q1.4 3 0.6 6.4" stroke="${c.stoneLight}" stroke-width="0.7" opacity="0.4" fill="none" />
+    <path d="M0 -3.8 l0.2 -1.8" stroke="${c.leafDark}" stroke-width="1" stroke-linecap="round" />`,
+  pricklypear: (c) => `
+    <ellipse cx="0" cy="0.6" rx="3.4" ry="4.2" fill="${c.leaf}" />
+    <g stroke="${c.stoneLight}" stroke-width="0.7" stroke-linecap="round">
+      <path d="M-2 -1.4 l-1.2 -0.8 M1.8 -1.6 l1.2 -0.8 M-1.8 1.8 l-1.2 0.8 M1.8 1.8 l1.2 0.8" />
+    </g>
+    <ellipse cx="0" cy="-3.6" rx="1.8" ry="1.4" fill="${c.bloom}" />`,
+  snowpea: (c) => `
+    <path d="M-4.6 1.4 q0 -4.6 4.6 -4.6 q4.6 0 4.6 4.6 q-4.6 1.8 -9.2 0 Z" fill="${c.leaf}" />
+    <g fill="${c.leafDark}" opacity="0.55">
+      <circle cx="-2.2" cy="0.4" r="1.1" />
+      <circle cx="0" cy="0.2" r="1.1" />
+      <circle cx="2.2" cy="0.4" r="1.1" />
+    </g>`,
+  frostplum: (c) => `
+    <circle cx="0" cy="0" r="4.6" fill="${c.glow}" opacity="0.5" />
+    <ellipse cx="0" cy="0.2" rx="3.2" ry="3.6" fill="${c.glowDeep}" />
+    <path d="M-2.6 -1.6 q2.6 -1.4 5 0.4" stroke="#ffffff" stroke-width="0.8" opacity="0.7" fill="none" />`,
+  glowcap: (c) => `
+    <path d="M-4.6 0.4 q0 -4.8 4.6 -4.8 q4.6 0 4.6 4.8 Z" fill="${c.bloom}" />
+    <path d="M-2.6 0.4 q2.6 4.2 5.2 0 Z" fill="${c.glow}" />
+    <circle cx="-1.8" cy="-2.2" r="1" fill="#ffffff" opacity="0.7" />`,
+  sporepod: (c) => `
+    <ellipse cx="0" cy="0.4" rx="3" ry="4.4" fill="${c.glowDeep}" />
+    <g fill="${c.glow}">
+      <circle cx="-0.9" cy="-1.6" r="0.8" />
+      <circle cx="1" cy="0.4" r="0.8" />
+      <circle cx="-0.6" cy="2.2" r="0.8" />
+    </g>`,
+  sunbud: (c) => `
+    <circle cx="0" cy="-1" r="2.2" fill="${c.glowDeep}" />
+    <g fill="${c.glow}">
+      <ellipse cx="0" cy="-4.2" rx="1.1" ry="1.8" />
+      <ellipse cx="-2.8" cy="-2.2" rx="1.8" ry="1.1" />
+      <ellipse cx="2.8" cy="-2.2" rx="1.8" ry="1.1" />
+    </g>
+    <path d="M0 1.2 q0.4 2.2 -0.4 3.8" stroke="${c.leaf}" stroke-width="1.1" fill="none" stroke-linecap="round" />`,
+  dewdrop: (c) => `
+    <path d="M0 -4.8 q3.4 3.6 3.4 5.8 a3.4 3.4 0 0 1 -6.8 0 q0 -2.2 3.4 -5.8 Z" fill="${c.waterLight}" />
+    <circle cx="-1" cy="1.4" r="1" fill="#ffffff" opacity="0.85" />`,
 };
 
 export const TREAT_IDS = Object.keys(TREATS);
+
+/**
+ * What a treat is made of, for the crumbs that come off it when it is bitten. Two or three
+ * of its own fills and nothing else — a crumb that is not the colour of the thing it came
+ * off reads as confetti, and confetti is a reward. Eating is not a reward here.
+ *
+ * One entry per drawing above, and a test holds the two to the same keys: a new fruit
+ * cannot ship without crumbs.
+ */
+export const TREAT_COLORS = {
+  berry: (c) => [c.accent, c.bloom, c.leaf],
+  apple: (c) => [c.accent, c.bloom, c.leaf],
+  melon: (c) => [c.leaf, c.leafDark, c.bloom],
+  carrot: (c) => [c.accent, c.leaf, c.bloom],
+  fish: (c) => [c.accent, c.bloom, c.waterLight],
+  glowberry: (c) => [c.glowDeep, c.glow, c.bloom],
+  starfruit: (c) => [c.bloom, c.glow, c.accent],
+  plum: (c) => [c.bloom, c.leafDark, c.accent],
+  clover: (c) => [c.leaf, c.leafDark],
+  acorn: (c) => [c.wood, c.leafDark],
+  pear: (c) => [c.leaf, c.leafDark, c.bloom],
+  shrimp: (c) => [c.accent, c.bloom],
+  seagrape: (c) => [c.water, c.waterLight, c.leaf],
+  datefruit: (c) => [c.wood, c.stoneLight],
+  pricklypear: (c) => [c.leaf, c.bloom, c.leafDark],
+  snowpea: (c) => [c.leaf, c.leafDark],
+  frostplum: (c) => [c.glowDeep, c.glow],
+  glowcap: (c) => [c.bloom, c.glow, c.glowDeep],
+  sporepod: (c) => [c.glowDeep, c.glow],
+  sunbud: (c) => [c.glowDeep, c.glow, c.leaf],
+  dewdrop: (c) => [c.waterLight, c.water],
+};
+
 
 /** The ball. The one prop that is the same in every habitat, so it is always findable. */
 export const BALL = (c) => `
