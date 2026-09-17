@@ -1359,6 +1359,75 @@ main {
   stroke-width: 4;
 }
 
+/* ------------------------------------------------------------ reading it */
+
+/* A face being *read* is not a face being set. The hands are not to be touched, and the
+   five-minute counts printed outside the rim come off: they are a scaffold for counting round
+   in fives while setting the hands, and in a reading question they are very nearly the
+   answer — "15" is written on the rim right where the long hand is pointing. */
+#clock.is-reading .minute-label {
+  display: none;
+}
+
+#clock.is-reading .hand,
+#clock.is-reading .hand-grip {
+  cursor: default;
+  pointer-events: none;
+}
+
+#clock.is-reading {
+  touch-action: auto;
+}
+
+#answer-choices[hidden] {
+  display: none;
+}
+
+.choice-wrap {
+  margin: 0.85rem auto 0.4rem;
+  width: min(100%, 380px);
+}
+
+/* Two by two rather than a list of four: a 2x2 grid gives each phrase a whole half-width to
+   sit on, which "fem over halv fem" needs, and keeps all four on screen at once on a phone
+   without the child scrolling past one of the answers. */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.choice {
+  min-height: 62px;
+  padding: 0.5rem 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--pz-ink);
+  background: var(--pz-card);
+  border: 2px solid var(--pz-line);
+  border-radius: 14px;
+  box-shadow: var(--pz-shadow);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.choice:active {
+  transform: scale(0.96);
+}
+
+/* The pick is a decision, not an answer — the big button still submits — so it is marked
+   plainly and reversibly, with no hint as to whether it was the right one. */
+.choice.is-picked {
+  background: var(--pz-accent-soft);
+  border-color: var(--pz-accent);
+}
+
+.choice[disabled] {
+  opacity: 0.55;
+}
+
 .hand-knob {
   pointer-events: none;
 }

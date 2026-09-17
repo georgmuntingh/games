@@ -23,6 +23,7 @@ import {
   refreshTiers,
   review,
 } from './srs.js';
+import * as clockSubject from './subjects/clock.js';
 import * as math from './subjects/math/index.js';
 import {
   DEFAULT_SUBJECT,
@@ -170,6 +171,8 @@ const el = {
   promptSpoken: $('prompt-spoken'),
   clock: $('clock'),
   answerClock: $('answer-clock'),
+  answerChoices: $('answer-choices'),
+  choiceGrid: $('choice-grid'),
   answerSum: $('answer-sum'),
   keypad: $('keypad'),
   tenframeHost: $('tenframe-host'),
@@ -405,6 +408,8 @@ function svgVector(event) {
 }
 
 el.clock.addEventListener('pointerdown', (event) => {
+  // A face being read is a face to look at. Nothing on it moves.
+  if (isReading()) return;
   if (locked || !current) return;
   const v = svgVector(event);
   const hand = pickHand({
@@ -521,8 +526,15 @@ const GAP_EGG_PROMPTS = ['prompt.gapEgg', 'prompt.gapEgg1', 'prompt.gapEgg2'];
 // and this one is not worked out so much as shared out, a step at a time.
 const DIVIDE_EGG_PROMPTS = ['prompt.divEgg', 'prompt.divEgg1', 'prompt.divEgg2'];
 
+// And a sixth for reading the clock, because every clock line above leads into a time —
+// "they eat at…" — and this question is the one where naming the time is the child's job.
+const READ_EGG_PROMPTS = ['prompt.readEgg', 'prompt.readEgg1', 'prompt.readEgg2'];
+
 /** An item answered by writing digits rather than by dragging hands. */
 const isSum = (item) => (item?.subject ?? DEFAULT_SUBJECT) === math.id;
+
+/** True while the question on screen is a clock face to be read rather than set. */
+const isReading = (c = current) => c?.shown?.shape === 'read';
 
 /** Which of the families of prompt line an item is asked with. */
 const promptKindOf = (item) => (isSum(item) ? (current?.layout ?? 'inline') : 'clock');
@@ -537,12 +549,18 @@ const EGG_LINES = {
   gap: GAP_EGG_PROMPTS,
   div: DIVIDE_EGG_PROMPTS,
   sum: SUM_EGG_PROMPTS,
+  read: READ_EGG_PROMPTS,
 };
 
 function promptFor(item) {
   // `col`, `gap` or `div` for a question that is written out, `sum` for one on a single line,
-  // and null for the clock, whose lines are not filed under a prefix at all.
-  const prefix = isSum(item) ? PROMPT_PREFIXES[promptKindOf(item)] ?? 'sum' : null;
+  // `read` for a clock face to be read, and null for the clock being *set*, whose lines are
+  // not filed under a prefix at all.
+  const prefix = isSum(item)
+    ? PROMPT_PREFIXES[promptKindOf(item)] ?? 'sum'
+    : isReading()
+      ? 'read'
+      : null;
   if (item.hatchedAt === null) {
     const prompts = EGG_LINES[prefix] ?? EGG_PROMPTS;
     return { line: t(prompts[Math.min(item.cracks ?? 0, prompts.length - 1)]), button: t('button.warm') };
@@ -616,6 +634,7 @@ function renderPrompt(item) {
   el.promptLine.textContent = prompt.line;
   el.submit.textContent = prompt.button;
   if (isSum(item)) {
+    setClockMode(false);
     el.promptDigital.hidden = true;
     el.promptSum.hidden = false;
     el.promptSpoken.classList.remove('is-lead');
@@ -623,14 +642,80 @@ function renderPrompt(item) {
     renderAnswer();
     return;
   }
-  const digits = digitalOn();
   el.promptSum.hidden = true;
+  if (isReading()) {
+    setClockMode(true);
+    // Neither the digits nor the phrase, whatever the setting says: both of them *are* the
+    // answer. The question is the face, and the line above it does the asking. Emptied as
+    // well as hidden — the last question's time is this one's answer often enough.
+    el.promptDigital.hidden = true;
+    el.promptDigital.textContent = '';
+    el.promptSpoken.textContent = '';
+    el.promptSpoken.classList.remove('is-lead');
+    renderChoices();
+    return;
+  }
+  setClockMode(false);
+  const digits = digitalOn();
   el.promptDigital.textContent = timeId(item.h, item.m);
   el.promptDigital.hidden = !digits;
   el.promptSpoken.textContent = t.spoken(item.h, item.m);
   // Without the digits the phrase is the whole question, so it takes their weight.
   el.promptSpoken.classList.toggle('is-lead', !digits);
 }
+
+/* ------------------------------------------------------------- reading the clock */
+
+/**
+ * Which of the two clock questions the face is being used for. Set from `renderPrompt` rather
+ * than from `askNext`, because a grown-up switching language mid-question redraws the prompt
+ * and would otherwise put the setting question's aria-label back on a face being read.
+ *
+ * The label is the part worth being careful about: it has to say a clock is there without
+ * saying what it says, or a screen reader is handed the answer.
+ */
+function setClockMode(reading) {
+  el.answerChoices.hidden = !reading;
+  // Cleared rather than merely hidden: leaving the last question's four times sitting in the
+  // document means the next reading question can flash them before it draws its own.
+  if (!reading) el.choiceGrid.innerHTML = '';
+  el.clock.classList.toggle('is-reading', reading);
+  el.clock.setAttribute('aria-label', t(reading ? 'clock.ariaRead' : 'clock.aria'));
+}
+
+/**
+ * The four times to choose between. Always the phrase, never the digits: a child who can pick
+ * "4:15" off a list has matched two numerals to two hands, which is not reading a clock. The
+ * digital setting is left out of it entirely for the same reason — see `renderPrompt`.
+ */
+function renderChoices() {
+  el.choiceGrid.innerHTML = (current.options ?? [])
+    .map((option, i) => {
+      const phrase = t.spoken(option.h, option.m);
+      const picked = current.choice === i;
+      return `<button type="button" class="choice${picked ? ' is-picked' : ''}" data-choice="${i}"
+        aria-pressed="${picked}" aria-label="${escape(t('answer.choice', { time: phrase }))}"
+        >${escape(phrase)}</button>`;
+    })
+    .join('');
+}
+
+/** Take a pick. It only selects — the big button still submits, so a mis-tap costs nothing. */
+function pickChoice(index) {
+  if (locked || !isReading() || !current.options?.[index]) return;
+  // The clock's `reversals` and the sum's `clears` by another name: changing your mind is the
+  // tell that the answer was worked out rather than known, and `qualityOf` wants to hear it.
+  if (current.choice !== null && current.choice !== index) current.reversals += 1;
+  current.choice = index;
+  audio.play('tick');
+  renderChoices();
+  el.submit.disabled = false;
+}
+
+el.choiceGrid.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-choice]');
+  if (button) pickChoice(Number(button.dataset.choice));
+});
 
 /* ------------------------------------------------------------- writing a number */
 
@@ -1605,9 +1690,23 @@ el.keypad.addEventListener('pointerdown', (event) => {
 // The keyboard always works, whatever the setting says — it costs nothing and a grown-up
 // sitting next to a child on a laptop will reach for it.
 document.addEventListener('keydown', (event) => {
-  if (scene !== 'play' || !current || !isSum(current) || locked) return;
+  if (scene !== 'play' || !current || locked) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   if (document.querySelector('.overlay:not([hidden])')) return;
+  if (isReading()) {
+    // The options are numbered the way they are read, left to right and top to bottom, so a
+    // keyboard reaches them the same way it reaches the keypad's digits.
+    const n = Number(event.key);
+    if (Number.isInteger(n) && n >= 1 && n <= (current.options?.length ?? 0)) {
+      event.preventDefault();
+      pickChoice(n - 1);
+    } else if (event.key === 'Enter' && current.choice !== null) {
+      event.preventDefault();
+      submit();
+    }
+    return;
+  }
+  if (!isSum(current)) return;
   if (event.key >= '0' && event.key <= '9') {
     event.preventDefault();
     typeDigit(event.key);
@@ -1667,10 +1766,16 @@ function askNext() {
   const item = ensureItem(id);
   lastAskedId = id;
   const sum = isSum(item);
+  // Which way round the clock is asked this time: the face shown and read, or the time said
+  // and the hands set. An uncovered case first, so a time the child has never met is
+  // introduced by being shown rather than demanded — see `subjects/clock.js`.
+  const shape = sum ? null : clockSubject.shapeFor(item);
   // A fact *is* its question; a skill makes one up, from a seed built out of state the save was
   // keeping anyway — so a reload mid-question, and the retry two questions after a wrong
-  // answer, both come back to the very same numbers the child was last looking at.
-  const question = sum ? math.instanceOf(item) : { h: item.h, m: item.m };
+  // answer, both come back to the very same numbers the child was last looking at. A clock
+  // face's wrong answers are drawn from the same kind of seed, for the same reason.
+  const question = sum ? math.instanceOf(item) : { h: item.h, m: item.m, shape };
+  const reading = shape === 'read';
   const width = sum ? math.answerWidth(item) : 0;
   const layout = sum ? math.layoutOf(question) : 'clock';
   // Almost every question is answered on one line. A stacked multiplication is the exception:
@@ -1706,6 +1811,10 @@ function askNext() {
     ),
     // Which carry box the cursor is in, when it is in one at all.
     focus: null,
+    // The four times a reading question offers, and which one is picked so far. Empty and
+    // null for everything else, which is every other question this game asks.
+    options: reading ? clockSubject.optionsFor(item) : [],
+    choice: null,
     clears: 0,
     startedAt: now(),
     reversals: 0,
@@ -1731,15 +1840,19 @@ function askNext() {
 
   locked = false;
   renderPrompt(item);
-  // A sum has nothing to submit until a digit is put down; the clock always has the hands
-  // wherever they happen to be sitting.
-  el.submit.disabled = sum;
+  // A sum has nothing to submit until a digit is put down, and a reading question nothing
+  // until one of the four is picked; the clock being *set* always has the hands wherever they
+  // happen to be sitting.
+  el.submit.disabled = sum || reading;
   el.feedback.textContent = '';
   el.feedback.className = 'feedback';
   renderPetStage(item, moodOf(item, now()));
   if (!sum) {
     setGhostVisible(false);
-    scatterHands(current.target);
+    // Read the face, or set it: one shows the time, the other hides it somewhere that is not
+    // the answer so that every question needs real work.
+    if (reading) setDial(item.h, item.m);
+    else scatterHands(current.target);
   }
   save();
 }
@@ -1912,8 +2025,14 @@ function teachLine(target, result) {
 
 async function submit() {
   if (locked || !current) return;
+  // Nothing picked yet. The button is disabled until one is, so this is a belt on top of the
+  // braces — but the alternative is reading `options[null]`, and that is not a crash worth
+  // leaving for whatever calls `submit` next.
+  if (isReading() && current.choice === null) return;
   locked = true;
   el.submit.disabled = true;
+  // The picks are the answer now; nothing about them is still a choice.
+  for (const button of el.choiceGrid.querySelectorAll('button')) button.disabled = true;
   beginSessionIfNeeded();
 
   const subject = SUBJECTS[current.subject] ?? SUBJECTS[DEFAULT_SUBJECT];
@@ -1922,7 +2041,13 @@ async function submit() {
   // `3 + 5` come to the same number, but a column sum's columns do not line up if it is
   // turned round, so the question the child actually answered is the one to answer against.
   const target = current.shown;
-  const answer = sum ? answerText(current) : { ...dial };
+  // Three ways an answer arrives — written, picked, or swung into place — and one shape it
+  // arrives in: `grade` takes any `{ h, m }` whatever put it there.
+  const answer = sum
+    ? answerText(current)
+    : isReading()
+      ? { h: current.options[current.choice].h, m: current.options[current.choice].m }
+      : { ...dial };
   const result = subject.grade(target, answer);
   const ms = now() - current.startedAt;
   const item = state.items[current.id];
@@ -1937,7 +2062,10 @@ async function submit() {
     correct: result.correct,
     ms,
     reversals: sum ? current.clears : current.reversals,
-    pace: subject.paceOf?.(item) ?? subject.paceScale,
+    // The question as well as the item: tapping one of four is quicker than swinging two
+    // hands, and the clock's two cases are paced apart on exactly that. Maths, whose pace is a
+    // property of the skill alone, ignores the second argument.
+    pace: subject.paceOf?.(item, current.shown) ?? subject.paceScale,
     reviewClock: state.reviewClock,
     now: now(),
   });

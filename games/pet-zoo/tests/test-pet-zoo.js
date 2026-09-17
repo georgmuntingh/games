@@ -16,6 +16,9 @@ import {
   MINUTE_REACH,
   PIN_DEAD_ZONE,
   pointOnFace,
+  READ_FAMILIES,
+  READ_OPTIONS,
+  readingOptions,
   snapMinute,
   timeId,
 } from '../clock.js';
@@ -98,6 +101,7 @@ import { mirror, recognize, UNSURE_BELOW } from '../ink/recognize.js';
 import { CAPACITY, recall, remember, sanitize as sanitizeMemory } from '../ink/memory.js';
 import { bounds as inkBounds, dedupe, hasInk, resample } from '../ink/strokes.js';
 import { CASES } from './ink-fixtures.js';
+import { hashSeed, rngFrom } from '../seed.js';
 import * as addSubject from '../subjects/math/index.js';
 import * as mathFacts from '../subjects/math/facts.js';
 import * as mathSkills from '../subjects/math/skills.js';
@@ -767,6 +771,204 @@ test('time ids pad the minutes and parse back', () => {
 test('norm360 folds any angle into one turn', () => {
   assertEqual(norm360(-90), 270);
   assertEqual(norm360(450), 90);
+});
+
+/* -------------------------------------------------- reading the clock */
+
+describe('clock — reading the face');
+
+const every5 = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+const everyTime = HOURS.flatMap((h) => every5.map((m) => ({ h, m, tier: tierOfMinute(m) })));
+
+const optionsFor = (target, seed = 1) =>
+  readingOptions(target, { tier: target.tier ?? tierOfMinute(target.m), seed });
+
+const asIds = (options) => options.map((o) => timeId(o.h, o.m));
+
+test('every one of the 144 times offers four legal, distinct choices', () => {
+  for (const target of everyTime) {
+    for (let seed = 1; seed <= 6; seed += 1) {
+      const options = readingOptions(target, { tier: target.tier, seed });
+      assertEqual(options.length, READ_OPTIONS, `wrong number of choices for ${timeId(target.h, target.m)}`);
+      const ids = asIds(options);
+      assertEqual(new Set(ids).size, READ_OPTIONS, `a choice was offered twice for ${timeId(target.h, target.m)}`);
+      assert(ids.includes(timeId(target.h, target.m)), 'the right answer was not among the choices');
+      for (const o of options) {
+        assert(Number.isInteger(o.h) && o.h >= 1 && o.h <= 12, `${o.h} is not an hour on a face`);
+        assert(Number.isInteger(o.m) && o.m >= 0 && o.m < 60 && o.m % 5 === 0, `${o.m} is not a time this game teaches`);
+      }
+    }
+  }
+});
+
+// The one that would really break the question: two choices that *say the same thing*. A
+// swapped-hands distractor lands on a real clock face, so nothing but the words themselves
+// rules this out — and the words are not the same rules in the two languages.
+test('no two choices say the same thing, in either language', () => {
+  for (const target of everyTime) {
+    for (const lang of ['nb', 'en']) {
+      const spoken = optionsFor(target).map((o) => spokenTime(lang, o.h, o.m));
+      assertEqual(
+        new Set(spoken).size,
+        READ_OPTIONS,
+        `two choices read alike in ${lang} for ${timeId(target.h, target.m)}: ${spoken.join(' / ')}`
+      );
+    }
+  }
+});
+
+test('the hands read the wrong way round is offered — 4:15 as 3:20', () => {
+  const swapped = READ_FAMILIES.swapped({ h: 4, m: 15 });
+  assertEqual(timeId(swapped.h, swapped.m), '3:20');
+  // The minute hand on the 12 is read as twelve o'clock, not as nought o'clock.
+  const onTheHour = READ_FAMILIES.swapped({ h: 4, m: 0 });
+  assertEqual(timeId(onTheHour.h, onTheHour.m), '12:20');
+});
+
+test('the hour next door is offered, and past the half it is the coming one', () => {
+  const always = () => 0.9; // whichever way the seed leans, :30 and later go forwards
+  const named = (time, rnd) => {
+    const got = READ_FAMILIES.hourOff(time, rnd);
+    return timeId(got.h, got.m);
+  };
+  assertEqual(named({ h: 4, m: 30 }, always), '5:30', 'halv fem was not offered as halv seks');
+  assertEqual(named({ h: 12, m: 45 }, always), '1:45');
+  // And it is a real hour in both directions — never 0 o'clock or 13 o'clock.
+  for (const h of HOURS) {
+    for (const rnd of [() => 0.9, () => 0.1]) {
+      const got = READ_FAMILIES.hourOff({ h, m: 0 }, rnd);
+      assert(got.h >= 1 && got.h <= 12, `${got.h} is not an hour`);
+      assert(got.h !== h, 'the neighbouring hour was the same hour');
+    }
+  }
+});
+
+test('quarter past is offered as quarter to', () => {
+  const mirrored = (time) => {
+    const got = READ_FAMILIES.mirror(time);
+    return timeId(got.h, got.m);
+  };
+  assertEqual(mirrored({ h: 4, m: 15 }), '4:45');
+  assertEqual(mirrored({ h: 4, m: 50 }), '4:10');
+});
+
+test('a family that would offer the right answer back is skipped', () => {
+  // 3:15 swaps to 3:15, and the mirror of anything on the hour or the half is itself.
+  const swapped = READ_FAMILIES.swapped({ h: 3, m: 15 });
+  assertEqual(timeId(swapped.h, swapped.m), '3:15', 'this test needs a time that swaps onto itself');
+  for (const target of [{ h: 3, m: 15, tier: 2 }, { h: 12, m: 0, tier: 0 }, { h: 7, m: 30, tier: 1 }]) {
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const ids = asIds(readingOptions(target, { tier: target.tier, seed }));
+      assertEqual(new Set(ids).size, READ_OPTIONS, `${timeId(target.h, target.m)} was offered a choice twice`);
+    }
+  }
+});
+
+test('the distractors are the ones the tier is teaching', () => {
+  const kindsAt = (target, tier) => {
+    const seen = new Set();
+    for (let seed = 1; seed <= 30; seed += 1) {
+      for (const o of readingOptions(target, { tier, seed })) seen.add(o.kind);
+    }
+    return seen;
+  };
+  // Quarters: "over" read as "på" is the confusion of that tier, and it is always offered.
+  for (let seed = 1; seed <= 30; seed += 1) {
+    const kinds = readingOptions({ h: 4, m: 15 }, { tier: 2, seed }).map((o) => o.kind);
+    assert(kinds.includes('mirror'), 'quarter past was not offered as quarter to');
+    assert(kinds.includes('hourOff'), 'the neighbouring hour was not offered');
+  }
+  // Five-minute times: the hands themselves are what gets muddled up. (Not 4:20 — that one
+  // swaps onto itself, which is the case the test below is about.)
+  for (let seed = 1; seed <= 30; seed += 1) {
+    const kinds = readingOptions({ h: 7, m: 20 }, { tier: 3, seed }).map((o) => o.kind);
+    assert(kinds.includes('swapped'), 'the swapped hands were not offered at tier 3');
+  }
+  // On the hour the mirror has nothing to say, so it is never wheeled out.
+  assert(!kindsAt({ h: 4, m: 0 }, 0).has('mirror'), 'o’clock was offered its own mirror');
+});
+
+test('the same question deals the same hand, and a new one deals a new hand', () => {
+  const item = { h: 4, m: 15, tier: 2, covered: [], reps: 0, feeds: 0, correctStreak: 0, lapses: 0 };
+  const first = asIds(clockSubject.optionsFor(item)).join(' ');
+  assertEqual(asIds(clockSubject.optionsFor({ ...item })).join(' '), first, 'a reload dealt a different hand');
+  // A wrong answer resets the streak and touches nothing else in the seed, so the question the
+  // child just had explained is the question that comes back.
+  assertEqual(asIds(clockSubject.optionsFor({ ...item, correctStreak: 0 })).join(' '), first);
+  const moved = asIds(clockSubject.optionsFor({ ...item, correctStreak: 1 })).join(' ');
+  assert(moved !== first, 'a right answer gave the very same four back');
+});
+
+describe('clock — the two ways of asking');
+
+test('a time is asked the reading way first, then the setting way', () => {
+  const item = { h: 4, m: 15, tier: 2, covered: [], reps: 0, feeds: 0, correctStreak: 0, lapses: 0 };
+  assertEqual(clockSubject.shapeFor(item), 'read', 'a brand-new time was demanded before it was shown');
+  assertEqual(clockSubject.shapeFor({ ...item, covered: ['read'] }), 'set');
+  assertEqual(clockSubject.shapeFor({ ...item, covered: ['set'] }), 'read');
+  // Both covered: the time is free practice rather than running out of questions.
+  assert(
+    clockSubject.SHAPES.includes(clockSubject.shapeFor({ ...item, covered: ['read', 'set'] })),
+    'a fully covered time had nothing left to ask'
+  );
+});
+
+test('a clock pet cannot hatch on reading alone', () => {
+  const answerRead = (item, step) =>
+    review(item, { ...clockSubject.pacing(), shape: 'read', correct: true, reviewClock: step, now: 0 }).item;
+  let item = createItem({ subject: 'clock', h: 4, m: 15, tier: 2, species: 'mochi', reviewClock: 0 });
+  for (let n = 0; n < 20; n += 1) item = answerRead(item, n + 1);
+  assertEqual(item.phase, 'learning', 'twenty readings counted as knowing the time');
+  assertEqual(item.hatchedAt, null, 'and it hatched anyway');
+  assert(item.cracks < CRACK_STAGES, 'the last crack was spent before the hatch it promises');
+  // One answer the other way round, and the egg is free to go.
+  item = review(item, {
+    ...clockSubject.pacing(),
+    shape: 'set',
+    correct: true,
+    reviewClock: 21,
+    now: 0,
+  }).item;
+  assertEqual(item.phase, 'graduated');
+  assert(item.hatchedAt !== null, 'both cases covered and it still had not hatched');
+});
+
+test('tapping one of four is paced faster than swinging two hands', () => {
+  const item = { h: 4, m: 15 };
+  assert(
+    clockSubject.paceOf(item, { shape: 'read' }) < clockSubject.paceOf(item, { shape: 'set' }),
+    'a tap was given as long as a drag'
+  );
+  assertEqual(clockSubject.paceOf(item, { shape: 'set' }), clockSubject.paceScale);
+  // A six-second tap is a worked-out answer, not fluent recall.
+  assertEqual(qualityOf({ correct: true, ms: 6000, pace: clockSubject.paceOf(item, { shape: 'read' }) }), 4);
+  assertEqual(qualityOf({ correct: true, ms: 6000, pace: clockSubject.paceOf(item, { shape: 'set' }) }), 5);
+});
+
+test('a picked answer is graded exactly as a dragged one', () => {
+  const target = { h: 4, m: 15 };
+  const options = readingOptions(target, { tier: 2, seed: 7 });
+  for (const option of options) {
+    const g = grade(target, option);
+    assertEqual(g.correct, option.kind === 'target', 'the wrong choice was graded right, or the right one wrong');
+  }
+});
+
+describe('seeds — the same key, the same numbers');
+
+test('the hash is stable and the generator is reproducible', () => {
+  assertEqual(hashSeed('4:15|0|0|0|0'), hashSeed('4:15|0|0|0|0'));
+  assert(hashSeed('4:15|0|0|0|0') !== hashSeed('4:15|0|0|1|0'), 'two keys hashed alike');
+  const a = rngFrom(99);
+  const b = rngFrom(99);
+  for (let i = 0; i < 20; i += 1) assertEqual(a(), b(), 'the same seed gave different numbers');
+});
+
+test('moving the hash out of the maths deck did not move its questions', () => {
+  // The key it hashes is unchanged, so every generated sum has to come back identical — this
+  // is the only thing standing between a refactor and a child's half-answered column sum.
+  const item = { skill: 'col+3', reps: 2, feeds: 1, correctStreak: 1, lapses: 0 };
+  assertEqual(addSubject.seedOf(item), hashSeed('skill:col+3|2|1|1|0'));
 });
 
 /* ---------------------------------------------------------- curriculum */
@@ -4365,8 +4567,10 @@ test('a lapsed skill re-graduates without touring every case again', () => {
 test('a fact is unaffected by any of it — no cases, no change', () => {
   assertEqual(JSON.stringify(addSubject.pacing({ op: '+', a: 3, b: 5 })), '{}');
   assertEqual(shapesFor('add:3+5').length, 0);
-  assertEqual(shapesFor('4:15').length, 0);
   assert(shapesFor('skill:col+2c').length > 0, 'a skill really does declare its cases');
+  // A clock face has two cases — read it, set it — and declares them through the very same
+  // interface, which is the whole reason there is one.
+  assertEqual(shapesFor('4:15').join(' '), clockSubject.SHAPES.join(' '));
 });
 
 test('the shell still breaks at the same rate it always did', () => {

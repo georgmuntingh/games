@@ -17,6 +17,7 @@
 // Pure, and deterministic: the same seed gives the same numbers, which is the only reason any
 // of this is testable.
 
+import { rngFrom } from '../../seed.js';
 import { mulSteps } from './columns.js';
 import { digitsOf as divDigits, divSteps, quotientOf, remainderOf, rowShape } from './divide.js';
 
@@ -34,20 +35,11 @@ export function parse(itemId) {
 
 /* ------------------------------------------------------------------ randomness */
 
-/**
- * mulberry32 — small, fast, and good enough for picking two-digit numbers. What matters is
- * only that it is a pure function of its seed, so a generated question can be reproduced in a
- * test without the test having to know what the generator was thinking.
- */
-export function rngFrom(seed) {
-  let t = (Number(seed) >>> 0) || 1;
-  return () => {
-    t = (t + 0x6d2b79f5) >>> 0;
-    let x = Math.imul(t ^ (t >>> 15), 1 | t);
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// The generator itself now lives in `seed.js`, because the clock draws its wrong answers from
+// one too and a clock that imported the maths deck to borrow a shuffler would be a dependency
+// nobody could explain. Re-exported here so that this module still names the whole of what a
+// skill is made of: a shape, a seed, and numbers drawn from it.
+export { rngFrom };
 
 /** An integer in [lo, hi], both ends included. */
 const between = (rnd, lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));

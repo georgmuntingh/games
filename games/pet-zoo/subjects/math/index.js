@@ -27,6 +27,7 @@
 // not about the curriculum, and importing it here would close a cycle
 // (srs → subjects → pets → srs). main.js keeps deciding species, exactly as it does today.
 
+import { hashSeed } from '../../seed.js';
 import * as divfacts from './divfacts.js';
 import { quotientOf } from './divide.js';
 import * as facts from './facts.js';
@@ -149,13 +150,9 @@ export const valid = (itemId, item) => {
  * streak (or, once graduated, `reps` and `feeds`), so the numbers change.
  */
 export function seedOf(item) {
-  const key = `${idOf(item)}|${item?.reps ?? 0}|${item?.feeds ?? 0}|${item?.correctStreak ?? 0}|${item?.lapses ?? 0}`;
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < key.length; i += 1) {
-    h ^= key.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h >>> 0;
+  return hashSeed(
+    `${idOf(item)}|${item?.reps ?? 0}|${item?.feeds ?? 0}|${item?.correctStreak ?? 0}|${item?.lapses ?? 0}`
+  );
 }
 
 /**
