@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pet Zoo</title>
-    <script type="module" crossorigin src="/games/assets/games/pet-zoo-ChA9n7vN.js"></script>
+    <script type="module" crossorigin src="/games/assets/games/pet-zoo-B1eMRyyl.js"></script>
     <link rel="modulepreload" crossorigin href="/games/assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="/games/assets/recognize-DolGw8_D.js">
-    <link rel="modulepreload" crossorigin href="/games/assets/yard-J7gEAqD4.js">
+    <link rel="modulepreload" crossorigin href="/games/assets/yard-BLYh8Gpz.js">
     <link rel="modulepreload" crossorigin href="/games/assets/pad-C9HCjdes.js">
-    <link rel="stylesheet" crossorigin href="/games/assets/pet-zoo-BHhBX4ji.css">
+    <link rel="stylesheet" crossorigin href="/games/assets/pet-zoo-BlWh_WcH.css">
     <link rel="stylesheet" crossorigin href="/games/assets/ui-IHdlRC7L.css">
   </head>
   <body>
@@ -62,6 +62,19 @@
             data-i18n-aria-label="clock.aria"
             aria-label="Dra viserne for å stille klokka"
           ></svg>
+        </div>
+
+        <!-- The other way the clock is asked: the face is set to the time and the child picks
+             what it says. Four phrases, never digits — reading a face and saying it out loud is
+             the whole of what this question is for. -->
+        <div id="answer-choices" class="choice-wrap" hidden>
+          <div
+            id="choice-grid"
+            class="choice-grid"
+            role="group"
+            data-i18n-aria-label="answer.choices"
+            aria-label="Hva er klokka?"
+          ></div>
         </div>
 
         <div id="answer-sum" class="sum-wrap" hidden>
