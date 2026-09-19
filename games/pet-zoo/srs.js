@@ -129,7 +129,11 @@ export function createItem({
  */
 export function qualityOf({ correct, ms = 0, reversals = 0, pace = 1 }) {
   if (!correct) return 0;
-  const slow = Math.max(1, pace);
+  // `pace` scales the thresholds by how long this kind of question honestly takes: above 1 for
+  // a sum that has to be written down, below it for a clock face answered with one tap. The
+  // floor is only there to stop a nonsense pace collapsing the thresholds to nothing — it is
+  // not a rule that no question may be quicker than swinging two hands.
+  const slow = Math.max(0.2, pace);
   if (ms > 20000 * slow || reversals >= 2) return 3;
   if (ms > 8000 * slow || reversals >= 1) return 4;
   return 5;

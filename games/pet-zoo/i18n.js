@@ -220,6 +220,9 @@ const STRINGS = {
     'sound.off': 'Sound off',
     'settings.open': 'Settings',
     'clock.aria': 'Drag the clock hands to set the time',
+    // Deliberately says a clock is there without saying what it says: for a reading question
+    // the time is the answer, and an aria-label is not a place to leave it lying about.
+    'clock.ariaRead': 'A clock face — read it, then pick the time below',
 
     'prompt.booting': 'Waking the zoo…',
     'prompt.egg': 'A chilly egg! It hatches at…',
@@ -228,6 +231,12 @@ const STRINGS = {
     'prompt.forgot': '{name} forgot their snack time. It is…',
     'prompt.hungry': '{name} is hungry! They eat at…',
     'prompt.snack': '{name} fancies a snack at…',
+    'prompt.readEgg': 'A chilly egg! What time does the clock say?',
+    'prompt.readEgg1': 'The egg is stirring! Read the clock:',
+    'prompt.readEgg2': 'It is cracking open! One more reading:',
+    'prompt.readForgot': '{name} forgot the time. What does the clock say?',
+    'prompt.readHungry': '{name} is hungry! What time does the clock say?',
+    'prompt.readSnack': '{name} fancies a snack. Read the clock:',
     'button.warm': 'Warm the egg!',
     'button.feed': 'Feed {name}!',
 
@@ -647,6 +656,8 @@ const STRINGS = {
     'answer.keypad': 'Number buttons',
     'answer.digit': 'Put down {n}',
     'answer.clear': 'Clear',
+    'answer.choices': 'Pick the time',
+    'answer.choice': 'Pick {time}',
     'answer.nextRow': 'Next row',
     'settings.answerMode': 'Answering',
     'settings.admire': 'Time to look at the pet',
@@ -698,6 +709,7 @@ const STRINGS = {
     'sound.off': 'Lyd av',
     'settings.open': 'Innstillinger',
     'clock.aria': 'Dra viserne for å stille klokka',
+    'clock.ariaRead': 'En klokke — les av den, og velg tida under',
 
     'prompt.booting': 'Vekker dyrehagen…',
     'prompt.egg': 'Et kaldt egg! Det klekkes…',
@@ -706,6 +718,12 @@ const STRINGS = {
     'prompt.forgot': '{name} har glemt måltidet sitt. Klokka er…',
     'prompt.hungry': '{name} er sulten! Spiser…',
     'prompt.snack': '{name} vil gjerne ha en matbit…',
+    'prompt.readEgg': 'Et kaldt egg! Hva er klokka?',
+    'prompt.readEgg1': 'Egget rører på seg! Les av klokka:',
+    'prompt.readEgg2': 'Det slår sprekker! Én avlesning til:',
+    'prompt.readForgot': '{name} har glemt tida. Hva er klokka?',
+    'prompt.readHungry': '{name} er sulten! Hva er klokka?',
+    'prompt.readSnack': '{name} vil gjerne ha en matbit. Hva er klokka?',
     'button.warm': 'Varm egget!',
     'button.feed': 'Mat {name}!',
 
@@ -1122,6 +1140,8 @@ const STRINGS = {
     'answer.keypad': 'Talltaster',
     'answer.digit': 'Sett inn {n}',
     'answer.clear': 'Tøm',
+    'answer.choices': 'Velg klokkeslettet',
+    'answer.choice': 'Velg {time}',
     'answer.nextRow': 'Neste rad',
     'settings.answerMode': 'Svarer med',
     'settings.admire': 'Tid til å se på dyret',

@@ -4,6 +4,8 @@
 // Angles are degrees measured clockwise from 12 o'clock, so a point on the face is
 // (cx + r·sin θ, cy − r·cos θ) and the inverse is atan2(dx, −dy).
 
+import { rngFrom } from './seed.js';
+
 export const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 export const MINUTE_STEP = 5; // the child never has to be more precise than this
 export const STEP_DEG = MINUTE_STEP * 6; // 30° between snap points
@@ -221,4 +223,119 @@ export function grade(target, answer) {
     minuteDelta,
     hourDelta,
   };
+}
+
+/* ----------------------------------------------------------- reading the face */
+
+// The clock's second question. Instead of being told a time and setting the hands, the child
+// is shown a face and picks what it says out of four — which is the half of telling the time
+// that dragging cannot teach, because a child can learn "big hand on the 3" without ever
+// being able to read a clock on a wall.
+//
+// The three wrong answers are the whole of the exercise. A distractor drawn at random is a
+// distractor a child eliminates without reading the face at all; these are the four ways a
+// clock is actually misread, so eliminating one means having read something.
+
+export const READ_OPTIONS = 4;
+
+const wrapHour = (h) => (mod(h, 12) === 0 ? 12 : mod(h, 12));
+
+/**
+ * The hands read the wrong way round: the hour taken from the numeral the *minute* hand
+ * points at, the minutes from where the hour hand is sitting. 4:15 becomes 3:20 — which is a
+ * real clock, says something quite different, and is what a child who has not yet sorted the
+ * two hands out will say.
+ */
+const swapped = ({ h, m }) => ({ h: m === 0 ? 12 : m / MINUTE_STEP, m: mod(h, 12) * MINUTE_STEP });
+
+/**
+ * The hour next door. The classic mistake, and the one `grade` already has a name and a
+ * teaching line for: past the half hour the little hand is nearer the *next* numeral than its
+ * own, so that is the direction this leans — and in Norwegian it is the "halv fem" trap
+ * exactly, where 4:30 is read as 5:30.
+ */
+const hourOff = ({ h, m }, rnd) => ({ h: wrapHour(h + (m >= 30 ? 1 : rnd() < 0.5 ? 1 : -1)), m });
+
+/** The minutes counted the wrong way round the face: quarter past read as quarter to. */
+const mirror = ({ h, m }) => ({ h, m: (60 - m) % 60 });
+
+/** One tick out. Not a misconception — a miscount, which is what makes it worth offering. */
+const tick = ({ h, m }, rnd) => {
+  const next = advanceMinuteTo({ h, m }, mod(m + (rnd() < 0.5 ? MINUTE_STEP : -MINUTE_STEP), 60));
+  return { h: next.h, m: next.m };
+};
+
+export const READ_FAMILIES = { swapped, hourOff, mirror, tick };
+
+const FAMILY_IDS = Object.keys(READ_FAMILIES);
+
+/**
+ * Which confusions each tier is worth offering, as the cases it is actually teaching.
+ *
+ * `prefer` is taken in order and `rest` is shuffled, so a time gets the distractor that
+ * belongs to its own lesson and still does not offer the same three wrong answers forever.
+ * `mirror` is missing from tiers 0 and 1 because it has nothing to say there — the mirror of
+ * :00 is :00 and the mirror of :30 is :30.
+ */
+const READ_ORDER = {
+  0: { prefer: ['hourOff'], rest: ['swapped', 'tick'] },
+  1: { prefer: ['hourOff'], rest: ['swapped', 'tick'] },
+  2: { prefer: ['mirror', 'hourOff'], rest: ['swapped', 'tick'] },
+  3: { prefer: ['swapped', 'hourOff'], rest: ['tick', 'mirror'] },
+};
+
+/** Fisher-Yates, from the item's own seed, so a reload deals the same hand. */
+function shuffle(list, rnd) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Four times to choose between, one of them the truth.
+ *
+ * `tier` decides which confusions are offered and `seed` decides everything that is left to
+ * chance, so the same item asked twice — after a reload, or on the retry two questions after
+ * a wrong answer — offers the very same four in the very same order. A child who has just had
+ * a time explained meets the question they were explained, not a new one.
+ *
+ * Total for all 144 times: a family that collapses onto the target (swapped hands at 3:15,
+ * the mirror of anything on the hour or the half) is simply skipped, and if that leaves the
+ * set short it is filled from the rest of the face.
+ */
+export function readingOptions(target, { tier = 0, seed = 0, count = READ_OPTIONS } = {}) {
+  const rnd = rngFrom(seed);
+  const order = READ_ORDER[tier] ?? READ_ORDER[0];
+  const queue = [...order.prefer, ...shuffle(order.rest, rnd)];
+  for (const id of FAMILY_IDS) if (!queue.includes(id)) queue.push(id);
+
+  const taken = new Set([timeId(target.h, target.m)]);
+  const options = [{ h: target.h, m: target.m, kind: 'target' }];
+
+  for (const kind of queue) {
+    if (options.length >= count) break;
+    const option = READ_FAMILIES[kind](target, rnd);
+    const key = timeId(option.h, option.m);
+    if (taken.has(key)) continue; // the family collapsed onto something already offered
+    taken.add(key);
+    options.push({ ...option, kind });
+  }
+
+  // Still short — every family that had anything to say has said it. Walk the face from a
+  // seeded starting point rather than drawing at random, so the filler is reproducible too.
+  let step = Math.floor(rnd() * 144);
+  while (options.length < count) {
+    const h = wrapHour(1 + (step % 12));
+    const m = (Math.floor(step / 12) % (60 / MINUTE_STEP)) * MINUTE_STEP;
+    step += 1;
+    const key = timeId(h, m);
+    if (taken.has(key)) continue;
+    taken.add(key);
+    options.push({ h, m, kind: 'other' });
+  }
+
+  return shuffle(options, rnd);
 }
