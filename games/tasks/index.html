@@ -343,10 +343,22 @@
           Stored in this browser only, and sent only to openrouter.ai. Nothing is uploaded
           anywhere else.
         </p>
-        <label class="field">
-          <span>Model</span>
-          <select id="model-picker"></select>
-        </label>
+        <div class="field">
+          <span id="model-label">Model</span>
+          <div class="picker-row">
+            <select id="model-picker" aria-labelledby="model-label"></select>
+            <button
+              type="button"
+              id="refresh-models-icon"
+              class="icon-btn"
+              title="Refresh model list"
+              aria-label="Refresh model list"
+            >
+              ↻
+            </button>
+          </div>
+        </div>
+        <p id="models-state" class="muted small"></p>
         <div class="row">
           <button type="button" id="refresh-models">Refresh model list</button>
           <button type="button" id="clear-key" class="danger">Clear key</button>

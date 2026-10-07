@@ -57,7 +57,13 @@ import {
   CONTEXT_BLOCKS,
 } from '../exporter.js';
 import { parseJsonResponse, ACTIONS, askMessages, ASK_SYSTEM } from '../prompts.js';
-import { createSseReader } from '../llm.js';
+import {
+  createSseReader,
+  normaliseModels,
+  fetchModels,
+  getCachedModels,
+  setCachedModels,
+} from '../llm.js';
 import { crc32, createZip } from '../zip.js';
 
 /* ------------------------------------------------------------- harness */
@@ -2220,6 +2226,94 @@ dropboxTest('an unchanged folder is settled in one request', async () => {
   remote.log.length = 0;
   await storage.save(moved.files);
   assertEqual(remote.log, []);
+});
+
+describe('model list');
+
+const MODEL_PAYLOAD = {
+  data: [
+    { id: 'b/pricey', name: 'Pricey', pricing: { prompt: '0.000003' } },
+    { id: 'a/cheap', name: 'Cheap', pricing: { prompt: '0.0000001' } },
+    { id: 'z/free', pricing: { prompt: '0' } },
+    { id: 'a/free', name: 'Also free', pricing: { prompt: '0' } },
+    { id: 'img/out', pricing: { prompt: '0' }, architecture: { output_modalities: ['image'] } },
+    { id: 'no/price', name: 'No price', pricing: {} },
+  ],
+};
+
+/** Stub `fetch` with a handler per path, restoring it and the cached list afterwards. */
+function modelsTest(name, fn) {
+  test(name, async () => {
+    const realFetch = globalThis.fetch;
+    const saved = localStorage.getItem('tasks.openrouter.models');
+    const calls = [];
+    const stub = (routes) => {
+      globalThis.fetch = async (url, init = {}) => {
+        const path = new URL(url).pathname.replace('/api/v1', '');
+        calls.push({ path, auth: init.headers?.Authorization ?? null });
+        const status = routes[path] ?? 404;
+        return new Response(JSON.stringify(status === 200 ? MODEL_PAYLOAD : {}), { status });
+      };
+    };
+    try {
+      await fn({ stub, calls });
+    } finally {
+      globalThis.fetch = realFetch;
+      if (saved === null) localStorage.removeItem('tasks.openrouter.models');
+      else localStorage.setItem('tasks.openrouter.models', saved);
+    }
+  });
+}
+
+test('only priced text models are listed, cheapest first and then by id', () => {
+  const ids = normaliseModels(MODEL_PAYLOAD).map((m) => m.id);
+  assertEqual(ids, ['a/free', 'z/free', 'a/cheap', 'b/pricey']);
+  assertEqual(normaliseModels(MODEL_PAYLOAD).find((m) => m.id === 'z/free').name, 'z/free');
+  assertEqual(normaliseModels(null), []);
+});
+
+modelsTest('with a key the list is the account’s own', async ({ stub, calls }) => {
+  stub({ '/models/user': 200 });
+  const { models, scope } = await fetchModels({ key: 'sk-or-test' });
+  assertEqual(scope, 'account');
+  assertEqual(models.length, 4);
+  assertEqual(calls, [{ path: '/models/user', auth: 'Bearer sk-or-test' }]);
+});
+
+modelsTest('without a key the public catalogue is read, and no key is sent', async ({ stub, calls }) => {
+  stub({ '/models': 200 });
+  const { scope } = await fetchModels();
+  assertEqual(scope, 'public');
+  assertEqual(calls, [{ path: '/models', auth: null }]);
+});
+
+modelsTest('a refused key falls back to the public catalogue', async ({ stub, calls }) => {
+  stub({ '/models/user': 401, '/models': 200 });
+  const { models, scope } = await fetchModels({ key: 'sk-or-bad' });
+  assertEqual(scope, 'public');
+  assertEqual(models.length, 4);
+  assertEqual(calls.map((c) => c.path), ['/models/user', '/models']);
+});
+
+modelsTest('when both requests fail the error reaches the caller', async ({ stub }) => {
+  stub({});
+  let failed = false;
+  try {
+    await fetchModels({ key: 'sk-or-test' });
+  } catch {
+    failed = true;
+  }
+  assert(failed, 'a list that could not be read must not look like an empty one');
+});
+
+modelsTest('the cached list round-trips, and a corrupt one reads as none', async () => {
+  const entry = { models: normaliseModels(MODEL_PAYLOAD), scope: 'account', fetchedAt: 1 };
+  setCachedModels(entry);
+  assertEqual(getCachedModels(), entry);
+  localStorage.setItem('tasks.openrouter.models', '{not json');
+  assertEqual(getCachedModels(), null);
+  localStorage.setItem('tasks.openrouter.models', '{"models":"nope"}');
+  assertEqual(getCachedModels(), null);
 });
 
 /* ---------------------------------------------------------------- run */

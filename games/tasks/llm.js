@@ -8,6 +8,7 @@
 const BASE = 'https://openrouter.ai/api/v1';
 const KEY_STORAGE = 'tasks.openrouter.key';
 const MODEL_STORAGE = 'tasks.openrouter.model';
+const MODELS_STORAGE = 'tasks.openrouter.models';
 
 export const DEFAULT_MODEL = 'google/gemini-2.0-flash-001';
 
@@ -34,14 +35,8 @@ export function formatPrice(pricePerMillion) {
   return `$${pricePerMillion.toFixed(2)}/M`;
 }
 
-/**
- * The model catalogue, cheapest first. This endpoint needs no authentication, so the
- * dropdown can be populated before the user has entered a key.
- */
-export async function fetchModels() {
-  const response = await fetch(`${BASE}/models`);
-  if (!response.ok) throw new Error(`OpenRouter models request failed (${response.status})`);
-  const payload = await response.json();
+/** OpenRouter's model payload as dropdown entries: text models with a price, cheapest first. */
+export function normaliseModels(payload) {
   return (payload?.data ?? [])
     .filter((m) => m?.id && (m.architecture?.output_modalities ?? ['text']).includes('text'))
     .map((m) => ({
@@ -52,6 +47,47 @@ export async function fetchModels() {
     }))
     .filter((m) => m.price != null)
     .sort((a, b) => a.price - b.price || a.id.localeCompare(b.id));
+}
+
+async function requestModels(path, init) {
+  const response = await fetch(`${BASE}${path}`, init);
+  if (!response.ok) throw new Error(`OpenRouter models request failed (${response.status})`);
+  return normaliseModels(await response.json());
+}
+
+/**
+ * The model catalogue, cheapest first. With a key it is the account's own list, filtered by
+ * its provider and privacy settings; without one, or when that request fails, it is the
+ * public catalogue, which needs no authentication so the dropdown fills before a key exists.
+ */
+export async function fetchModels({ key } = {}) {
+  if (key) {
+    try {
+      const models = await requestModels('/models/user', { headers: headersFor(key) });
+      return { models, scope: 'account' };
+    } catch {
+      // A bad key or a blocked endpoint should still leave something to pick from.
+    }
+  }
+  return { models: await requestModels('/models'), scope: 'public' };
+}
+
+/** The last fetched list, so the dropdown fills at once and survives being offline. */
+export function getCachedModels() {
+  try {
+    const entry = JSON.parse(localStorage.getItem(MODELS_STORAGE));
+    return Array.isArray(entry?.models) ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedModels(entry) {
+  try {
+    localStorage.setItem(MODELS_STORAGE, JSON.stringify(entry));
+  } catch {
+    // A full or blocked storage only costs the cache; the list on screen is still current.
+  }
 }
 
 /* ------------------------------------------------------------ completion */
