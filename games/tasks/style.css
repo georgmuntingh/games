@@ -851,6 +851,38 @@ div.vis-tooltip {
   border-color: var(--ui-accent);
 }
 
+.icon-btn[disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.picker-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.picker-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+#refresh-models-icon.loading {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #refresh-models-icon.loading {
+    animation: none;
+  }
+}
+
 #project .field + .field,
 #project .grid2,
 #project .roster,

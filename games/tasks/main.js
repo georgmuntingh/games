@@ -1868,7 +1868,7 @@ function openSettings() {
   $('api-key').value = llm.getKey();
   $('dropbox-key').value = dropbox.getAppKey();
   if (!$('settings').open) $('settings').showModal();
-  if (!$('model-picker').options.length) loadModels();
+  if (!$('model-picker').options.length && !showCachedModels()) loadModels();
 }
 
 /**
@@ -1933,37 +1933,90 @@ function refreshStorageState() {
     : 'Nothing to move.';
 }
 
-async function loadModels() {
+/** Fill the dropdown, keeping the saved model selectable even when the list lacks it. */
+function fillModelPicker(models) {
   const picker = $('model-picker');
+  const chosen = llm.getModel();
   picker.textContent = '';
-  const placeholder = document.createElement('option');
-  placeholder.textContent = 'Loading models…';
-  picker.append(placeholder);
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model.id;
+    option.textContent = `${model.name} — ${llm.formatPrice(model.price)}`;
+    option.selected = model.id === chosen;
+    picker.append(option);
+  }
+  if (!models.some((m) => m.id === chosen)) {
+    const option = document.createElement('option');
+    option.value = chosen;
+    option.textContent = `${chosen} (current)`;
+    option.selected = true;
+    picker.prepend(option);
+  }
+}
+
+/** Say how many models the list holds, where they came from and when. */
+function describeModels({ models, scope, fetchedAt }) {
+  const source = scope === 'account' ? 'available to your account' : 'in the public catalogue';
+  const when = new Date(fetchedAt).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  $('models-state').textContent = `${models.length} models ${source} · updated ${when}`;
+}
+
+/** Show the cached list, if there is one. Returns whether there was. */
+function showCachedModels() {
+  const cached = llm.getCachedModels();
+  if (!cached) return false;
+  fillModelPicker(cached.models);
+  describeModels(cached);
+  return true;
+}
+
+let modelsLoading = null; // the request in flight, shared by every caller until it settles
+
+/**
+ * Fetch the model list and repopulate the dropdown. `quiet` is for the background refresh at
+ * startup: it must not talk over the boot messages, and a failure there leaves the cached list.
+ */
+function loadModels({ quiet = false } = {}) {
+  modelsLoading ??= refreshModels(quiet).finally(() => {
+    modelsLoading = null;
+  });
+  return modelsLoading;
+}
+
+async function refreshModels(quiet) {
+  const picker = $('model-picker');
+  const buttons = [$('refresh-models'), $('refresh-models-icon')];
+  for (const button of buttons) button.disabled = true;
+  $('refresh-models-icon').classList.add('loading');
+  // An existing list stays usable while the new one loads, and stays put if it fails.
+  const hadList = picker.options.length > 0;
+  if (!hadList) {
+    const placeholder = document.createElement('option');
+    placeholder.textContent = 'Loading models…';
+    picker.append(placeholder);
+  }
   try {
-    const models = await llm.fetchModels();
-    const chosen = llm.getModel();
-    picker.textContent = '';
-    for (const model of models.slice(0, 120)) {
+    const { models, scope } = await llm.fetchModels({ key: llm.getKey() });
+    const entry = { models, scope, fetchedAt: Date.now() };
+    llm.setCachedModels(entry);
+    fillModelPicker(models);
+    describeModels(entry);
+    if (!quiet) status(`Loaded ${models.length} models.`);
+  } catch (error) {
+    if (!hadList) {
+      picker.textContent = '';
       const option = document.createElement('option');
-      option.value = model.id;
-      option.textContent = `${model.name} — ${llm.formatPrice(model.price)}`;
-      option.selected = model.id === chosen;
+      option.value = llm.getModel();
+      option.textContent = `${llm.getModel()} — model list unavailable`;
       picker.append(option);
     }
-    if (!models.some((m) => m.id === chosen)) {
-      const option = document.createElement('option');
-      option.value = chosen;
-      option.textContent = `${chosen} (current)`;
-      option.selected = true;
-      picker.prepend(option);
-    }
-  } catch (error) {
-    picker.textContent = '';
-    const option = document.createElement('option');
-    option.value = llm.getModel();
-    option.textContent = `${llm.getModel()} — model list unavailable`;
-    picker.append(option);
-    status(`Could not load models: ${error.message}`, true);
+    if (!quiet) status(`Could not load models: ${error.message}`, true);
+  } finally {
+    for (const button of buttons) button.disabled = false;
+    $('refresh-models-icon').classList.remove('loading');
   }
 }
 
@@ -2144,7 +2197,8 @@ function wireEvents() {
     status('API key cleared.');
   });
   $('model-picker').addEventListener('change', (event) => llm.setModel(event.target.value));
-  $('refresh-models').addEventListener('click', loadModels);
+  $('refresh-models').addEventListener('click', () => loadModels());
+  $('refresh-models-icon').addEventListener('click', () => loadModels());
 
   $('connect-folder').addEventListener('click', async () => {
     try {
@@ -2501,6 +2555,9 @@ async function boot() {
   refreshStorageState();
   render();
   graph.fit();
+  showCachedModels();
+  // With a key the account's list can change between visits, so fetch it fresh in the background.
+  if (llm.getKey()) loadModels({ quiet: true });
   if (demo) status('Demo project loaded. Settings ⚙ to clear it and start empty.');
   else if (signedIn) status(`Reading Dropbox as ${storage.state.folderName}. ${conflictNote()}`.trim());
   else if (conflictNote()) status(conflictNote());
