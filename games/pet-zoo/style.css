@@ -1837,6 +1837,65 @@ body.in-habitat .zoo-bar {
   height: 100%;
 }
 
+/* The picnic basket: the snacks bought in the shop, under the scene, each with what is left. */
+.hab-tray {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+  max-width: 820px;
+  margin: 0.55rem auto 0;
+  padding: 0 1rem;
+}
+
+.hab-tray[hidden] {
+  display: none;
+}
+
+.tray-snack {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  padding: 4px;
+  border: 2px solid var(--pz-card-2);
+  border-radius: 16px;
+  background: var(--pz-card);
+  box-shadow: 0 2px 6px rgba(60, 48, 84, 0.12);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.12s ease;
+}
+
+.tray-snack:active {
+  transform: scale(0.92);
+}
+
+.tray-snack:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tray-snack svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.tray-count {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--pz-warm);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
 .hab-note {
   margin: 0.6rem 1rem 0;
   text-align: center;
@@ -2018,6 +2077,38 @@ body.in-habitat .zoo-bar {
   font-weight: 800;
   text-anchor: middle;
   fill: #43354f;
+}
+
+.hab-stick {
+  fill: #f4f1f9;
+  stroke: rgba(60, 48, 84, 0.3);
+  stroke-width: 0.3;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+.hab-seed {
+  fill: #43354f;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+.hab-stick.is-fading,
+.hab-seed.is-fading {
+  opacity: 0;
+}
+
+/* Soda hiccups and chili steam, floating up off the pet. */
+.hab-bubble-pop {
+  fill: rgba(255, 255, 255, 0.35);
+  stroke: rgba(255, 255, 255, 0.95);
+  stroke-width: 0.45;
+  pointer-events: none;
+}
+
+.hab-steam {
+  fill: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
 }
 
 .hab-burp rect {
@@ -2830,6 +2921,43 @@ body.in-habitat .zoo-bar {
 
 .shop-card.is-locked .shop-state::before {
   content: '🔒 ';
+}
+
+/* The snack shelf: the snack, a line about what it does, the pack price, and how many the
+   basket already holds. */
+.snack-card svg {
+  width: 52px;
+  height: 52px;
+}
+
+.snack-about {
+  display: block;
+  min-height: 2.1em;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  line-height: 1.05rem;
+  color: var(--pz-ink-soft);
+}
+
+.shop-pack {
+  margin-left: 0.25rem;
+  font-weight: 700;
+  color: var(--pz-ink-soft);
+}
+
+.snack-have {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--pz-good);
+}
+
+.snack-preview {
+  display: block;
+  width: 100%;
+  max-height: 120px;
+  background: var(--pz-card-2);
 }
 
 .shop-confirm-card .confirm-preview {

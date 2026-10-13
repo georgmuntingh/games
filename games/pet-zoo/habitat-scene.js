@@ -105,7 +105,7 @@ const FOOD_STYLES = {
 const foodStyle = (kind) => FOOD_STYLES[kind] ?? null;
 
 /** A cookie is mostly crumbs. Everything else sheds one, sometimes two. */
-const crumbsPerBite = (kind) => (kind === 'cookie' ? 3 : 1 + (Math.random() < 0.4 ? 1 : 0));
+const crumbsPerBite = (kind) => (kind === 'cookie' ? 3 : kind === 'kernel' ? 0 : 1 + (Math.random() < 0.4 ? 1 : 0));
 
 /** The keyframes behind each move, played on `.pet-inner` once per mouthful. */
 const MOVES = {
@@ -140,6 +140,9 @@ const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
 /** The postures where the mouth is busy and the feet are not. `stepMeal` owns their clock. */
 const MEAL_STATES = new Set(['notice', 'dip', 'toss', 'chew', 'gulp', 'savour', 'eat', 'sniff', 'reject']);
 
+/** Snack shows that hold the pet still (or run it about) and own its face while they last. */
+const SHOW_STATES = new Set(['freeze', 'spit', 'pant', 'zoom']);
+
 /** Parse an SVG-string fragment into a live node, so pets.js markup can be retained. */
 function nodeFrom(markup) {
   const holder = document.createElementNS(SVG_NS, 'g');
@@ -151,7 +154,7 @@ function nodeFrom(markup) {
  * The scene. One instance for the whole game — `open` swaps which pet is in it, so the
  * listeners below are wired once and never re-attached.
  */
-export function createHabitatScene({ host, fx }) {
+export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   let root = null; // the <svg class="habitat">
   let actors = null; // the <g> the movers live in
   let habitat = null;
@@ -169,6 +172,9 @@ export function createHabitatScene({ host, fx }) {
   let crumbs = []; // { node, x, y, vx, vy, landed, born }
   let belly = 0; // treats eaten this visit; it only ever makes the pet rounder, and sleepier
   let labels = {}; // the few words the scene shows, translated by whoever opened it
+  let buffs = {}; // what the last snack is still doing to the pet: { hiccup: { until, next }, … }
+  let filterIds = null; // the SVG filters a snack can tint the pet with, per open scene
+  let opens = 0; // keeps every open scene's filter ids distinct
   let mind = { state: 'idle', until: 0, target: 0 };
   let stroke = null; // { pointerId, travelled, lastX, lastY, purredAt }
   let drag = null; // { pointerId, kind, node, samples: [] }
@@ -314,7 +320,7 @@ export function createHabitatScene({ host, fx }) {
       return;
     }
 
-    if (pet.moodUntil && now() > pet.moodUntil && !MEAL_STATES.has(mind.state)) {
+    if (pet.moodUntil && now() > pet.moodUntil && !MEAL_STATES.has(mind.state) && !SHOW_STATES.has(mind.state)) {
       pet.moodUntil = 0;
       setMood(restingMood());
     }
@@ -360,6 +366,17 @@ export function createHabitatScene({ host, fx }) {
         return;
       case 'peck':
         if (now() >= mind.until) finishPeck();
+        return;
+      case 'freeze':
+      case 'spit':
+      case 'pant':
+        if (now() >= mind.until) {
+          setMood(restingMood());
+          if (!tidyUp(5)) idleFor(300, 900);
+        }
+        return;
+      case 'zoom':
+        stepZoom(dt);
         return;
       case 'notice':
       case 'dip':
@@ -504,15 +521,20 @@ export function createHabitatScene({ host, fx }) {
       if (treat.falling) {
         treat.vy += 260 * dt;
         treat.y += treat.vy * dt;
+        if (treat.vx) treat.x = clamp(treat.x + treat.vx * dt, 6, 194);
         if (treat.y >= WALK_Y - 2) {
           treat.y = WALK_Y - 2;
           treat.falling = false;
+          treat.vx = 0;
           // Down, and staying down. Food that faded away uneaten was the one thing in this
           // scene that punished a child for missing; now the pet comes and gets it.
           treat.dropped = true;
+          landed(treat);
         }
       }
     }
+    // Popcorn bursts the moment it lands, so the list may have changed under the loop above.
+    treats = treats.filter((treat) => !treat.gone);
     const at = now();
     for (const [spot, due] of regrowAt) {
       if (at >= due) {
@@ -607,9 +629,11 @@ export function createHabitatScene({ host, fx }) {
     audio.play('gulp');
     if (loved) audio.play('love');
     buzz([10, 40, 10]);
+    if (treat.snack) onSnackEaten(treat.kind);
     removeTreat(treat);
     ate(treat.kind);
     meal = null;
+    afterEffect(treat.kind);
     setMood('happy');
     pet.moodUntil = now() + HAPPY_MS;
     mind = { state: 'eat', until: now() + EAT_MS, target: pet.x };
@@ -634,6 +658,8 @@ export function createHabitatScene({ host, fx }) {
       taste: tasteFor(treat),
       style: styleFor(treat),
       tossed: false,
+      // A popcorn kernel is a snap of the jaws, not a meal: no long look first, no hearts after.
+      quick: treat.kind === 'kernel',
     };
     if (still) {
       swallowWhole(treat);
@@ -653,7 +679,7 @@ export function createHabitatScene({ host, fx }) {
     audio.play(meal.taste === 'love' ? 'love' : 'grab');
     if (meal.taste === 'love') hop(9);
     else pop(inner(), { power: 0.6 });
-    mind = { state: 'notice', until: now() + NOTICE_MS, target: pet.x };
+    mind = { state: 'notice', until: now() + (meal.quick ? 80 : NOTICE_MS), target: pet.x };
   }
 
   function beginDip() {
@@ -713,6 +739,7 @@ export function createHabitatScene({ host, fx }) {
     pet.wrap.classList.remove('is-chewing');
     const kind = meal.treat.kind;
     meal.swallowed = true;
+    if (meal.treat.snack) onSnackEaten(kind);
     removeTreat(meal.treat);
     audio.play('gulp');
     buzz([10, 40, 10]);
@@ -773,7 +800,9 @@ export function createHabitatScene({ host, fx }) {
   }
 
   /** After the hearts: a nap if that was one treat too many, a tidy-up if it was messy. */
-  function afterMeal() {
+  function afterMeal(kind) {
+    // A snack's own show comes first; a feast can wait until the chili has worn off.
+    if (afterEffect(kind)) return;
     if (!still && belly >= BELLY_FULL) {
       beginComa();
       return;
@@ -839,9 +868,32 @@ export function createHabitatScene({ host, fx }) {
         vy: -Math.random() * 30,
         landed: false,
         born: now(),
+        life: CRUMB_LIFE,
+        edible: true,
+        bounces: 0,
       });
     }
-    while (crumbs.length > CRUMB_MAX) crumbs.shift().node.remove();
+    trimCrumbs();
+  }
+
+  /** Crumbs first, then anything else on the ground, oldest first, down to the cap. */
+  function trimCrumbs() {
+    while (crumbs.filter((crumb) => crumb.edible).length > CRUMB_MAX) {
+      const oldest = crumbs.find((crumb) => crumb.edible);
+      oldest.node.remove();
+      crumbs = crumbs.filter((crumb) => crumb !== oldest);
+    }
+  }
+
+  /**
+   * Something that is not a crumb but lies about like one — a spat-out seed, a lollipop
+   * stick. Same physics, never tidied up, and gone by itself after `life`.
+   */
+  function litter(node, { x, y, vx = 0, vy = 0, life = 6000, bounces = 0 }) {
+    if (!actors) return;
+    actors.append(node);
+    crumbs.push({ node, x, y, vx, vy, landed: false, born: now(), life, edible: false, bounces });
+    if (crumbs.length > CRUMB_MAX * 2) crumbs.shift().node.remove();
   }
 
   function stepCrumbs(dt) {
@@ -853,12 +905,18 @@ export function createHabitatScene({ host, fx }) {
         crumb.y += crumb.vy * dt;
         if (crumb.y >= WALK_Y - 0.8) {
           crumb.y = WALK_Y - 0.8;
-          crumb.landed = true;
+          if (crumb.bounces > 0 && crumb.vy > 30) {
+            crumb.bounces -= 1;
+            crumb.vy = -crumb.vy * 0.45;
+            crumb.vx *= 0.6;
+          } else {
+            crumb.landed = true;
+          }
         }
       }
-      if (at - crumb.born > CRUMB_LIFE - 900) crumb.node.classList.add('is-fading');
+      if (at - crumb.born > crumb.life - 900) crumb.node.classList.add('is-fading');
     }
-    const stale = crumbs.filter((crumb) => at - crumb.born > CRUMB_LIFE);
+    const stale = crumbs.filter((crumb) => at - crumb.born > crumb.life);
     if (stale.length) {
       for (const crumb of stale) crumb.node.remove();
       crumbs = crumbs.filter((crumb) => !stale.includes(crumb));
@@ -870,7 +928,7 @@ export function createHabitatScene({ host, fx }) {
     if (!pet) return null;
     return (
       crumbs
-        .filter((crumb) => crumb.landed && Math.abs(crumb.x - pet.x) <= CRUMB_REACH)
+        .filter((crumb) => crumb.edible && crumb.landed && Math.abs(crumb.x - pet.x) <= CRUMB_REACH)
         .filter((crumb) => crumb.x >= habitat.roam.x0 - MOUTH.x && crumb.x <= habitat.roam.x1 + MOUTH.x)
         .sort((a, b) => Math.abs(a.x - pet.x) - Math.abs(b.x - pet.x))[0] ?? null
     );
@@ -909,7 +967,8 @@ export function createHabitatScene({ host, fx }) {
   /* ------------------------------------------------------------- the belly */
 
   function ate(kind) {
-    belly += kind === 'cake' || kind === 'feast' ? 2 : 1;
+    // A popcorn kernel is a mouthful, not a meal: five of them make about one.
+    belly += kind === 'cake' || kind === 'feast' ? 2 : kind === 'kernel' ? 0.25 : 1;
     shapeBody();
   }
 
@@ -1034,12 +1093,21 @@ export function createHabitatScene({ host, fx }) {
         if (at >= meal.nextAt) bite();
         return;
       case 'gulp':
-        if (at >= mind.until) beginSavour();
+        if (at < mind.until) return;
+        if (meal.quick) {
+          const kind = treat.kind;
+          pop(inner(), { power: 0.5 });
+          endMeal();
+          afterMeal(kind);
+        } else {
+          beginSavour();
+        }
         return;
       case 'savour':
         if (at >= mind.until) {
+          const kind = treat.kind;
           endMeal();
-          afterMeal();
+          afterMeal(kind);
         }
         return;
       case 'sniff': {
@@ -1068,6 +1136,291 @@ export function createHabitatScene({ host, fx }) {
         // Something else took the pet over — the nap, or the scene closing behind us.
         endMeal();
     }
+  }
+
+  /* ----------------------------------------------------------------- snacks */
+
+  // What the shop's snacks do. Everything here is decoration on top of the ordinary meal —
+  // the walk, the chew and the gulp are the same as for a berry. A snack only adds a moment
+  // when it lands (`landed`) and a show once it is eaten (`afterEffect`), and some of those
+  // shows leave a lingering *buff* that `stepBuffs` keeps ticking while the pet carries on.
+
+  /** A snack from the picnic basket, dropped from the sky a little way from the pet. */
+  function dropSnack(kind) {
+    if (!pet || !habitat || napping || item?.hatchedAt === null || !actors) return false;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = clamp(pet.x + side * (16 + Math.random() * 16), habitat.roam.x0 + 4, habitat.roam.x1 - 4);
+    const treat = spawnTreat(kind, x, still ? WALK_Y - 2 : 8, { snack: true });
+    if (still) {
+      treat.dropped = true;
+      landed(treat);
+    } else {
+      treat.falling = true;
+      treat.vy = 0;
+    }
+    audio.play('grab');
+    return true;
+  }
+
+  /** A loose treat with no plant to grow back on. */
+  function spawnTreat(kind, x, y, extra = {}) {
+    const wrap = svgEl('g', { class: 'hab-treat hab-grab' });
+    wrap.innerHTML = `<g class="hab-art hab-arrive">${treatSvg(kind, habitat.palette)}</g>`;
+    place(wrap, x, y);
+    actors.append(wrap);
+    const treat = { wrap, x, y, spot: null, kind, held: false, falling: false, dropped: false, vy: 0, vx: 0, ...extra };
+    treats.push(treat);
+    return treat;
+  }
+
+  /** How many snacks are lying about uneaten — so the tray can count them as already spent. */
+  const pendingSnacks = (kind) =>
+    treats.filter((treat) => treat.snack && treat.kind === kind && !treat.gone).length;
+
+  /** A treat touched down. Most just sit there; a couple of snacks make an entrance. */
+  function landed(treat) {
+    if (treat.kind === 'popcorn' && !still) {
+      burstPopcorn(treat);
+    } else if (treat.kind === 'jelly' && !still) {
+      treat.wrap.querySelector('.hab-art')?.animate(
+        [
+          { transform: 'scale(1.3, 0.7)' },
+          { transform: 'scale(0.85, 1.2)', offset: 0.3 },
+          { transform: 'scale(1.1, 0.92)', offset: 0.55 },
+          { transform: 'scale(0.96, 1.04)', offset: 0.8 },
+          { transform: 'scale(1, 1)' },
+        ],
+        { duration: 700, easing: 'ease-out' }
+      );
+      audio.play('boing');
+    }
+  }
+
+  /** Popcorn pops on landing: the bag is gone and five kernels go everywhere. */
+  function burstPopcorn(treat) {
+    treat.gone = true;
+    treat.wrap.remove();
+    if (treat.snack) onSnackEaten('popcorn');
+    audio.play('bounce', { power: 0.5 });
+    for (let i = 0; i < 5; i += 1) {
+      const kernel = spawnTreat('kernel', treat.x, treat.y - 2);
+      kernel.falling = true;
+      kernel.vx = (i - 2) * 22 + (Math.random() - 0.5) * 14;
+      kernel.vy = -70 - Math.random() * 50;
+    }
+  }
+
+  /**
+   * The show a snack puts on once it is down. Answers whether it took the pet over — if it
+   * did, the show itself decides what comes next, and the meal's own ending stands aside.
+   */
+  function afterEffect(kind) {
+    if (still) {
+      // Reduced motion keeps the parts that are a look rather than a movement.
+      if (kind === 'goldenapple') crown();
+      return false;
+    }
+    switch (kind) {
+      case 'lollipop':
+        dropStick();
+        return false;
+      case 'watermelon':
+        spitSeeds();
+        return true;
+      case 'icecream':
+        brainFreeze();
+        return true;
+      case 'soda':
+        buffs.hiccup = { until: now() + 6000, next: now() + 500 };
+        return false;
+      case 'jelly':
+        buffs.boing = { until: now() + 4200, next: now() + 300 };
+        return false;
+      case 'chili':
+        goSpicy();
+        return true;
+      case 'cake':
+        party();
+        return false;
+      case 'goldenapple':
+        crown();
+        audio.play('sparkle');
+        heartBurst(pet.art, fx, { count: 3 });
+        return false;
+      default:
+        return false;
+    }
+  }
+
+  function dropStick() {
+    const node = svgEl('ellipse', { class: 'hab-stick', rx: '2.8', ry: '0.55' });
+    const x = mouthX();
+    litter(node, { x, y: mouthY(), vx: pet.facing * 12, vy: -20, life: 5000, bounces: 1 });
+  }
+
+  function spitSeeds() {
+    setMood('stuffed');
+    mind = { state: 'spit', until: now() + 1500, target: pet.x };
+    [250, 650, 1050].forEach((delay, i) => {
+      setTimeout(() => {
+        if (!pet || mind.state !== 'spit') return;
+        const node = svgEl('ellipse', { class: 'hab-seed', rx: '0.9', ry: '1.3' });
+        litter(node, {
+          x: mouthX(),
+          y: mouthY() + 4,
+          vx: pet.facing * (55 + i * 18 + Math.random() * 20),
+          vy: -70 - Math.random() * 40,
+          life: 7000,
+          bounces: 2,
+        });
+        move('chomp', 200);
+        audio.play('ptoo');
+        if (i === 2) setMood('happy');
+      }, delay);
+    });
+  }
+
+  function brainFreeze() {
+    setMood('droopy');
+    audio.play('brr');
+    buzz([8, 20, 8, 20, 8]);
+    buffs.frozen = { until: now() + 1700 };
+    mind = { state: 'freeze', until: now() + 1700, target: pet.x };
+    inner()?.animate(
+      [
+        { transform: 'translateX(0)' },
+        { transform: 'translateX(-1.2px)' },
+        { transform: 'translateX(1.2px)' },
+        { transform: 'translateX(0)' },
+      ],
+      { duration: 120, iterations: 12 }
+    );
+    confetti(pet.art, fx, { power: 0.5, round: 1, colors: ['#ffffff', '#cfeaff', '#9fd2ff'] });
+  }
+
+  function goSpicy() {
+    setMood('hungry');
+    audio.play('sizzle');
+    buzz([10, 20, 10]);
+    buffs.spicy = { until: now() + 5200, next: now() };
+    const far = pet.x - habitat.roam.x0 > habitat.roam.x1 - pet.x ? habitat.roam.x0 : habitat.roam.x1;
+    mind = { state: 'zoom', until: 0, target: far, legs: 3 };
+  }
+
+  /** Chili laps: flat out to one end, then the other, until the legs run out. */
+  function stepZoom(dt) {
+    const delta = mind.target - pet.x;
+    if (Math.abs(delta) <= ARRIVE) {
+      mind.legs -= 1;
+      if (mind.legs <= 0) {
+        mind = { state: 'pant', until: now() + 1200, target: pet.x };
+        return;
+      }
+      audio.play('sizzle');
+      mind.target = mind.target === habitat.roam.x0 ? habitat.roam.x1 : habitat.roam.x0;
+      return;
+    }
+    pet.facing = Math.sign(delta);
+    pet.x = clamp(pet.x + pet.facing * 78 * dt, habitat.roam.x0, habitat.roam.x1);
+  }
+
+  function party() {
+    audio.play('sparkle');
+    hop(10);
+    confetti(pet.art, fx, { power: 1.4 });
+    heartBurst(pet.art, fx, { count: 4 });
+    buffs.rainbow = { until: now() + 6000 };
+  }
+
+  function crown() {
+    buffs.golden = { until: Infinity };
+    if (pet.body.querySelector('.hab-crown')) return;
+    const node = nodeFrom(`<g class="hab-crown" transform="translate(0 ${-(PET_FOOT.y + 2).toFixed(1)})">
+      <path d="M-6 0 L-6 -5 L-3 -2.4 L0 -6.4 L3 -2.4 L6 -5 L6 0 Z" fill="#f7c948" stroke="#c8961e" stroke-width="0.6" stroke-linejoin="round" />
+      <circle cx="0" cy="-1.6" r="0.9" fill="#ef4f5f" />
+    </g>`);
+    pet.body.append(node);
+  }
+
+  /** A little round thing floating up off the pet and fading — a bubble, a puff of steam. */
+  function float(cls, { dx = 0, dy = -30, r = 1.6, rise = 22, drift = 0, duration = 1200 } = {}) {
+    if (!actors || still) return;
+    const node = svgEl('circle', { class: cls, r: String(r), cx: (pet.x + pet.facing * dx).toFixed(2), cy: (WALK_Y + dy).toFixed(2) });
+    actors.append(node);
+    node
+      .animate(
+        [
+          { transform: 'translate(0px, 0px) scale(0.6)', opacity: 0 },
+          { transform: `translate(${drift * 0.3}px, ${-rise * 0.3}px) scale(1)`, opacity: 0.95, offset: 0.2 },
+          { transform: `translate(${drift}px, ${-rise}px) scale(1.25)`, opacity: 0 },
+        ],
+        { duration, easing: 'ease-out' }
+      )
+      .finished.catch(() => {})
+      .finally(() => node.remove());
+  }
+
+  /**
+   * The lingering part of a snack: hiccups, jelly bounces, steam, and which tint the pet
+   * wears. One filter at a time, the most dramatic winning, so two snacks never muddy each
+   * other into brown.
+   */
+  function stepBuffs() {
+    if (!pet || !filterIds) return;
+    const at = now();
+    for (const [name, buff] of Object.entries(buffs)) {
+      if (at > buff.until) delete buffs[name];
+    }
+    const { hiccup, boing, spicy } = buffs;
+    if (hiccup && at >= hiccup.next && mind.state !== 'coma') {
+      hiccup.next = at + 700 + Math.random() * 300;
+      hop(4);
+      audio.play('hiccup');
+      float('hab-bubble-pop', { dx: 6, dy: -30, r: 1.8, rise: 26, drift: (Math.random() - 0.5) * 8 });
+    }
+    if (boing && at >= boing.next && mind.state !== 'coma' && !MEAL_STATES.has(mind.state)) {
+      boing.next = at + 650;
+      hop(9);
+      audio.play('boing');
+    }
+    if (spicy && at >= spicy.next) {
+      spicy.next = at + 160;
+      float('hab-steam', { dx: -4 + Math.random() * 8, dy: -38, r: 2 + Math.random(), rise: 16, drift: (Math.random() - 0.5) * 10, duration: 900 });
+    }
+    const tint = buffs.frozen ? 'frost' : buffs.spicy ? 'spicy' : buffs.rainbow ? 'rainbow' : buffs.golden ? 'golden' : '';
+    const filter = tint ? `url(#${filterIds[tint]})` : '';
+    if ((pet.body.getAttribute('filter') ?? '') !== filter) {
+      if (filter) pet.body.setAttribute('filter', filter);
+      else pet.body.removeAttribute('filter');
+    }
+  }
+
+  /** The four tints, added to the open scene's own <defs> so they travel with it. */
+  function addFilters(uid) {
+    filterIds = {
+      frost: `${uid}-frost`,
+      spicy: `${uid}-spicy`,
+      rainbow: `${uid}-rainbow`,
+      golden: `${uid}-golden`,
+    };
+    const spin = still
+      ? ''
+      : '<animate attributeName="values" from="0" to="360" dur="1.4s" repeatCount="indefinite" />';
+    const defs = svgEl('defs');
+    defs.innerHTML = `
+      <filter id="${filterIds.frost}" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0.55 0.2 0.2 0 0.05  0.2 0.65 0.2 0 0.12  0.2 0.25 0.8 0 0.28  0 0 0 1 0" />
+      </filter>
+      <filter id="${filterIds.spicy}" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="1 0.35 0.2 0 0.18  0.1 0.45 0.1 0 0  0.1 0.1 0.4 0 0  0 0 0 1 0" />
+      </filter>
+      <filter id="${filterIds.rainbow}" color-interpolation-filters="sRGB">
+        <feColorMatrix type="hueRotate" values="${still ? 60 : 0}">${spin}</feColorMatrix>
+      </filter>
+      <filter id="${filterIds.golden}" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="#ffd66b" flood-opacity="0.95" />
+      </filter>`;
+    root.prepend(defs);
   }
 
   /* --------------------------------------------------------------- pointers */
@@ -1249,6 +1602,7 @@ export function createHabitatScene({ host, fx }) {
     stepMeal();
     stepTreats(dt);
     stepCrumbs(dt);
+    stepBuffs();
     draw();
     raf = requestAnimationFrame(tick);
   }
@@ -1293,6 +1647,8 @@ export function createHabitatScene({ host, fx }) {
         buildBall();
         habitat.props.larder.spots.forEach((_, i) => buildTreat(i));
       }
+      opens += 1;
+      addFilters(`snk${opens}`);
       if (item.hatchedAt === null) {
         pet.x = habitat.props.nest.x;
         place(pet.wrap, pet.x, WALK_Y);
@@ -1328,6 +1684,8 @@ export function createHabitatScene({ host, fx }) {
       treats = [];
       crumbs = [];
       belly = 0;
+      buffs = {};
+      filterIds = null;
       // A meal has to be dropped here or it survives into the next pet's habitat. Both the
       // nap and a change of weather re-`open`, and `open` closes first — so this one line is
       // also what stops a mouthful that bedtime or a downpour interrupted.
@@ -1380,6 +1738,16 @@ export function createHabitatScene({ host, fx }) {
 
     get isOpen() {
       return Boolean(habitat);
+    },
+
+    /** A snack off the picnic tray. Answers whether it went in (not into an egg's home, say). */
+    dropSnack(kind) {
+      return dropSnack(kind);
+    },
+
+    /** Snacks from the tray that are in the scene but not eaten yet. */
+    pendingSnacks(kind) {
+      return habitat ? pendingSnacks(kind) : 0;
     },
 
     get itemId() {
