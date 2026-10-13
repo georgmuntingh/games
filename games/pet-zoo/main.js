@@ -122,7 +122,7 @@ import {
   TransferError,
 } from './transfer.js';
 import { BACKDROP, FURNITURE, YARD_PIECES } from './habitat-parts.js';
-import { habitatOf, habitatSvg, treatSvg } from './habitat.js';
+import { habitatOf, habitatSvg, treatColors, treatSvg } from './habitat.js';
 import { createHabitatScene } from './habitat-scene.js';
 import { yardSvg } from './yard.js';
 import { dayFraction, groundSoak, weatherFor } from './weather.js';
@@ -131,6 +131,7 @@ import {
   buzz,
   confetti,
   flyCoins,
+  flyFood,
   flyHeart,
   heartBurst,
   pop,
@@ -2172,13 +2173,59 @@ async function celebrate(outcome, paid = 0) {
     streak >= 3 ? t('cheer.streak', { cheer: cheer(), n: streak }) : cheer();
   el.feedback.className = 'feedback good';
   audio.play(streak >= 3 ? 'streak' : 'correct');
+
+  // The answer turns into dinner on its way across: the pet opens wide, the food sails in off
+  // the clock, and two chews later it is gone. Reduced motion, and the odd egg that reaches
+  // here without cracking, keep the old heart instead — there is no mouth to aim at.
+  const food = feedTabFood(item, streak);
+  const palette = habitatOf(item).palette;
+  const fed = item.hatchedAt !== null && !reduceMotion();
+  if (fed) {
+    renderPetStage(item, 'hungry');
+    await flyFood(answerSource(), el.petStage.querySelector('.pet'), el.fx, treatSvg(food.kind, palette), {
+      scale: food.scale,
+    });
+    renderPetStage(item, 'chew');
+    el.petStage.querySelector('.pet')?.classList.add('is-chewing');
+    audio.play('munch', { pitch: 0.95 });
+    buzz(8);
+    await wait(200);
+    audio.play('munch', { pitch: 1.1 });
+    await wait(200);
+    audio.play('gulp');
+  } else {
+    flyHeart(answerSource(), el.petStage, el.fx);
+  }
   audio.play('feed');
   buzz([12, 30, 12]);
-  confetti(el.petStage, el.fx, { power: streak >= 3 ? 1.5 : 1 });
-  flyHeart(el.clock, el.petStage, el.fx);
+  confetti(el.petStage, el.fx, {
+    power: food.power,
+    colors: fed ? [...treatColors(food.kind, palette), '#ffd66b', '#ff9ec0'] : undefined,
+  });
   renderPetStage(item, 'happy');
-  pop(el.petStage.querySelector('.pet-inner'), { power: streak >= 3 ? 1.3 : 1 });
-  await wait(1250);
+  const inner = el.petStage.querySelector('.pet-inner');
+  pop(inner, { power: streak >= 3 ? 1.3 : 1 });
+  if (fed && streak >= 5) heartBurst(el.petStage.querySelector('.pet'), el.fx, { count: streak >= 10 ? 6 : 3 });
+  await wait(fed ? 750 : 1250);
+}
+
+/** Wherever the answer was given: the clock for a time, the sum for a sum. */
+function answerSource() {
+  const shown = (node) => node && node.getBoundingClientRect().width > 0;
+  return [el.clock, el.answerSum, el.promptSum, el.submit].find(shown) ?? el.submit;
+}
+
+/**
+ * What the Feed tab throws. Something off the pet's own larder as a rule, so the food in the
+ * quiz is the food it eats at home; a run of right answers upgrades it — a cookie at three, a
+ * cake at five, and at ten a whole feast with candles on.
+ */
+function feedTabFood(item, streak) {
+  if (streak >= 10) return { kind: 'feast', scale: 1.5, power: 2 };
+  if (streak >= 5) return { kind: 'cake', scale: 1.3, power: 1.7 };
+  if (streak >= 3) return { kind: 'cookie', scale: 1.15, power: 1.5 };
+  const menu = habitatOf(item).props.larder.menu ?? ['berry'];
+  return { kind: menu[Math.floor(Math.random() * menu.length)] ?? 'berry', scale: 1, power: 1 };
 }
 
 // Flakes off a breaking shell: bone and chalk, never the pet's colours. The pet's palette is
