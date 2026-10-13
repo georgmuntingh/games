@@ -169,6 +169,7 @@
           </button>
         </div>
         <div id="habitat-host" class="hab-host"></div>
+        <div id="habitat-tray" class="hab-tray" role="group" data-i18n-aria-label="habitat.trayLabel" aria-label="Piknikkurv" hidden></div>
         <p id="habitat-note" class="hab-note" aria-live="polite"></p>
       </section>
 
@@ -258,11 +259,16 @@
                   data-tab="home" data-i18n="shop.tabHome">Hjemme hos dyra</button>
           <button class="shop-tab" type="button" role="tab" aria-selected="false"
                   data-tab="zoo" data-i18n="shop.tabZoo">Hele dyrehagen</button>
+          <button class="shop-tab" type="button" role="tab" aria-selected="false"
+                  data-tab="snacks" data-i18n="shop.tabSnacks">Godteri</button>
         </div>
 
         <div id="shop-body">
           <p id="shop-pick" class="shop-pick" data-i18n="shop.pickPet">Hvem skal det være til?</p>
           <div id="shop-pets" class="shop-pets" role="group" aria-labelledby="shop-pick"></div>
+          <p id="shop-snack-intro" class="shop-pick" data-i18n="shop.snackIntro" hidden>
+            Morsomme godbiter til piknikkurven. Trykk på en hjemme hos et dyr og se hva som skjer!
+          </p>
           <div id="shop-grid" class="shop-grid"></div>
         </div>
 

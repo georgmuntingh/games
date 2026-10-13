@@ -100,6 +100,16 @@ import {
   ZOO_CATALOG,
 } from './shop.js';
 import {
+  buySnack,
+  canStock,
+  countOf,
+  isSnackUnlocked,
+  snackById,
+  SNACKS,
+  stocked,
+  useSnack,
+} from './snacks.js';
+import {
   canAfford,
   dayBonusFor,
   earn,
@@ -122,7 +132,7 @@ import {
   TransferError,
 } from './transfer.js';
 import { BACKDROP, FURNITURE, YARD_PIECES } from './habitat-parts.js';
-import { habitatOf, habitatSvg, treatSvg } from './habitat.js';
+import { habitatOf, habitatSvg, treatColors, treatSvg } from './habitat.js';
 import { createHabitatScene } from './habitat-scene.js';
 import { yardSvg } from './yard.js';
 import { dayFraction, groundSoak, weatherFor } from './weather.js';
@@ -131,6 +141,7 @@ import {
   buzz,
   confetti,
   flyCoins,
+  flyFood,
   flyHeart,
   heartBurst,
   pop,
@@ -197,6 +208,7 @@ const el = {
   zooEmpty: $('zoo-empty'),
   habitatScene: $('habitat-scene'),
   habitatHost: $('habitat-host'),
+  habitatTray: $('habitat-tray'),
   habitatBack: $('habitat-back'),
   habitatName: $('habitat-name'),
   habitatRank: $('habitat-rank'),
@@ -212,6 +224,7 @@ const el = {
   shopTabs: $('shop-tabs'),
   shopBody: $('shop-body'),
   shopPick: $('shop-pick'),
+  shopSnackIntro: $('shop-snack-intro'),
   shopPets: $('shop-pets'),
   shopGrid: $('shop-grid'),
   shopNote: $('shop-note'),
@@ -2172,13 +2185,59 @@ async function celebrate(outcome, paid = 0) {
     streak >= 3 ? t('cheer.streak', { cheer: cheer(), n: streak }) : cheer();
   el.feedback.className = 'feedback good';
   audio.play(streak >= 3 ? 'streak' : 'correct');
+
+  // The answer turns into dinner on its way across: the pet opens wide, the food sails in off
+  // the clock, and two chews later it is gone. Reduced motion, and the odd egg that reaches
+  // here without cracking, keep the old heart instead — there is no mouth to aim at.
+  const food = feedTabFood(item, streak);
+  const palette = habitatOf(item).palette;
+  const fed = item.hatchedAt !== null && !reduceMotion();
+  if (fed) {
+    renderPetStage(item, 'hungry');
+    await flyFood(answerSource(), el.petStage.querySelector('.pet'), el.fx, treatSvg(food.kind, palette), {
+      scale: food.scale,
+    });
+    renderPetStage(item, 'chew');
+    el.petStage.querySelector('.pet')?.classList.add('is-chewing');
+    audio.play('munch', { pitch: 0.95 });
+    buzz(8);
+    await wait(200);
+    audio.play('munch', { pitch: 1.1 });
+    await wait(200);
+    audio.play('gulp');
+  } else {
+    flyHeart(answerSource(), el.petStage, el.fx);
+  }
   audio.play('feed');
   buzz([12, 30, 12]);
-  confetti(el.petStage, el.fx, { power: streak >= 3 ? 1.5 : 1 });
-  flyHeart(el.clock, el.petStage, el.fx);
+  confetti(el.petStage, el.fx, {
+    power: food.power,
+    colors: fed ? [...treatColors(food.kind, palette), '#ffd66b', '#ff9ec0'] : undefined,
+  });
   renderPetStage(item, 'happy');
-  pop(el.petStage.querySelector('.pet-inner'), { power: streak >= 3 ? 1.3 : 1 });
-  await wait(1250);
+  const inner = el.petStage.querySelector('.pet-inner');
+  pop(inner, { power: streak >= 3 ? 1.3 : 1 });
+  if (fed && streak >= 5) heartBurst(el.petStage.querySelector('.pet'), el.fx, { count: streak >= 10 ? 6 : 3 });
+  await wait(fed ? 750 : 1250);
+}
+
+/** Wherever the answer was given: the clock for a time, the sum for a sum. */
+function answerSource() {
+  const shown = (node) => node && node.getBoundingClientRect().width > 0;
+  return [el.clock, el.answerSum, el.promptSum, el.submit].find(shown) ?? el.submit;
+}
+
+/**
+ * What the Feed tab throws. Something off the pet's own larder as a rule, so the food in the
+ * quiz is the food it eats at home; a run of right answers upgrades it — a cookie at three, a
+ * cake at five, and at ten a whole feast with candles on.
+ */
+function feedTabFood(item, streak) {
+  if (streak >= 10) return { kind: 'feast', scale: 1.5, power: 2 };
+  if (streak >= 5) return { kind: 'cake', scale: 1.3, power: 1.7 };
+  if (streak >= 3) return { kind: 'cookie', scale: 1.15, power: 1.5 };
+  const menu = habitatOf(item).props.larder.menu ?? ['berry'];
+  return { kind: menu[Math.floor(Math.random() * menu.length)] ?? 'berry', scale: 1, power: 1 };
 }
 
 // Flakes off a breaking shell: bone and chalk, never the pet's colours. The pet's palette is
@@ -2527,6 +2586,9 @@ setInterval(() => {
     habitat.setNapping(napping);
     if (habitatId && state.items[habitatId]) renderHabitatBar(state.items[habitatId]);
   }
+  // A change of weather reopens the scene, and anything dropped but uneaten goes with it —
+  // back into the basket, which is where the count says it is.
+  if (scene === 'habitat') renderTray();
 
   if (napping) {
     el.napTimer.textContent = session.formatCountdown(session.napRemaining(state.session, tick));
@@ -2864,7 +2926,7 @@ function closeShop() {
 }
 
 /** The catalog the open tab is showing. */
-const shelf = () => (shopTab === 'zoo' ? ZOO_CATALOG : HOME_CATALOG);
+const shelf = () => (shopTab === 'zoo' ? ZOO_CATALOG : shopTab === 'snacks' ? SNACKS : HOME_CATALOG);
 
 function renderTabs() {
   for (const tab of el.shopTabs.querySelectorAll('.shop-tab')) {
@@ -2896,6 +2958,12 @@ function renderShop() {
   const home = shopTab === 'home';
   el.shopPick.hidden = !home;
   el.shopPets.hidden = !home;
+  el.shopSnackIntro.hidden = shopTab !== 'snacks';
+
+  if (shopTab === 'snacks') {
+    el.shopGrid.innerHTML = SNACKS.map(snackCard).join('');
+    return;
+  }
 
   if (home) {
     el.shopPets.innerHTML = pets
@@ -2941,6 +3009,70 @@ function renderShop() {
         </button>`;
     })
     .join('');
+}
+
+/**
+ * One snack on the shelf: the snack itself, what it does, how many come in a pack, and how
+ * many are already in the basket. Drawn by the same fragment the habitat drops, so the cookie
+ * on the shelf is the cookie that lands.
+ */
+function snackCard(entry) {
+  const locked = !isSnackUnlocked(entry.id, state.tiers.clock);
+  const poor = !canAfford(state.coins, entry.price);
+  const have = countOf(state.pantry, entry.id);
+  const name = escape(t(`snack.${entry.id}`));
+  const status = locked
+    ? `<span class="shop-state is-locked">${escape(t('shop.locked'))}</span>`
+    : `<span class="shop-price${poor ? ' is-poor' : ''}">${coinChip(entry.price)}<span class="shop-pack">×${entry.pack}</span></span>`;
+  const cls = ['shop-card', 'snack-card', !have && locked && 'is-locked'].filter(Boolean).join(' ');
+  return `
+    <button class="${cls}" type="button" data-snack="${entry.id}"
+            aria-label="${escape(`${t(`snack.${entry.id}`)} — ${t('shop.pack', { n: entry.pack })}${have ? `, ${t('shop.have', { n: have })}` : ''}`)}">
+      <span class="shop-art">${snackArt(entry.id)}</span>
+      <span class="shop-name">${name}</span>
+      <span class="snack-about">${escape(t(`snack.about.${entry.id}`))}</span>
+      ${status}
+      ${have ? `<span class="snack-have">${escape(t('shop.have', { n: have }))}</span>` : ''}
+    </button>`;
+}
+
+/** A snack drawn on its own, in a box that fits the ~9-unit treats. */
+function snackArt(id) {
+  return `<svg viewBox="-8 -8.5 16 16" aria-hidden="true" focusable="false">${treatSvg(id, habitatOf({ h: 12, m: 0 }).palette)}</svg>`;
+}
+
+function askToBuySnack(id) {
+  const entry = snackById.get(id);
+  if (!entry) return;
+  if (!isSnackUnlocked(id, state.tiers.clock)) return note(t('shop.lockedHelp'));
+  if (!canStock(state.pantry, id)) return note(t('shop.fullSnack'));
+  if (!canAfford(state.coins, entry.price)) return note(t('shop.tooDear'));
+  pendingPurchase = { id, mode: 'snack' };
+  const copy = t('shop.confirmSnack', { item: t(`snack.${id}`), n: entry.pack, price: entry.price });
+  const row = Array.from({ length: entry.pack }, (_, i) =>
+    `<g transform="translate(${(i - (entry.pack - 1) / 2) * 15} 0)">${treatSvg(id, habitatOf({ h: 12, m: 0 }).palette)}</g>`
+  ).join('');
+  showConfirm(
+    `<svg class="snack-preview" viewBox="-26 -11 52 22" role="img" aria-label="${escape(copy)}">${row}</svg>`,
+    copy,
+    t('shop.buy')
+  );
+}
+
+function buySnackNow() {
+  const { id } = pendingPurchase;
+  const entry = snackById.get(id);
+  if (!entry || !canAfford(state.coins, entry.price) || !canStock(state.pantry, id)) return closeConfirm();
+  state.pantry = buySnack(state.pantry, id);
+  state.coins = spend(state.coins, entry.price);
+  audio.play('buy');
+  buzz([12, 40, 18]);
+  note(t('shop.boughtSnack'));
+  save();
+  closeConfirm();
+  renderShop();
+  renderStall();
+  renderTray();
 }
 
 /**
@@ -3032,6 +3164,7 @@ function closeConfirm() {
 }
 
 function commit() {
+  if (pendingPurchase?.mode === 'snack') return buySnackNow();
   const entry = pendingPurchase && shopItemById.get(pendingPurchase.id);
   if (!entry) return closeConfirm();
   const { id, mode } = pendingPurchase;
@@ -3097,7 +3230,9 @@ el.shopPets.addEventListener('click', (event) => {
 
 el.shopGrid.addEventListener('click', (event) => {
   const card = event.target.closest('.shop-card');
-  if (card) askToBuy(card.dataset.id);
+  if (!card) return;
+  if (card.dataset.snack) askToBuySnack(card.dataset.snack);
+  else askToBuy(card.dataset.id);
 });
 
 /**
@@ -3156,8 +3291,62 @@ function payMilestones() {
 
 /* ----------------------------------------------------------------- habitat */
 
-const habitat = createHabitatScene({ host: el.habitatHost, fx: el.fx });
+const habitat = createHabitatScene({ host: el.habitatHost, fx: el.fx, onSnackEaten: snackEaten });
 habitat.attach(el.habitatHost);
+
+/**
+ * A snack off the picnic tray has been eaten — or, for popcorn, has burst open. Only now does
+ * it come out of the pantry: one that was dropped and then taken back, or left lying about
+ * when the child walked out, was never eaten and is never charged for.
+ */
+function snackEaten(kind) {
+  state.pantry = useSnack(state.pantry, kind);
+  save();
+  renderTray();
+}
+
+let trayMarkup = '';
+
+/**
+ * The picnic basket under the habitat: one button per snack the child owns, each with how many
+ * are left. Snacks already dropped and not yet eaten are counted as gone, so a quick tapper
+ * cannot drop five cookies out of a packet of three. Redrawn only when something changed —
+ * it is called from the heartbeat.
+ */
+function renderTray() {
+  const item = habitatId ? state.items[habitatId] : null;
+  const open = scene === 'habitat' && item && item.hatchedAt !== null && !habitatNapping;
+  const name = item ? petName(item, t.lang) : '';
+  const entries = open
+    ? stocked(state.pantry).map(([id, n]) => [id, Math.max(0, n - habitat.pendingSnacks(id))])
+    : [];
+  const markup = entries
+    .map(([id, left]) => {
+      const label = escape(t('habitat.trayGive', { name, item: t(`snack.${id}`), n: left }));
+      return `<button class="tray-snack" type="button" data-snack="${id}"
+                ${left ? '' : 'disabled'} aria-label="${label}" title="${label}">
+          ${snackArt(id)}<span class="tray-count">${left}</span>
+        </button>`;
+    })
+    .join('');
+  el.habitatTray.hidden = !entries.length;
+  if (markup !== trayMarkup) {
+    trayMarkup = markup;
+    el.habitatTray.innerHTML = markup;
+  }
+}
+
+el.habitatTray.addEventListener('click', (event) => {
+  const button = event.target.closest('.tray-snack');
+  if (!button || button.disabled) return;
+  const kind = button.dataset.snack;
+  const left = countOf(state.pantry, kind) - habitat.pendingSnacks(kind);
+  if (left <= 0) return;
+  if (habitat.dropSnack(kind)) {
+    buzz(8);
+    renderTray();
+  }
+});
 
 /** The name, rank and collar clock above the scene — everything the habitat says in words. */
 function renderHabitatBar(item) {
@@ -3207,13 +3396,16 @@ function openHabitat(id) {
     weather: sky.weather,
     soak: sky.soak,
     title: escape(isEgg ? eggTitle(item) : name),
+    words: { burp: t('habitat.burp'), nom: t('habitat.nom') },
   });
   showScene('habitat');
+  renderTray();
 }
 
 function closeHabitat() {
   habitat.close();
   habitatId = null;
+  renderTray();
 }
 
 /** Repaint the open habitat from state — after a rename, or a language or format change. */
@@ -3227,6 +3419,7 @@ function refreshHabitat() {
   }
   const { name } = renderHabitatBar(item);
   habitat.setTitle(escape(name));
+  renderTray();
 }
 
 el.habitatBack.addEventListener('click', () => {

@@ -269,6 +269,20 @@ import {
   zooIsFull,
   zooOwns,
 } from '../shop.js';
+import {
+  buySnack,
+  canStock,
+  countOf,
+  effectOf,
+  isSnackUnlocked,
+  PANTRY_CAP,
+  sanitizePantry,
+  SNACK_IDS,
+  SNACKS,
+  stocked,
+  tasteOf,
+  useSnack,
+} from '../snacks.js';
 import { yardPalette, yardPiecesFor, YARD_SLOTS, yardSvg } from '../yard.js';
 import {
   dayFraction,
@@ -6553,6 +6567,119 @@ test('the choices survive a reload, clamped', () => {
   assertEqual(back.practice.clock.on, false);
   assertEqual(back.practice.clock.floor, LAST_TIER, 'a floor past the ladder was kept');
   assertEqual(back.practice.math.floor, 1);
+});
+
+describe('snacks — the shelf and the pantry');
+
+test('every snack is drawn, sheds crumbs, and has an effect', () => {
+  for (const entry of SNACKS) {
+    assert(TREAT_IDS.includes(entry.id), `${entry.id} is sold but never drawn`);
+    assert(Object.hasOwn(TREAT_COLORS, entry.id), `${entry.id} has no crumbs`);
+    assert(typeof effectOf(entry.id) === 'string', `${entry.id} does nothing when eaten`);
+    assert(entry.price > 0 && Number.isInteger(entry.price), `${entry.id} costs ${entry.price}`);
+    assert(entry.pack >= 1, `${entry.id} comes in packs of ${entry.pack}`);
+  }
+  assertEqual(new Set(SNACK_IDS).size, SNACK_IDS.length, 'a snack is listed twice');
+});
+
+test('there is a snack to buy at the very first tier', () => {
+  assert(SNACKS.some((entry) => isSnackUnlocked(entry.id, 0)), 'nothing on the shelf at tier 0');
+  assert(!isSnackUnlocked('nonsense', 3), 'an unknown snack unlocked');
+});
+
+test('a pack goes into the pantry and one comes out when eaten', () => {
+  let pantry = {};
+  pantry = buySnack(pantry, 'cookie');
+  assertEqual(countOf(pantry, 'cookie'), 3);
+  pantry = useSnack(pantry, 'cookie');
+  assertEqual(countOf(pantry, 'cookie'), 2);
+  pantry = useSnack(useSnack(pantry, 'cookie'), 'cookie');
+  assert(!('cookie' in pantry), 'the last cookie left an empty jar behind');
+  assertEqual(useSnack(pantry, 'cookie').cookie, undefined, 'ate a cookie that was not there');
+});
+
+test('the pantry refuses to overfill and refuses what it does not sell', () => {
+  let pantry = {};
+  for (let i = 0; i < 20; i += 1) pantry = buySnack(pantry, 'chili');
+  assertEqual(countOf(pantry, 'chili'), PANTRY_CAP);
+  assert(!canStock(pantry, 'chili'), 'a full jar still takes more');
+  assertEqual(Object.keys(buySnack({}, 'berry')).length, 0, 'sold a larder fruit');
+  assertEqual(Object.keys(buySnack({}, 'nonsense')).length, 0, 'sold nothing at all');
+});
+
+test('a hand-edited pantry comes back clean', () => {
+  const clean = sanitizePantry({ cookie: 2.7, chili: -1, soda: 'lots', cake: 999, berry: 4, nonsense: 3 });
+  assertEqual(clean.cookie, 2);
+  assertEqual(clean.cake, PANTRY_CAP);
+  assert(!('chili' in clean) && !('soda' in clean), 'kept a count that is not a count');
+  assert(!('berry' in clean) && !('nonsense' in clean), 'kept something the shelf never sold');
+  for (const junk of [null, undefined, 7, 'x', ['cookie']]) {
+    assertEqual(Object.keys(sanitizePantry(junk)).length, 0, `${JSON.stringify(junk)} made a pantry`);
+  }
+});
+
+test('the tray lists what is stocked, in shelf order', () => {
+  const tray = stocked({ cake: 1, cookie: 2 });
+  assertEqual(tray.map(([id]) => id).join(','), 'cookie,cake');
+  assertEqual(tray[0][1], 2);
+});
+
+describe('snacks — every pet has its own taste');
+
+test('a taste is the same every time it is asked', () => {
+  const menu = ['berry', 'plum', 'clover'];
+  for (const id of ['4:15', '9:30', 'math:3+4']) {
+    for (const kind of [...menu, ...SNACK_IDS]) {
+      assertEqual(tasteOf(id, kind, menu), tasteOf(id, kind, menu), `${id} changed its mind about ${kind}`);
+    }
+  }
+});
+
+test('every pet loves exactly one thing', () => {
+  const menu = ['apple', 'acorn', 'berry'];
+  for (let h = 1; h <= 12; h += 1) {
+    const id = `${h}:00`;
+    const loved = [...menu, ...SNACK_IDS].filter((kind) => tasteOf(id, kind, menu) === 'love');
+    assertEqual(loved.length, 1, `${id} loves ${loved.join(', ') || 'nothing'}`);
+  }
+});
+
+test('a bought snack is never turned down', () => {
+  const menu = ['fish', 'shrimp', 'seagrape'];
+  for (let i = 0; i < 200; i += 1) {
+    for (const kind of [...SNACK_IDS, 'kernel']) {
+      assert(tasteOf(`pet${i}`, kind, menu) !== 'yuck', `pet${i} refused a ${kind} somebody paid for`);
+    }
+  }
+});
+
+test('some pets are fussy about their larder, and some favourites are free', () => {
+  const menu = ['carrot', 'snowpea', 'frostplum'];
+  let fussy = 0;
+  let freeFavourite = 0;
+  for (let i = 0; i < 200; i += 1) {
+    if (menu.some((kind) => tasteOf(`pet${i}`, kind, menu) === 'yuck')) fussy += 1;
+    if (menu.some((kind) => tasteOf(`pet${i}`, kind, menu) === 'love')) freeFavourite += 1;
+  }
+  assert(fussy > 40 && fussy < 190, `${fussy} of 200 pets are fussy`);
+  assert(freeFavourite > 40, `only ${freeFavourite} of 200 pets love something that costs nothing`);
+});
+
+test('the pantry survives a reload and travels with an export', () => {
+  const storage = fakeStorage();
+  const state = freshState(1000);
+  assertEqual(Object.keys(state.pantry).length, 0, 'a fresh zoo starts with snacks');
+  state.pantry = { cookie: 3, soda: 1 };
+  write(state, storage);
+  assertEqual(load(2000, storage).pantry.cookie, 3);
+  const raw = JSON.parse(storage.getItem(STORAGE_KEY));
+  raw.pantry = { cookie: 'many', nonsense: 4 };
+  storage.setItem(STORAGE_KEY, JSON.stringify(raw));
+  assertEqual(Object.keys(load(3000, storage).pantry).length, 0, 'a mangled pantry was trusted');
+  const payload = exportPayload(state, 2000);
+  assertEqual(payload.pantry.soda, 1);
+  const landed = applyImport(freshState(5000), parseTransfer(payloadToJson(payload)), 5000);
+  assertEqual(landed.pantry.cookie, 3, 'the snacks were left behind on the old device');
 });
 
 const out = document.getElementById('out');

@@ -140,6 +140,57 @@ const SOUNDS = {
     tone(ac, { type: 'sine', freq: 300, endFreq: 120, duration: 0.14, gain: 0.05 });
     tone(ac, { type: 'triangle', freq: 150, endFreq: 95, duration: 0.1, gain: 0.03, delay: 0.06 });
   },
+  // Too many treats. A low, rubbery blurt that wobbles on its way down — the silliest noise in
+  // the game, and a pet only makes it after a proper feast.
+  burp(ac) {
+    tone(ac, { type: 'sawtooth', freq: 120, endFreq: 70, duration: 0.32, gain: 0.05 });
+    tone(ac, { type: 'square', freq: 96, endFreq: 62, duration: 0.26, gain: 0.025, delay: 0.05 });
+    tone(ac, { type: 'sine', freq: 180, endFreq: 90, duration: 0.2, gain: 0.04, delay: 0.12 });
+  },
+  // Not that one, thanks: a nasal "bleh", two flat notes bending down.
+  bleh(ac) {
+    tone(ac, { type: 'square', freq: 330, endFreq: 260, duration: 0.12, gain: 0.025 });
+    tone(ac, { type: 'square', freq: 280, endFreq: 190, duration: 0.2, gain: 0.025, delay: 0.12 });
+  },
+  // Its very favourite: a quick happy trill up to a squeak.
+  love(ac) {
+    arpeggio(ac, [784, 988, 1175, 1568], { type: 'triangle', gain: 0.07, spacing: 0.05, duration: 0.12 });
+    tone(ac, { type: 'sine', freq: 1400, endFreq: 2100, duration: 0.12, gain: 0.05, delay: 0.22 });
+  },
+  // A treat snatched out of the air.
+  nom(ac) {
+    tone(ac, { type: 'triangle', freq: 520, endFreq: 880, duration: 0.08, gain: 0.07 });
+    tone(ac, { type: 'triangle', freq: 260, endFreq: 180, duration: 0.07, gain: 0.06, delay: 0.08 });
+  },
+  // A lollipop lick: a short wet upward slide.
+  lick(ac) {
+    tone(ac, { type: 'sine', freq: 500, endFreq: 900, duration: 0.09, gain: 0.04 });
+  },
+  // A watermelon seed spat out.
+  ptoo(ac) {
+    tone(ac, { type: 'square', freq: 700, endFreq: 260, duration: 0.07, gain: 0.03 });
+  },
+  hiccup(ac) {
+    tone(ac, { type: 'sine', freq: 420, endFreq: 980, duration: 0.07, gain: 0.06 });
+  },
+  // Chili: a hiss of steam, made of a fast wobble high up.
+  sizzle(ac) {
+    for (let i = 0; i < 6; i += 1) {
+      tone(ac, { type: 'sawtooth', freq: 2400 + (i % 2) * 600, duration: 0.05, gain: 0.012, delay: i * 0.045 });
+    }
+  },
+  // Brain freeze: a shivery wobble.
+  brr(ac) {
+    for (let i = 0; i < 5; i += 1) {
+      tone(ac, { type: 'triangle', freq: i % 2 ? 620 : 560, duration: 0.06, gain: 0.04, delay: i * 0.06 });
+    }
+  },
+  boing(ac) {
+    tone(ac, { type: 'sine', freq: 180, endFreq: 520, duration: 0.18, gain: 0.06 });
+  },
+  sparkle(ac) {
+    arpeggio(ac, [1319, 1568, 2093, 2637], { gain: 0.05, spacing: 0.045, duration: 0.14 });
+  },
   // Disturbing a sleeping pet: it stretches, it does not wake. A slow yawn up and back.
   stretch(ac) {
     tone(ac, { type: 'sine', freq: 300, endFreq: 430, duration: 0.3, gain: 0.045 });
