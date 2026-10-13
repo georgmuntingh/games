@@ -3254,6 +3254,7 @@ function openHabitat(id) {
     weather: sky.weather,
     soak: sky.soak,
     title: escape(isEgg ? eggTitle(item) : name),
+    words: { burp: t('habitat.burp'), nom: t('habitat.nom') },
   });
   showScene('habitat');
 }

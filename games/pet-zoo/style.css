@@ -1984,6 +1984,46 @@ body.in-habitat .zoo-bar {
   }
 }
 
+/* Crumbs off a bitten treat: they land, sit a while for the pet to tidy, then fade. */
+.hab-crumb {
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+.hab-crumb.is-fading {
+  opacity: 0;
+}
+
+/* The mouthful on its way down. */
+.hab-lump {
+  fill: rgba(255, 255, 255, 0.7);
+  stroke: rgba(60, 48, 84, 0.35);
+  stroke-width: 0.5;
+  pointer-events: none;
+}
+
+/* A word over a pet's head — "Burp!", "Nom!" — in a little speech bubble. */
+.hab-bubble {
+  pointer-events: none;
+}
+
+.hab-bubble rect {
+  fill: #fffdf8;
+  stroke: rgba(60, 48, 84, 0.45);
+  stroke-width: 0.6;
+}
+
+.hab-bubble text {
+  font-size: 5.6px;
+  font-weight: 800;
+  text-anchor: middle;
+  fill: #43354f;
+}
+
+.hab-burp rect {
+  fill: #e9ffd9;
+}
+
 /* Inside the habitat, one CSS px is one viewBox unit — about 3.5 screen px — so these
    numbers are much smaller than they look. */
 .hab-zeds {

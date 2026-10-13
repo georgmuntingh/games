@@ -35,6 +35,7 @@ import {
   WALK_Y,
 } from './habitat.js';
 import { audio } from './audio.js';
+import { tasteOf } from './snacks.js';
 import { shelters, slows } from './weather.js';
 import { buzz, confetti, heartBurst, pop, reduceMotion, svgEl, wiggle } from './juice.js';
 
@@ -70,6 +71,66 @@ const HAPPY_MS = 2600;
 const REGROW_MS = 2400;
 const STROKE_STEP = 26; // pointer travel, in screen px, between hearts
 const PURR_MS = 520;
+const TOSS_MS = 520; // a chunky pet flicks its food up and catches it before chewing
+const SNIFF_MS = 650; // a food it does not like: a long suspicious sniff first
+const REJECT_MS = 1400; // and then the face, the nudge, and the food rolling away
+const CRUMB_MAX = 8; // crumbs on the ground at once; the oldest goes first
+const CRUMB_LIFE = 20000;
+const CRUMB_REACH = 46; // how far a pet will wander to tidy up after itself
+const PECK_MS = 260;
+const BELLY_FULL = 4; // treats in one visit before the feast catches up with it
+const COMA_MS = 5000;
+const BURP_MS = 700;
+
+/**
+ * How each body shape eats. Same meal, same states — only the number of mouthfuls, their
+ * pace, and the move that goes with each one. A tall pet pecks, a wide one swallows it in
+ * one go, a round one nibbles, and anything chunky or spiky flips its food up first.
+ */
+const EAT_STYLES = {
+  tall: { bites: 4, biteMs: 260, move: 'peck' },
+  wide: { bites: 1, biteMs: 700, move: 'chomp' },
+  round: { bites: 5, biteMs: 190, move: 'nibble' },
+  chunky: { bites: 3, biteMs: 380, move: 'chomp', toss: true },
+};
+const PLAIN_STYLE = { bites: BITES, biteMs: BITE_MS, move: 'nibble' };
+
+/** Foods that insist on being eaten their own way, whoever is eating them. */
+const FOOD_STYLES = {
+  lollipop: { bites: 6, biteMs: 480, move: 'lick', toss: false },
+  kernel: { bites: 1, biteMs: 160, move: 'nibble', toss: false },
+  cake: { bites: 4, biteMs: 300 },
+  feast: { bites: 5, biteMs: 300 },
+};
+const foodStyle = (kind) => FOOD_STYLES[kind] ?? null;
+
+/** A cookie is mostly crumbs. Everything else sheds one, sometimes two. */
+const crumbsPerBite = (kind) => (kind === 'cookie' ? 3 : 1 + (Math.random() < 0.4 ? 1 : 0));
+
+/** The keyframes behind each move, played on `.pet-inner` once per mouthful. */
+const MOVES = {
+  peck: [
+    { transform: 'rotate(0deg) translateY(0)' },
+    { transform: 'rotate(10deg) translateY(2px)', offset: 0.4 },
+    { transform: 'rotate(0deg) translateY(0)' },
+  ],
+  chomp: [
+    { transform: 'scale(1, 1)' },
+    { transform: 'scale(1.16, 0.84)', offset: 0.3 },
+    { transform: 'scale(0.94, 1.08)', offset: 0.65 },
+    { transform: 'scale(1, 1)' },
+  ],
+  nibble: [
+    { transform: 'translateY(0)' },
+    { transform: 'translateY(-1.2px) scale(1.02, 0.98)', offset: 0.5 },
+    { transform: 'translateY(0)' },
+  ],
+  lick: [
+    { transform: 'rotate(0deg)' },
+    { transform: 'rotate(-6deg) translateY(1px)', offset: 0.5 },
+    { transform: 'rotate(0deg)' },
+  ],
+};
 
 /* -------------------------------------------------------------------- utils */
 
@@ -77,7 +138,7 @@ const now = () => performance.now();
 const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
 
 /** The postures where the mouth is busy and the feet are not. `stepMeal` owns their clock. */
-const MEAL_STATES = new Set(['notice', 'dip', 'chew', 'gulp', 'savour', 'eat']);
+const MEAL_STATES = new Set(['notice', 'dip', 'toss', 'chew', 'gulp', 'savour', 'eat', 'sniff', 'reject']);
 
 /** Parse an SVG-string fragment into a live node, so pets.js markup can be retained. */
 function nodeFrom(markup) {
@@ -104,7 +165,10 @@ export function createHabitatScene({ host, fx }) {
   let pet = null; // { wrap, art, x, facing, mood, moodUntil }
   let ball = null; // { wrap, x, y, vx, vy, resting, held, carried }
   let treats = []; // { wrap, x, y, spot, kind, held, falling, dropped, vy }
-  let meal = null; // { treat, taken, nextAt, liftFrom } — the mouthful in progress, if any
+  let meal = null; // { treat, taken, nextAt, liftFrom, taste, style } — the mouthful in progress
+  let crumbs = []; // { node, x, y, vx, vy, landed, born }
+  let belly = 0; // treats eaten this visit; it only ever makes the pet rounder, and sleepier
+  let labels = {}; // the few words the scene shows, translated by whoever opened it
   let mind = { state: 'idle', until: 0, target: 0 };
   let stroke = null; // { pointerId, travelled, lastX, lastY, purredAt }
   let drag = null; // { pointerId, kind, node, samples: [] }
@@ -152,7 +216,7 @@ export function createHabitatScene({ host, fx }) {
     if (!pet || pet.mood === mood) return;
     pet.mood = mood;
     const art = fitPetArt(nodeFrom(petMarkup(mood)));
-    pet.wrap.replaceChild(art, pet.art);
+    pet.body.replaceChild(art, pet.art);
     pet.art = art;
   }
 
@@ -169,12 +233,16 @@ export function createHabitatScene({ host, fx }) {
 
   function buildPet() {
     const wrap = svgEl('g', { class: 'hab-pet hab-grab' });
+    // The art hangs inside a group of its own, so a full belly can widen the pet (and a food
+    // coma tip it over) without touching the transform `draw` writes to the wrapper.
+    const body = svgEl('g', { class: 'hab-body' });
     const art = fitPetArt(nodeFrom(petMarkup(napping ? 'sleep' : 'content')));
-    wrap.append(art);
+    body.append(art);
+    wrap.append(body);
     const startX = napping ? habitat.props.nest.x : habitat.home.x;
     place(wrap, startX, WALK_Y);
     actors.append(wrap);
-    pet = { wrap, art, x: startX, facing: 1, mood: napping ? 'sleep' : 'content', moodUntil: 0, title: pet?.title ?? '' };
+    pet = { wrap, body, art, x: startX, facing: 1, mood: napping ? 'sleep' : 'content', moodUntil: 0, title: pet?.title ?? '' };
     if (napping) {
       wrap.append(nodeFrom(`<g class="hab-zeds" transform="translate(15 -31)">
         <text class="hab-z hab-z1" x="0" y="0">z</text>
@@ -239,6 +307,13 @@ export function createHabitatScene({ host, fx }) {
   function stepMind(dt) {
     if (!pet || napping || mind.state === 'enjoy') return;
 
+    // Sleeping off a feast. Food dropped meanwhile waits on the ground until it wakes.
+    if (mind.state === 'coma') {
+      if (!mind.flopped && now() >= mind.burpUntil) flop();
+      if (now() >= mind.until) wakeFromComa();
+      return;
+    }
+
     if (pet.moodUntil && now() > pet.moodUntil && !MEAL_STATES.has(mind.state)) {
       pet.moodUntil = 0;
       setMood(restingMood());
@@ -283,11 +358,17 @@ export function createHabitatScene({ host, fx }) {
       case 'eat':
         if (now() >= mind.until) idleFor();
         return;
+      case 'peck':
+        if (now() >= mind.until) finishPeck();
+        return;
       case 'notice':
       case 'dip':
+      case 'toss':
       case 'chew':
       case 'gulp':
       case 'savour':
+      case 'sniff':
+      case 'reject':
         // Standing still while a mouthful happens. `stepMeal` owns the clock for these; the
         // mind only has to know the feet are not going anywhere.
         return;
@@ -300,6 +381,7 @@ export function createHabitatScene({ host, fx }) {
         }
       // falls through
       case 'walk':
+      case 'tidy':
       case 'dash':
       case 'chase':
       case 'fetchfood': {
@@ -309,7 +391,7 @@ export function createHabitatScene({ host, fx }) {
             : mind.state === 'dash'
               ? DASH_SPEED
               : mind.state === 'fetchfood'
-                ? FOOD_SPEED * pace()
+                ? FOOD_SPEED * pace() * (meal?.taste === 'love' ? 1.35 : 1)
                 : WALK_SPEED * pace();
         const delta = mind.target - pet.x;
         if (Math.abs(delta) <= ARRIVE) {
@@ -331,8 +413,13 @@ export function createHabitatScene({ host, fx }) {
   function arrived() {
     // First, so the chase below can never shadow it: a pet that walked to its dinner eats.
     if (mind.state === 'fetchfood') {
-      if (meal) beginDip();
-      else idleFor();
+      if (!meal) idleFor();
+      else if (meal.taste === 'yuck') beginSniff();
+      else beginDip();
+      return;
+    }
+    if (mind.state === 'tidy') {
+      beginPeck();
       return;
     }
     if (mind.state === 'dash') {
@@ -438,8 +525,9 @@ export function createHabitatScene({ host, fx }) {
   function removeTreat(treat) {
     treats = treats.filter((entry) => entry !== treat);
     treat.wrap.remove();
-    // The larder always fills back up: a child cannot run their pet out of food.
-    regrowAt.set(treat.spot, now() + REGROW_MS);
+    // The larder always fills back up: a child cannot run their pet out of food. A snack off
+    // the picnic tray has no plant to grow back on, so it simply goes.
+    if (Number.isInteger(treat.spot)) regrowAt.set(treat.spot, now() + REGROW_MS);
   }
 
   /* ------------------------------------------------------------------- meals */
@@ -465,20 +553,68 @@ export function createHabitatScene({ host, fx }) {
     return clamp(treat.x - dir * FOOD_REACH, habitat.roam.x0, habitat.roam.x1);
   }
 
+  const inner = () => pet?.art.querySelector('.pet-inner');
+
+  /** One of the MOVES, once, on the pet. Under reduced motion, nothing. */
+  function move(name, duration) {
+    if (still) return;
+    inner()?.animate(MOVES[name] ?? MOVES.nibble, { duration, easing: 'ease-in-out' });
+  }
+
+  /** A little hop on the spot — for spotting a favourite, and for loving it afterwards. */
+  function hop(height = 7) {
+    if (still) return;
+    inner()?.animate(
+      [
+        { transform: 'translateY(0) scale(1, 1)' },
+        { transform: 'translateY(1px) scale(1.08, 0.92)', offset: 0.15 },
+        { transform: `translateY(-${height}px) scale(0.95, 1.06)`, offset: 0.5 },
+        { transform: 'translateY(0) scale(1.06, 0.94)', offset: 0.85 },
+        { transform: 'translateY(0) scale(1, 1)' },
+      ],
+      { duration: 460, easing: 'ease-out' }
+    );
+  }
+
+  /** How this pet eats: its body's style, unless the food has a way of being eaten of its own. */
+  function styleFor(treat) {
+    const look = appearanceOf(item);
+    const base = EAT_STYLES[look.body] ?? PLAIN_STYLE;
+    const style = look.texture === 'spiky' ? { ...base, toss: true } : base;
+    return { ...style, ...(foodStyle(treat.kind) ?? {}) };
+  }
+
+  /** What this pet makes of this food. A habitat's id is its pet's id. */
+  const tasteFor = (treat) => tasteOf(habitat.id, treat.kind, habitat.props.larder.menu ?? []);
+
   /**
    * The reduced-motion meal: no walk, no chew, no crumbs. The treat is eaten where the pet
    * is standing — the same answer `returnBall` gives a thrown ball, and for the same reason.
    */
   function swallowWhole(treat) {
+    if (meal?.taste === 'yuck') {
+      // Not this one. The face says so, and the food simply goes back to its plant.
+      audio.play('bleh');
+      removeTreat(treat);
+      meal = null;
+      setMood('yuck');
+      pet.moodUntil = now() + HAPPY_MS;
+      mind = { state: 'eat', until: now() + EAT_MS, target: pet.x };
+      return;
+    }
+    const loved = meal?.taste === 'love';
     audio.play('munch');
     audio.play('gulp');
+    if (loved) audio.play('love');
     buzz([10, 40, 10]);
     removeTreat(treat);
+    ate(treat.kind);
     meal = null;
     setMood('happy');
     pet.moodUntil = now() + HAPPY_MS;
     mind = { state: 'eat', until: now() + EAT_MS, target: pet.x };
-    pop(pet.art.querySelector('.pet-inner'));
+    pop(inner());
+    if (loved) heartBurst(pet.art, fx, { count: 4 });
   }
 
   /**
@@ -486,11 +622,19 @@ export function createHabitatScene({ host, fx }) {
    * which skips the noticing and the walk — they have already done both.
    */
   function beginMeal(treat, { from = 'ground' } = {}) {
-    if (!pet || napping || !treat || !treats.includes(treat)) return;
+    if (!pet || napping || !treat || !treats.includes(treat) || mind.state === 'coma') return;
     treat.held = false;
     treat.falling = false;
     treat.dropped = false; // claimed: nothing else may pick this one up
-    meal = { treat, taken: 0, nextAt: 0, liftFrom: { x: treat.x, y: treat.y } };
+    meal = {
+      treat,
+      taken: 0,
+      nextAt: 0,
+      liftFrom: { x: treat.x, y: treat.y },
+      taste: tasteFor(treat),
+      style: styleFor(treat),
+      tossed: false,
+    };
     if (still) {
       swallowWhole(treat);
       return;
@@ -501,12 +645,14 @@ export function createHabitatScene({ host, fx }) {
     if (mind.state === 'chase') fetchWanted = true;
     pet.facing = Math.sign(treat.x - pet.x) || pet.facing;
     if (from === 'hand') {
-      beginDip();
+      if (meal.taste === 'yuck') beginSniff();
+      else beginDip();
       return;
     }
     setMood('hungry');
-    audio.play('grab');
-    pop(pet.art.querySelector('.pet-inner'), { power: 0.6 });
+    audio.play(meal.taste === 'love' ? 'love' : 'grab');
+    if (meal.taste === 'love') hop(9);
+    else pop(inner(), { power: 0.6 });
     mind = { state: 'notice', until: now() + NOTICE_MS, target: pet.x };
   }
 
@@ -515,20 +661,30 @@ export function createHabitatScene({ host, fx }) {
     mind = { state: 'dip', until: now() + DIP_MS, target: pet.x };
   }
 
+  /** Chunky pets flick the food up and catch it — once per meal, and only the first time. */
+  function beginToss() {
+    meal.tossed = true;
+    setMood('hungry');
+    audio.play('boing');
+    mind = { state: 'toss', until: now() + TOSS_MS, target: pet.x };
+  }
+
   function beginChew() {
-    setMood('chew');
+    setMood('stuffed');
     // On the wrap, not the art: `setMood` and `setTitle` both replace the art node, and a
     // class on a node that is about to be thrown away is a chew that stops halfway.
     pet.wrap.classList.add('is-chewing');
-    meal.nextAt = now();
+    // A one-bite eater holds it in its cheeks a moment first, so the chomp has a wind-up.
+    meal.nextAt = now() + (meal.style.bites === 1 ? 450 : 0);
     mind = { state: 'chew', until: 0, target: pet.x };
   }
 
   function bite() {
+    const { bites, biteMs, move: style } = meal.style;
     meal.taken += 1;
     const art = meal.treat.wrap.querySelector('.hab-art');
-    const from = biteScale(meal.taken - 1);
-    const to = biteScale(meal.taken);
+    const from = biteScale(meal.taken - 1, bites);
+    const to = biteScale(meal.taken, bites);
     // On `.hab-art`, never on the wrapper: `draw` rewrites the wrapper's transform every
     // frame, and anything animating there would be overwritten before it was seen.
     art?.animate(
@@ -539,38 +695,291 @@ export function createHabitatScene({ host, fx }) {
       ],
       { duration: 200, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'forwards' }
     );
+    move(style, Math.min(biteMs, 340));
     confetti(meal.treat.wrap, fx, {
       power: 0.22,
       round: 0.7,
       colors: treatColors(meal.treat.kind, habitat.palette),
     });
-    audio.play('munch', { pitch: 0.92 + meal.taken * 0.07 });
+    dropCrumbs(meal.treat, crumbsPerBite(meal.treat.kind));
+    if (style === 'lick') audio.play('lick');
+    else audio.play('munch', { pitch: (meal.taste === 'love' ? 1.1 : 0.92) + meal.taken * 0.07 });
     buzz(8);
-    if (meal.taken >= BITES) beginGulp();
-    else meal.nextAt = now() + BITE_MS;
+    if (meal.taken >= bites) beginGulp();
+    else meal.nextAt = now() + biteMs;
   }
 
   function beginGulp() {
     pet.wrap.classList.remove('is-chewing');
+    const kind = meal.treat.kind;
+    meal.swallowed = true;
     removeTreat(meal.treat);
     audio.play('gulp');
     buzz([10, 40, 10]);
     setMood('happy');
+    gulpDown();
+    ate(kind);
     pet.moodUntil = now() + HAPPY_MS + SAVOUR_MS;
     mind = { state: 'gulp', until: now() + GULP_MS, target: pet.x };
   }
 
+  /** The mouthful on its way down: a stretch up, a lump sliding into the belly, a squash. */
+  function gulpDown() {
+    if (still) return;
+    inner()?.animate(
+      [
+        { transform: 'scale(1, 1)' },
+        { transform: 'scale(0.9, 1.12)', offset: 0.35 },
+        { transform: 'scale(1.1, 0.92)', offset: 0.75 },
+        { transform: 'scale(1, 1)' },
+      ],
+      { duration: GULP_MS + 120, easing: 'ease-in-out' }
+    );
+    const lump = svgEl('circle', { class: 'hab-lump', cx: '0', cy: '0', r: '2.4' });
+    pet.body.append(lump);
+    lump
+      .animate(
+        [
+          { transform: 'translate(0px, -10px)', opacity: 0.9 },
+          { transform: 'translate(0px, -3px)', opacity: 0.7, offset: 0.7 },
+          { transform: 'translate(0px, -2px) scale(1.6, 0.6)', opacity: 0 },
+        ],
+        { duration: GULP_MS + 200, easing: 'ease-in' }
+      )
+      .finished.catch(() => {})
+      .finally(() => lump.remove());
+  }
+
   function beginSavour() {
-    pop(pet.art.querySelector('.pet-inner'));
-    wiggle(pet.art.querySelector('.pet-inner'));
-    heartBurst(pet.art, fx, { count: 3 });
-    audio.play('purr');
+    const loved = meal.taste === 'love';
+    pop(inner(), { power: loved ? 1.4 : 1 });
+    if (loved) {
+      hop(10);
+      heartBurst(pet.art, fx, { count: 6, spread: 34 });
+      confetti(pet.art, fx, { power: 0.6, colors: ['#ffd66b', '#ff9ec0', '#fff0b0'] });
+      audio.play('love');
+    } else {
+      wiggle(inner());
+      heartBurst(pet.art, fx, { count: 3 });
+      audio.play('purr');
+    }
     mind = { state: 'savour', until: now() + SAVOUR_MS, target: pet.x };
   }
 
   function endMeal() {
     pet?.wrap.classList.remove('is-chewing');
+    if (meal?.treat?.wrap) meal.treat.wrap.style.opacity = '';
     meal = null;
+  }
+
+  /** After the hearts: a nap if that was one treat too many, a tidy-up if it was messy. */
+  function afterMeal() {
+    if (!still && belly >= BELLY_FULL) {
+      beginComa();
+      return;
+    }
+    if (!tidyUp(5)) idleFor();
+  }
+
+  /* --------------------------------------------------------------- dislikes */
+
+  // Not every pet likes everything on its own plant. It goes over, sniffs, pulls a face and
+  // noses the thing away — and the plant grows another. A bought snack is never refused:
+  // snacks.js only ever picks the food a pet dislikes from its free larder.
+
+  function beginSniff() {
+    meal.liftFrom = { x: meal.treat.x, y: meal.treat.y };
+    setMood('content');
+    mind = { state: 'sniff', until: now() + SNIFF_MS, target: pet.x };
+    if (!still) {
+      inner()?.animate(
+        [
+          { transform: 'rotate(0deg)' },
+          { transform: 'rotate(7deg)', offset: 0.2 },
+          { transform: 'rotate(4deg)', offset: 0.35 },
+          { transform: 'rotate(8deg)', offset: 0.5 },
+          { transform: 'rotate(4deg)', offset: 0.65 },
+          { transform: 'rotate(0deg)' },
+        ],
+        { duration: SNIFF_MS, easing: 'ease-in-out' }
+      );
+    }
+  }
+
+  function beginReject() {
+    setMood('yuck');
+    audio.play('bleh');
+    buzz([6, 30, 6]);
+    wiggle(inner());
+    const treat = meal.treat;
+    meal.pushFrom = { x: treat.x, y: treat.y };
+    meal.pushDir = Math.sign(treat.x - pet.x) || pet.facing || 1;
+    treat.wrap.style.transition = 'opacity 0.6s ease 0.7s';
+    treat.wrap.style.opacity = '0';
+    mind = { state: 'reject', until: now() + REJECT_MS, target: pet.x };
+  }
+
+  /* ---------------------------------------------------------------- crumbs */
+
+  function dropCrumbs(treat, count) {
+    if (still || !actors) return;
+    const colors = treatColors(treat.kind, habitat.palette);
+    for (let i = 0; i < count; i += 1) {
+      const node = svgEl('circle', {
+        class: 'hab-crumb',
+        r: (0.8 + Math.random() * 0.7).toFixed(2),
+        fill: colors[Math.floor(Math.random() * colors.length)],
+      });
+      actors.append(node);
+      crumbs.push({
+        node,
+        x: treat.x + (Math.random() - 0.5) * 6,
+        y: treat.y + 2,
+        vx: (Math.random() - 0.5) * 34,
+        vy: -Math.random() * 30,
+        landed: false,
+        born: now(),
+      });
+    }
+    while (crumbs.length > CRUMB_MAX) crumbs.shift().node.remove();
+  }
+
+  function stepCrumbs(dt) {
+    const at = now();
+    for (const crumb of crumbs) {
+      if (!crumb.landed) {
+        crumb.vy += 260 * dt;
+        crumb.x = clamp(crumb.x + crumb.vx * dt, 4, 196);
+        crumb.y += crumb.vy * dt;
+        if (crumb.y >= WALK_Y - 0.8) {
+          crumb.y = WALK_Y - 0.8;
+          crumb.landed = true;
+        }
+      }
+      if (at - crumb.born > CRUMB_LIFE - 900) crumb.node.classList.add('is-fading');
+    }
+    const stale = crumbs.filter((crumb) => at - crumb.born > CRUMB_LIFE);
+    if (stale.length) {
+      for (const crumb of stale) crumb.node.remove();
+      crumbs = crumbs.filter((crumb) => !stale.includes(crumb));
+    }
+  }
+
+  /** The closest crumb on the ground within reach, or null. */
+  function nearestCrumb() {
+    if (!pet) return null;
+    return (
+      crumbs
+        .filter((crumb) => crumb.landed && Math.abs(crumb.x - pet.x) <= CRUMB_REACH)
+        .filter((crumb) => crumb.x >= habitat.roam.x0 - MOUTH.x && crumb.x <= habitat.roam.x1 + MOUTH.x)
+        .sort((a, b) => Math.abs(a.x - pet.x) - Math.abs(b.x - pet.x))[0] ?? null
+    );
+  }
+
+  /** Walk over to the nearest crumb, if there is one. Answers whether it went. */
+  function tidyUp(left) {
+    if (still || left <= 0) return false;
+    const crumb = nearestCrumb();
+    if (!crumb) return false;
+    const dir = Math.sign(crumb.x - pet.x) || pet.facing || 1;
+    walkTo(crumb.x - dir * (MOUTH.x - 2), 'tidy');
+    mind.crumb = crumb;
+    mind.left = left;
+    pet.facing = dir;
+    return true;
+  }
+
+  function beginPeck() {
+    const { crumb, left } = mind;
+    if (crumb && crumbs.includes(crumb)) pet.facing = Math.sign(crumb.x - pet.x) || pet.facing;
+    move('peck', PECK_MS);
+    mind = { state: 'peck', until: now() + PECK_MS, target: pet.x, crumb, left };
+  }
+
+  function finishPeck() {
+    const { crumb, left } = mind;
+    if (crumb && crumbs.includes(crumb)) {
+      crumb.node.remove();
+      crumbs = crumbs.filter((entry) => entry !== crumb);
+      audio.play('munch', { pitch: 1.3 });
+    }
+    if (!tidyUp(left - 1)) idleFor();
+  }
+
+  /* ------------------------------------------------------------- the belly */
+
+  function ate(kind) {
+    belly += kind === 'cake' || kind === 'feast' ? 2 : 1;
+    shapeBody();
+  }
+
+  /** Rounder with every treat, and tipped over on its side while it sleeps one off. */
+  function shapeBody() {
+    if (!pet?.body) return;
+    const b = Math.min(belly, BELLY_FULL);
+    const round = still ? '' : `scale(${(1 + 0.045 * b).toFixed(3)} ${(1 - 0.012 * b).toFixed(3)})`;
+    const flop = mind.state === 'coma' && mind.flopped ? ' rotate(80 0 -14)' : '';
+    pet.body.setAttribute('transform', `${round}${flop}`.trim());
+  }
+
+  function beginComa() {
+    audio.play('burp');
+    buzz([20, 40, 30]);
+    pop(inner(), { power: 1.5 });
+    setMood('happy');
+    pet.moodUntil = 0;
+    say(labels.burp || 'Burp!', 'hab-burp');
+    mind = { state: 'coma', until: now() + BURP_MS + COMA_MS, burpUntil: now() + BURP_MS, flopped: false, target: pet.x };
+  }
+
+  function flop() {
+    mind.flopped = true;
+    setMood('sleep');
+    shapeBody();
+    const zeds = nodeFrom(`<g class="hab-zeds hab-coma-z" transform="translate(4 -26)">
+      <text class="hab-z hab-z1" x="0" y="0">z</text>
+      <text class="hab-z hab-z2" x="3.4" y="-4.4">z</text>
+      <text class="hab-z hab-z3" x="7.6" y="-9.6">z</text></g>`);
+    pet.wrap.append(zeds);
+  }
+
+  function wakeFromComa() {
+    pet.wrap.querySelector('.hab-coma-z')?.remove();
+    belly = 1;
+    mind = { state: 'idle', until: now() + 400, target: pet.x };
+    shapeBody();
+    setMood('content');
+    audio.play('stretch');
+    wiggle(inner());
+  }
+
+  /** A word in a bubble over the pet's head, floating up and away. */
+  function say(text, className = 'hab-say') {
+    if (!actors || !pet) return;
+    const node = svgEl('g', { class: `hab-bubble ${className}` });
+    const width = Math.max(18, text.length * 4.2 + 8);
+    node.innerHTML = `<rect x="${(-width / 2).toFixed(1)}" y="-6.5" width="${width.toFixed(1)}" height="11" rx="5.5" />
+      <text x="0" y="1.6">${text.replace(/[<&>]/g, '')}</text>`;
+    place(node, clamp(pet.x, 16, 184), WALK_Y - 44);
+    actors.append(node);
+    const art = node;
+    if (still) {
+      setTimeout(() => node.remove(), 1100);
+      return;
+    }
+    art.style.transformBox = 'fill-box';
+    art
+      .animate(
+        [
+          { opacity: 0, translate: '0 4px', scale: '0.6' },
+          { opacity: 1, translate: '0 0', scale: '1.1', offset: 0.2 },
+          { opacity: 1, translate: '0 -3px', scale: '1', offset: 0.7 },
+          { opacity: 0, translate: '0 -8px', scale: '1' },
+        ],
+        { duration: 1200, easing: 'ease-out' }
+      )
+      .finished.catch(() => {})
+      .finally(() => node.remove());
   }
 
   /**
@@ -581,9 +990,11 @@ export function createHabitatScene({ host, fx }) {
     if (!meal || !pet) return;
     const treat = meal.treat;
     // The child may take the food back out of the pet's mouth, exactly as they may take the
-    // ball. If they have, there is nothing left to eat.
-    if (treat.held || !treats.includes(treat)) {
+    // ball. If they have, there is nothing left to eat. Once it is swallowed the treat is
+    // gone on purpose, and the gulp and the hearts still have to play out.
+    if (!meal.swallowed && (treat.held || !treats.includes(treat))) {
       endMeal();
+      setMood(restingMood());
       idleFor(200, 600);
       return;
     }
@@ -601,7 +1012,20 @@ export function createHabitatScene({ host, fx }) {
         const k = 1 - Math.max(0, Math.min(1, (mind.until - at) / DIP_MS));
         treat.x = meal.liftFrom.x + (mouthX() - meal.liftFrom.x) * k;
         treat.y = meal.liftFrom.y + (mouthY() - meal.liftFrom.y) * k;
-        if (at >= mind.until) beginChew();
+        if (at >= mind.until) {
+          if (meal.style.toss && !meal.tossed) beginToss();
+          else beginChew();
+        }
+        return;
+      }
+      case 'toss': {
+        const k = 1 - Math.max(0, Math.min(1, (mind.until - at) / TOSS_MS));
+        treat.x = mouthX();
+        treat.y = mouthY() - Math.sin(Math.PI * k) * 28;
+        if (at >= mind.until) {
+          audio.play('nom');
+          beginChew();
+        }
         return;
       }
       case 'chew':
@@ -615,9 +1039,31 @@ export function createHabitatScene({ host, fx }) {
       case 'savour':
         if (at >= mind.until) {
           endMeal();
+          afterMeal();
+        }
+        return;
+      case 'sniff': {
+        // Up to the nose, the same way a dip brings it to the mouth, and held there.
+        const k = 1 - Math.max(0, Math.min(1, (mind.until - at) / SNIFF_MS));
+        const lift = Math.min(1, k * 2.5) * 0.6;
+        treat.x = meal.liftFrom.x + (mouthX() - meal.liftFrom.x) * lift;
+        treat.y = meal.liftFrom.y + (mouthY() + 8 - meal.liftFrom.y) * lift;
+        if (at >= mind.until) beginReject();
+        return;
+      }
+      case 'reject': {
+        const k = Math.min(1, (at - (mind.until - REJECT_MS)) / 450);
+        const ease = 1 - (1 - k) * (1 - k);
+        treat.x = clamp(meal.pushFrom.x + meal.pushDir * 18 * ease, 6, 194);
+        treat.y = meal.pushFrom.y + (WALK_Y - 2 - meal.pushFrom.y) * k;
+        if (at >= mind.until) {
+          removeTreat(treat);
+          endMeal();
+          setMood(restingMood());
           idleFor();
         }
         return;
+      }
       default:
         // Something else took the pet over — the nap, or the scene closing behind us.
         endMeal();
@@ -642,6 +1088,13 @@ export function createHabitatScene({ host, fx }) {
 
     root.setPointerCapture(event.pointerId);
 
+    if (hit.classList.contains('hab-pet') && mind.state === 'coma') {
+      // Out cold after a feast. A poke gets a stretch and a mumble, and it sleeps on.
+      audio.play('stretch');
+      buzz(8);
+      return;
+    }
+
     if (hit.classList.contains('hab-pet')) {
       stroke = { pointerId: event.pointerId, travelled: 0, lastX: event.clientX, lastY: event.clientY, purredAt: 0 };
       mind = { state: 'enjoy', until: 0, target: pet.x };
@@ -664,8 +1117,11 @@ export function createHabitatScene({ host, fx }) {
       // Taken back out of the pet's mouth: the meal ends at the grab, not a frame later.
       if (meal?.treat === treat) {
         endMeal();
+        setMood(restingMood());
         idleFor(200, 600);
       }
+      treat.wrap.style.transition = '';
+      treat.wrap.style.opacity = '';
       treat.held = true;
       treat.falling = false;
       treat.dropped = false;
@@ -752,7 +1208,8 @@ export function createHabitatScene({ host, fx }) {
       const treat = drag.treat;
       treat.held = false;
       treat.wrap.classList.remove('is-held');
-      if (dist(treat.x, treat.y, pet.x + HEAD.x, WALK_Y + HEAD.y) <= EAT_RADIUS) {
+      const awake = mind.state !== 'coma';
+      if (awake && dist(treat.x, treat.y, pet.x + HEAD.x, WALK_Y + HEAD.y) <= EAT_RADIUS) {
         // Put straight on its head: it has already been noticed and walked to.
         beginMeal(treat, { from: 'hand' });
       } else if (still) {
@@ -778,6 +1235,10 @@ export function createHabitatScene({ host, fx }) {
       place(ball.wrap, ball.x, ball.y, ` rotate(${(ball.spin ?? 0).toFixed(1)})`);
     }
     for (const treat of treats) place(treat.wrap, treat.x, treat.y);
+    for (const crumb of crumbs) {
+      crumb.node.setAttribute('cx', crumb.x.toFixed(2));
+      crumb.node.setAttribute('cy', crumb.y.toFixed(2));
+    }
   }
 
   function tick(frameTime) {
@@ -787,6 +1248,7 @@ export function createHabitatScene({ host, fx }) {
     stepBallPhysics(dt);
     stepMeal();
     stepTreats(dt);
+    stepCrumbs(dt);
     draw();
     raf = requestAnimationFrame(tick);
   }
@@ -797,10 +1259,18 @@ export function createHabitatScene({ host, fx }) {
     /** Put a pet in its habitat. Safe to call over an already-open scene. */
     open(
       nextItem,
-      { napping: isNapping = false, label = '', title = '', weather: sky = null, soak = 0 } = {}
+      {
+        napping: isNapping = false,
+        label = '',
+        title = '',
+        weather: sky = null,
+        soak = 0,
+        words = labels,
+      } = {}
     ) {
       this.close();
       item = nextItem;
+      labels = words ?? {};
       napping = isNapping;
       still = reduceMotion();
       weather = sky;
@@ -856,6 +1326,8 @@ export function createHabitatScene({ host, fx }) {
       pet = null;
       ball = null;
       treats = [];
+      crumbs = [];
+      belly = 0;
       // A meal has to be dropped here or it survives into the next pet's habitat. Both the
       // nap and a change of weather re-`open`, and `open` closes first — so this one line is
       // also what stops a mouthful that bedtime or a downpour interrupted.
@@ -902,7 +1374,7 @@ export function createHabitatScene({ host, fx }) {
       if (!pet) return;
       pet.title = title;
       const art = fitPetArt(nodeFrom(petMarkup(pet.mood)));
-      pet.wrap.replaceChild(art, pet.art);
+      pet.body.replaceChild(art, pet.art);
       pet.art = art;
     },
 
