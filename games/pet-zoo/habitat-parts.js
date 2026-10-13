@@ -549,6 +549,75 @@ export const TREATS = {
   dewdrop: (c) => `
     <path d="M0 -4.8 q3.4 3.6 3.4 5.8 a3.4 3.4 0 0 1 -6.8 0 q0 -2.2 3.4 -5.8 Z" fill="${c.waterLight}" />
     <circle cx="-1" cy="1.4" r="1" fill="#ffffff" opacity="0.85" />`,
+
+  // Shop snacks. Bought, not grown, so they keep their own colours in every biome: a cookie
+  // that turned blue in the snowfield would stop reading as a cookie.
+  cookie: () => `
+    <circle cx="0" cy="0" r="4.4" fill="#d9a066" />
+    <circle cx="0" cy="0" r="4.4" fill="none" stroke="#b87d45" stroke-width="0.8" />
+    <g fill="#5b3a29">
+      <circle cx="-1.8" cy="-1.4" r="0.8" /><circle cx="1.6" cy="-2" r="0.7" />
+      <circle cx="0.4" cy="0.6" r="0.8" /><circle cx="-2" cy="1.8" r="0.7" /><circle cx="2.2" cy="1.6" r="0.7" />
+    </g>`,
+  popcorn: () => `
+    <path d="M-3.6 -0.6 L3.6 -0.6 L2.6 5 L-2.6 5 Z" fill="#ffffff" />
+    <path d="M-2.4 -0.6 L-1.8 5 M0 -0.6 L0 5 M2.4 -0.6 L1.8 5" stroke="#ef4f5f" stroke-width="1" />
+    <g fill="#fff6d6">
+      <circle cx="-2.4" cy="-1.8" r="1.8" /><circle cx="0" cy="-2.8" r="2" /><circle cx="2.4" cy="-1.8" r="1.8" />
+    </g>
+    <circle cx="-0.6" cy="-3.2" r="0.6" fill="#ffd66b" />`,
+  kernel: () => `
+    <g fill="#fff6d6">
+      <circle cx="-1" cy="0.4" r="1.6" /><circle cx="1" cy="0.2" r="1.5" /><circle cx="0" cy="-1.1" r="1.4" />
+    </g>
+    <circle cx="0.3" cy="0.6" r="0.6" fill="#ffd66b" />`,
+  lollipop: () => `
+    <path d="M0 2 L0 7" stroke="#f4f1f9" stroke-width="1.2" stroke-linecap="round" />
+    <circle cx="0" cy="-1.4" r="3.8" fill="#ff7eb6" />
+    <path d="M0 -1.4 m-2.6 0 a2.6 2.6 0 1 1 2.6 2.6 a1.6 1.6 0 1 1 -1.6 -1.6" stroke="#ffffff" stroke-width="0.9" fill="none" />`,
+  watermelon: () => `
+    <path d="M-5 -1.6 A5 5 0 0 0 5 -1.6 Z" fill="#56b35a" />
+    <path d="M-4.2 -1.6 A4.2 4.2 0 0 0 4.2 -1.6 Z" fill="#ff6a7a" />
+    <g fill="#43354f"><ellipse cx="-1.8" cy="0" rx="0.4" ry="0.6" /><ellipse cx="0.4" cy="1" rx="0.4" ry="0.6" /><ellipse cx="2" cy="-0.4" rx="0.4" ry="0.6" /></g>`,
+  icecream: () => `
+    <path d="M-3 0 L3 0 L0 6 Z" fill="#e2a85a" />
+    <path d="M-1.6 0.8 L1 3.6 M1.6 0.8 L-1 3.6" stroke="#c08640" stroke-width="0.6" />
+    <circle cx="0" cy="-2" r="3.4" fill="#fff0f5" />
+    <circle cx="-1.6" cy="-0.8" r="1.6" fill="#fff0f5" /><circle cx="1.6" cy="-0.8" r="1.6" fill="#fff0f5" />
+    <circle cx="0.2" cy="-5.4" r="1" fill="#ef4f5f" />`,
+  soda: () => `
+    <rect x="-2.8" y="-4" width="5.6" height="8.6" rx="1.4" fill="#5fb3f5" />
+    <rect x="-2.8" y="-1.2" width="5.6" height="2.6" fill="#ffffff" opacity="0.85" />
+    <rect x="-2.2" y="-4.8" width="4.4" height="1" rx="0.5" fill="#c6c0b2" />
+    <path d="M0.6 -4.8 L1.6 -7.2" stroke="#ff7eb6" stroke-width="0.9" stroke-linecap="round" />
+    <circle cx="-1.2" cy="3" r="0.5" fill="#ffffff" opacity="0.7" />`,
+  jelly: () => `
+    <path d="M-4.4 3.4 L-3.4 -2.6 Q0 -4.6 3.4 -2.6 L4.4 3.4 Q0 4.6 -4.4 3.4 Z" fill="#7ad37a" opacity="0.92" />
+    <path d="M-2.6 -1.6 Q-2.4 1 -3 2.4" stroke="#ffffff" stroke-width="0.9" opacity="0.6" fill="none" stroke-linecap="round" />
+    <circle cx="0.6" cy="-4" r="1.1" fill="#ef4f5f" />`,
+  chili: () => `
+    <path d="M-3.6 -2.4 Q2 -2.6 4 4.4 Q-1.4 2.6 -3.6 -2.4 Z" fill="#e8402f" />
+    <path d="M-2.4 -1.6 Q0.6 -1.4 2 1.4" stroke="#ffb3a8" stroke-width="0.7" fill="none" opacity="0.7" />
+    <path d="M-3.6 -2.4 q-0.6 -1.6 0.6 -2.8" stroke="#3f9a45" stroke-width="1.2" fill="none" stroke-linecap="round" />`,
+  cake: () => `
+    <rect x="-4.6" y="-1.6" width="9.2" height="5.6" rx="1" fill="#ffd9e2" />
+    <path d="M-4.6 -1.6 h9.2 v1.6 q-1.15 1.4 -2.3 0 q-1.15 1.4 -2.3 0 q-1.15 1.4 -2.3 0 q-1.15 1.4 -2.3 0 Z" fill="#fff8f0" />
+    <rect x="-4.6" y="1.8" width="9.2" height="0.9" fill="#ff9ec0" />
+    <rect x="-0.5" y="-4.6" width="1" height="3" fill="#7ba2f0" />
+    <ellipse cx="0" cy="-5.4" rx="0.7" ry="1.1" fill="#ffd66b" />`,
+  goldenapple: () => `
+    <circle cx="0" cy="0" r="5.6" fill="#fff0b0" opacity="0.5" />
+    <circle cx="0" cy="0.4" r="4" fill="#f7c948" />
+    <path d="M-2.2 -1.4 q1.4 -1.6 3 -1" stroke="#fffbe0" stroke-width="1" fill="none" stroke-linecap="round" />
+    <path d="M0 -3.4 l0.4 -2.6" stroke="#a87b52" stroke-width="1.1" stroke-linecap="round" />
+    <path d="M0.6 -5.2 q2.8 -1.8 4.2 -0.4 q-1.4 2.2 -4.2 1.4 Z" fill="#7fc65c" />`,
+  feast: () => `
+    <ellipse cx="0" cy="3.2" rx="5.8" ry="1.6" fill="#f4f1f9" />
+    <rect x="-4.4" y="-2" width="8.8" height="5" rx="1" fill="#c8a2ff" />
+    <rect x="-3.2" y="-5" width="6.4" height="3.2" rx="0.8" fill="#ffd9e2" />
+    <path d="M-4.4 -0.4 q1.1 1.2 2.2 0 q1.1 1.2 2.2 0 q1.1 1.2 2.2 0 q1.1 1.2 2.2 0" stroke="#fff8f0" stroke-width="1" fill="none" />
+    <g fill="#ffd66b"><ellipse cx="-1.6" cy="-6.6" rx="0.6" ry="1" /><ellipse cx="1.6" cy="-6.6" rx="0.6" ry="1" /></g>
+    <g fill="#7ba2f0"><rect x="-1.9" y="-6" width="0.6" height="1.2" /><rect x="1.3" y="-6" width="0.6" height="1.2" /></g>`,
 };
 
 export const TREAT_IDS = Object.keys(TREATS);
@@ -583,6 +652,18 @@ export const TREAT_COLORS = {
   sporepod: (c) => [c.glowDeep, c.glow],
   sunbud: (c) => [c.glowDeep, c.glow, c.leaf],
   dewdrop: (c) => [c.waterLight, c.water],
+  cookie: () => ['#d9a066', '#b87d45', '#5b3a29'],
+  popcorn: () => ['#fff6d6', '#ffd66b', '#ef4f5f'],
+  kernel: () => ['#fff6d6', '#ffd66b'],
+  lollipop: () => ['#ff7eb6', '#ffffff'],
+  watermelon: () => ['#ff6a7a', '#56b35a', '#43354f'],
+  icecream: () => ['#fff0f5', '#e2a85a', '#ef4f5f'],
+  soda: () => ['#5fb3f5', '#ffffff'],
+  jelly: () => ['#7ad37a', '#ef4f5f'],
+  chili: () => ['#e8402f', '#3f9a45', '#ffb3a8'],
+  cake: () => ['#ffd9e2', '#fff8f0', '#ff9ec0'],
+  goldenapple: () => ['#f7c948', '#fff0b0', '#7fc65c'],
+  feast: () => ['#c8a2ff', '#ffd9e2', '#ffd66b'],
 };
 
 

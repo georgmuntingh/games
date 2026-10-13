@@ -13,6 +13,7 @@
 // their hand, and a nap started on the tablet is not a fact about the laptop.
 
 import { sanitizeZoo } from './shop.js';
+import { sanitizePantry } from './snacks.js';
 import { subjectOf, tiersOf } from './subjects/index.js';
 import { cleanMilestones, dayStamp, freshState, migrateItems, upgrade, VERSION } from './store.js';
 import { normalize as normalizeCoins } from './wallet.js';
@@ -61,6 +62,8 @@ export function exportPayload(state, now) {
     // save does not pay again for a week the child already banked on the device it came from.
     zooDecor: state.zooDecor,
     milestones: state.milestones,
+    // Snacks are bought with coins, so they travel with the coins.
+    pantry: state.pantry,
     stats: state.stats,
     items: state.items,
   };
@@ -182,6 +185,7 @@ export function applyImport(state, payload, now) {
     // nothing rather than as a fortune. What each pet owns rides along on the items.
     coins: normalizeCoins(payload.coins),
     zooDecor: sanitizeZoo(payload.zooDecor),
+    pantry: sanitizePantry(payload.pantry),
     milestones: cleanMilestones(carried.milestones),
     // A save that lists its milestones has had them read on the device it came from; one that
     // does not is from a build that predates them, and is left for the latch at boot.
