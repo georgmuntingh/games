@@ -81,6 +81,10 @@ const PECK_MS = 260;
 const BELLY_FULL = 4; // treats in one visit before the feast catches up with it
 const COMA_MS = 5000;
 const BURP_MS = 700;
+const FLING_VY = 120; // an upward flick faster than this sends a treat flying instead of falling
+const CATCH_SPEED = 56; // flat out to get under a treat in the air
+const LEAP_MS = 420;
+const LEAP_HEIGHT = 12;
 
 /**
  * How each body shape eats. Same meal, same states — only the number of mouthfuls, their
@@ -320,7 +324,20 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       return;
     }
 
-    if (pet.moodUntil && now() > pet.moodUntil && !MEAL_STATES.has(mind.state) && !SHOW_STATES.has(mind.state)) {
+    // Getting under a treat that is still in the air. Outranks everything below it, and if
+    // the treat lands first the ordinary loose-treat rule takes over from here.
+    if (mind.state === 'catch') {
+      stepCatch(dt);
+      return;
+    }
+
+    if (
+      pet.moodUntil &&
+      now() > pet.moodUntil &&
+      !MEAL_STATES.has(mind.state) &&
+      !SHOW_STATES.has(mind.state) &&
+      mind.state !== 'catch'
+    ) {
       pet.moodUntil = 0;
       setMood(restingMood());
     }
@@ -521,10 +538,22 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       if (treat.falling) {
         treat.vy += 260 * dt;
         treat.y += treat.vy * dt;
-        if (treat.vx) treat.x = clamp(treat.x + treat.vx * dt, 6, 194);
+        if (treat.vx) {
+          treat.x += treat.vx * dt;
+          // Off the edges of the scene and back, softer, the way the ball comes off a wall.
+          if (treat.x < 6 || treat.x > 194) {
+            treat.x = clamp(treat.x, 6, 194);
+            treat.vx = -treat.vx * 0.5;
+          }
+        }
+        if (treat.y < 4) {
+          treat.y = 4;
+          treat.vy = Math.abs(treat.vy) * 0.3;
+        }
         if (treat.y >= WALK_Y - 2) {
           treat.y = WALK_Y - 2;
           treat.falling = false;
+          treat.airborne = false;
           treat.vx = 0;
           // Down, and staying down. Food that faded away uneaten was the one thing in this
           // scene that punished a child for missing; now the pet comes and gets it.
@@ -567,7 +596,18 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   // Where a carried ball rides, and where a mouthful sits. The same two lines the ball
   // physics already used, named now that two things need them.
   const mouthX = () => pet.x + pet.facing * MOUTH.x;
-  const mouthY = () => WALK_Y + MOUTH.y;
+  const mouthY = () => WALK_Y + MOUTH.y - petLift();
+
+  /** How high off the ground a leap has the pet right now. */
+  function petLift() {
+    if (!pet?.leapAt) return 0;
+    const k = (now() - pet.leapAt) / LEAP_MS;
+    if (k >= 1) {
+      pet.leapAt = 0;
+      return 0;
+    }
+    return Math.sin(Math.PI * k) * LEAP_HEIGHT;
+  }
 
   /** Where to stand to eat something: just short of it, so the food is under the nose. */
   function standSpot(treat) {
@@ -673,6 +713,12 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
     if (from === 'hand') {
       if (meal.taste === 'yuck') beginSniff();
       else beginDip();
+      return;
+    }
+    if (from === 'catch') {
+      // Straight into the cheeks — it was caught in the mouth, so there is nothing to dip for.
+      meal.tossed = true;
+      beginChew();
       return;
     }
     setMood('hungry');
@@ -1138,6 +1184,69 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
     }
   }
 
+  /* ------------------------------------------------------------------ catch */
+
+  // A treat flung into the air is a game of catch. The pet works out where it will come down
+  // to mouth height, gets under it, and snaps it out of the air with a little leap. Miss, and
+  // it simply lands — and is eaten off the ground like any other.
+
+  /** Where a treat in the air will be when it comes down past the pet's mouth. */
+  function catchPoint(treat) {
+    const g = 260;
+    const h = WALK_Y + MOUTH.y - treat.y;
+    const t = (-treat.vy + Math.sqrt(Math.max(0, treat.vy * treat.vy + 2 * g * h))) / g;
+    return clamp(treat.x + treat.vx * t, 6, 194);
+  }
+
+  function aimCatch(treat) {
+    if (!pet || napping || meal || mind.state === 'coma' || mind.state === 'enjoy') return;
+    if (SHOW_STATES.has(mind.state) || tasteFor(treat) === 'yuck') return;
+    const x = catchPoint(treat);
+    const dir = Math.sign(x - pet.x) || pet.facing || 1;
+    if (ball?.carried) dropBall();
+    if (mind.state === 'chase') fetchWanted = true;
+    setMood('hungry');
+    mind = { state: 'catch', until: 0, target: clamp(x - dir * MOUTH.x, habitat.roam.x0, habitat.roam.x1), treat };
+  }
+
+  function stepCatch(dt) {
+    const { treat } = mind;
+    if (!treat || !treats.includes(treat) || !treat.airborne || treat.held) {
+      setMood(restingMood());
+      idleFor(150, 400);
+      return;
+    }
+    // Keep re-aiming: a treat off a wall is not where it was going to be.
+    const x = catchPoint(treat);
+    const dir = Math.sign(x - pet.x) || pet.facing || 1;
+    mind.target = clamp(x - dir * MOUTH.x, habitat.roam.x0, habitat.roam.x1);
+    const delta = mind.target - pet.x;
+    if (Math.abs(delta) > ARRIVE) {
+      pet.facing = Math.sign(delta);
+      pet.x = clamp(pet.x + pet.facing * CATCH_SPEED * dt, habitat.roam.x0, habitat.roam.x1);
+    } else {
+      pet.facing = Math.sign(treat.x - pet.x) || pet.facing;
+    }
+    // Coming down, close to the mouth, and within a leap of it: snap.
+    const reach = mouthY() - LEAP_HEIGHT - 4;
+    if (treat.vy > 0 && Math.abs(treat.x - mouthX()) < 10 && treat.y >= reach && treat.y <= mouthY() + 6) {
+      caught(treat);
+    }
+  }
+
+  function caught(treat) {
+    treat.falling = false;
+    treat.airborne = false;
+    treat.vx = 0;
+    treat.vy = 0;
+    pet.leapAt = now();
+    audio.play('nom');
+    buzz([8, 30, 14]);
+    say(labels.nom || 'Nom!');
+    confetti(treat.wrap, fx, { power: 0.5, round: 1, colors: ['#ffd66b', '#fff0b0', '#ffffff'] });
+    beginMeal(treat, { from: 'catch' });
+  }
+
   /* ----------------------------------------------------------------- snacks */
 
   // What the shop's snacks do. Everything here is decoration on top of the ordinary meal —
@@ -1477,6 +1586,8 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       treat.wrap.style.opacity = '';
       treat.held = true;
       treat.falling = false;
+      treat.airborne = false;
+      treat.vx = 0;
       treat.dropped = false;
       treat.wrap.classList.add('is-held');
       drag = { pointerId: event.pointerId, kind: 'treat', treat, samples: [] };
@@ -1569,6 +1680,13 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
         // Reduced motion: it is already down. The pet eats it next frame, where it stands.
         treat.y = WALK_Y - 2;
         treat.dropped = true;
+      } else if (vy < -FLING_VY) {
+        // Flung upward: it goes up, comes down, and the pet may well get there first.
+        treat.falling = true;
+        treat.airborne = true;
+        treat.vx = clamp(vx * 0.7, -130, 130);
+        treat.vy = Math.max(vy * 0.85, -260);
+        aimCatch(treat);
       } else {
         // Wherever it lands, it stays there, and the pet will come and get it.
         treat.falling = true;
@@ -1582,7 +1700,7 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
 
   function draw() {
     if (pet) {
-      place(pet.wrap, pet.x, WALK_Y, pet.facing < 0 ? ' scale(-1 1)' : '');
+      place(pet.wrap, pet.x, WALK_Y - petLift(), pet.facing < 0 ? ' scale(-1 1)' : '');
     }
     if (ball) {
       place(ball.wrap, ball.x, ball.y, ` rotate(${(ball.spin ?? 0).toFixed(1)})`);
