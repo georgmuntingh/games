@@ -220,6 +220,8 @@ export const BROW_MOOD = {
   droopy: { rot: -9, dy: 1.5 }, // inner ends up: crestfallen, never cross
   sleep: { rot: -4, dy: 1 },
   chew: { rot: 0, dy: -1.5 }, // pleased, and settled: it already got what it asked for
+  stuffed: { rot: 0, dy: -3 }, // cheeks full and very pleased about it
+  yuck: { rot: 5, dy: 1 }, // a small frown — disgust, not fury, so the tilt stays shallow
 };
 
 /* --------------------------------------------------------------------- mouths */
@@ -235,6 +237,14 @@ export const MOUTHS = {
   // already chewing, and the working of it is a CSS animation rather than a second drawing.
   chew: `<ellipse cx="50" cy="69" rx="5.2" ry="5.6" fill="${INK}" />
          <ellipse cx="50" cy="71.4" rx="3.4" ry="2.6" fill="#ff9ec0" />`,
+  // Chipmunk cheeks: a mouth pressed shut on far too much, with a bulge either side of it.
+  stuffed: `<ellipse cx="36" cy="68" rx="9" ry="7.4" fill="#ffffff" opacity="0.32" />
+            <ellipse cx="64" cy="68" rx="9" ry="7.4" fill="#ffffff" opacity="0.32" />
+            <path d="M28.5 63 Q26 68.5 30 74 M71.5 63 Q74 68.5 70 74" fill="none" stroke="${INK}" stroke-width="1.6" stroke-linecap="round" opacity="0.45" />
+            <path d="M45 69 Q47.5 71.5 50 69 Q52.5 71.5 55 69" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" />`,
+  // Bleh. A wobbly mouth with the tongue stuck out of one side of it.
+  yuck: `<path d="M50 70.5 q0.4 7.4 5.4 7.2 q4.2 -0.4 2.6 -6.8 Z" fill="#ff7e9e" stroke="${INK}" stroke-width="1.4" />
+         <path d="M40 70 q3 -4 6 0 q3 4 6 0 q3 -4 6 0" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />`,
 };
 
 /* ==========================================================================

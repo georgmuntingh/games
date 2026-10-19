@@ -9,6 +9,7 @@ import { DEFAULT_WALK_SPEED, isWalkSpeed } from './column.js';
 import { DEFAULT_LANGUAGE } from './i18n.js';
 import { admireFor, ADMIRE_SECONDS_DEFAULT, PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
+import { sanitizePantry } from './snacks.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
 import { sanitize as sanitizeInk } from './ink/memory.js';
@@ -41,6 +42,9 @@ export function freshState(now) {
     // is derived from the yard's slots, exactly as a pet's furniture is from its habitat's.
     zooDecor: [],
     milestones: [],
+    // Snacks bought from the shelf and not eaten yet: `{ cookie: 3 }`. Counts only — what a
+    // snack does is the habitat's business, and what it costs is snacks.js's.
+    pantry: {},
     // When the shop's back pay was handed out. Set once, so a zoo that predates coins is
     // paid for the pets it already had exactly once however often it is reloaded.
     coinsGrantedAt: 0,
@@ -136,6 +140,8 @@ export function load(now, storage = safeStorage()) {
       // Filtered rather than trusted, the same as a pet's decor: a hand-edited save must not
       // be able to put a piece this build cannot draw into the yard.
       zooDecor: sanitizeZoo(save.zooDecor),
+      // The same again for the pantry: known snacks, whole counts, nothing over the cap.
+      pantry: sanitizePantry(save.pantry),
       // Ids only, so an unknown one from a future build is simply worth nothing rather than
       // being a number this build has to make sense of.
       milestones: cleanMilestones(save.milestones),

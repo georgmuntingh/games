@@ -120,6 +120,53 @@ export function flyHeart(from, to, layer) {
 }
 
 /**
+ * The pet's snack, thrown from the clock into its open mouth. `flyHeart`'s arc with something
+ * to eat on it instead: the answer turns into food on the way over, which is the whole joke of
+ * a zoo you feed by telling the time. `markup` is a treat drawn centred on (0, 0) at about a
+ * 9-unit span — exactly what `treatSvg` returns — and `to` is a `.pet`, whose mouth sits about
+ * two-thirds of the way down its box.
+ *
+ * Resolves when the food arrives, so the chewing can start on the frame it lands. Under
+ * reduced motion there is no flight, and it resolves at once.
+ */
+export function flyFood(from, to, layer, markup, { scale = 1, duration = 620 } = {}) {
+  if (!from || !to || !layer || reduceMotion()) return Promise.resolve();
+  const host = layer.getBoundingClientRect();
+  const a = from.getBoundingClientRect();
+  const b = to.getBoundingClientRect();
+  const el = document.createElement('i');
+  el.className = 'fly-food';
+  el.innerHTML = `<svg viewBox="-8 -8 16 16" aria-hidden="true">${markup}</svg>`;
+  layer.appendChild(el);
+  const x0 = a.left + a.width / 2 - host.left;
+  const y0 = a.top + a.height / 2 - host.top;
+  const x1 = b.left + b.width / 2 - host.left;
+  const y1 = b.top + b.height * 0.66 - host.top;
+  const spin = x1 >= x0 ? 340 : -340;
+  const anim = el.animate(
+    [
+      { transform: `translate(${x0}px, ${y0}px) scale(${0.5 * scale}) rotate(0deg)`, opacity: 0 },
+      { transform: `translate(${x0 + (x1 - x0) * 0.2}px, ${y0 - 40}px) scale(${scale}) rotate(${spin * 0.25}deg)`, opacity: 1, offset: 0.2 },
+      {
+        transform: `translate(${(x0 + x1) / 2}px, ${Math.min(y0, y1) - 80}px) scale(${1.25 * scale}) rotate(${spin * 0.6}deg)`,
+        opacity: 1,
+        offset: 0.55,
+      },
+      { transform: `translate(${x1}px, ${y1}px) scale(${0.55 * scale}) rotate(${spin}deg)`, opacity: 1 },
+    ],
+    { duration, easing: 'cubic-bezier(.35,0,.6,1)' }
+  );
+  return new Promise((resolve) => {
+    const done = () => {
+      el.remove();
+      resolve();
+    };
+    anim.onfinish = done;
+    anim.oncancel = done;
+  });
+}
+
+/**
  * The coins an answer just paid, drifting up off whatever earned them. The sibling of
  * `flyHeart`, except that it flies nowhere in particular: the purse lives on the zoo screen,
  * and a number that sails off toward a tab the child cannot currently see reads as a number
