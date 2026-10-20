@@ -1,0 +1,27 @@
+{
+  "_comment": "Geometry of eggerland2-map.png, measured from the image. Tile = 16 map px (screenshots are 2x native 8px tiles). Each room cell is 192 px (pitch) and holds an 11x11 tile playfield surrounded by a half-tile (8 px) wall border, so 8 + 11*16 + 8 = 192. The interior tile grid therefore starts 8 px into each cell: origin below is the top-left INTERIOR pixel of room (0,0) = (284+8, 28+8). The 10x10 grid of normal stages 1-100 has pitch 192 in both axes, so room (9,9)'s interior origin is (292+9*192, 36+9*192) = (2020, 1764).",
+  "tileSize": 16,
+  "roomTiles": {
+    "w": 11,
+    "h": 11
+  },
+  "mainGrid": {
+    "origin": {
+      "x": 291,
+      "y": 36
+    },
+    "pitch": {
+      "x": 192,
+      "y": 192
+    },
+    "cols": 10,
+    "rows": 10,
+    "coordOffset": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  "extraRooms": [],
+  "excludeRects": [],
+  "roomOverrides": {}
+}
