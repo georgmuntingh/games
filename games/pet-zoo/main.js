@@ -100,6 +100,17 @@ import {
   ZOO_CATALOG,
 } from './shop.js';
 import {
+  buyObstacle,
+  COURSE,
+  courseIsFull,
+  courseOf,
+  courseOwns,
+  isCourseUnlocked,
+  obstacleById,
+  sellObstacle,
+} from './course.js';
+import { COURSE_FLAG, obstacleSvg } from './course-parts.js';
+import {
   buySnack,
   canStock,
   countOf,
@@ -225,6 +236,7 @@ const el = {
   shopBody: $('shop-body'),
   shopPick: $('shop-pick'),
   shopSnackIntro: $('shop-snack-intro'),
+  shopCourseIntro: $('shop-course-intro'),
   shopPets: $('shop-pets'),
   shopGrid: $('shop-grid'),
   shopNote: $('shop-note'),
@@ -2657,6 +2669,16 @@ function penCollar(item, digits) {
   return `${collarClock(item.h, item.m)}${digits ? timeId(item.h, item.m) : ''}`;
 }
 
+/**
+ * A little start flag in the pen's top-left corner: this pet has an obstacle course at home.
+ * Drawn from the habitat's own flag, so it is the same flag the child will find in there.
+ */
+function courseBadge(item, name) {
+  const label = escape(t('course.badge', { name }));
+  return `<svg class="pen-course" viewBox="-3 -54 18 56" role="img" aria-label="${label}">
+      <title>${label}</title>${COURSE_FLAG(habitatOf(item).palette)}</svg>`;
+}
+
 function renderZoo() {
   renderStall();
   renderYard();
@@ -2703,6 +2725,7 @@ function renderZoo() {
         <button class="pen${isEgg ? ' is-egg' : ''}${resting ? ' is-resting' : ''}" type="button"
           data-id="${id}"${resting ? ` title="${escape(t('zoo.resting', { name }))}"` : ''}>
           <span class="pen-flag">${flag}</span>
+          ${!isEgg && courseOf(item).length ? courseBadge(item, name) : ''}
           ${art}
           <span class="pen-name">${label}</span>
           ${rank ? `<span class="pen-rank">${rank}</span>` : ''}
@@ -2875,9 +2898,10 @@ function renamePet(id) {
 // on. Deliberately not in the header: a number beside the clock is a number a child watches
 // instead of the hands, and the clock scene has one job.
 //
-// Two shelves, two tabs. The home shelf is bought for one named pet and needs to know which;
-// the yard shelf is bought once for the whole zoo and has no pet to pick, so the picker goes
-// away with it rather than sitting there meaning nothing.
+// Four shelves, four tabs. The home shelf and the obstacle course are bought for one named pet
+// and need to know which; the yard shelf is bought once for the whole zoo and the snacks go in
+// the shared picnic basket, so neither has a pet to pick, and the picker goes away with them
+// rather than sitting there meaning nothing.
 
 const coinChip = (n) => `<span class="coin-pip" aria-hidden="true"></span>${n}`;
 
@@ -2953,19 +2977,21 @@ function renderShop() {
 
   renderTabs();
 
-  // The picker belongs to the home shelf only. Hidden rather than emptied, so switching tabs
-  // and coming back does not lose the pet the child had chosen.
+  // The picker belongs to the shelves bought for one pet. Hidden rather than emptied, so
+  // switching tabs and coming back does not lose the pet the child had chosen.
   const home = shopTab === 'home';
-  el.shopPick.hidden = !home;
-  el.shopPets.hidden = !home;
+  const perPet = home || shopTab === 'course';
+  el.shopPick.hidden = !perPet;
+  el.shopPets.hidden = !perPet;
   el.shopSnackIntro.hidden = shopTab !== 'snacks';
+  el.shopCourseIntro.hidden = shopTab !== 'course';
 
   if (shopTab === 'snacks') {
     el.shopGrid.innerHTML = SNACKS.map(snackCard).join('');
     return;
   }
 
-  if (home) {
+  if (perPet) {
     el.shopPets.innerHTML = pets
       .map(([id, item]) => {
         const on = id === shopPetId;
@@ -2982,6 +3008,10 @@ function renderShop() {
 
   const pet = state.items[shopPetId];
   const petLabel = escape(petName(pet, t.lang));
+  if (shopTab === 'course') {
+    el.shopGrid.innerHTML = COURSE.map((entry) => courseCard(entry, pet, petLabel)).join('');
+    return;
+  }
   el.shopGrid.innerHTML = shelf()
     .map((entry) => {
       const locked = !isUnlocked(entry.id, state.tiers.clock);
@@ -3034,6 +3064,94 @@ function snackCard(entry) {
       ${status}
       ${have ? `<span class="snack-have">${escape(t('shop.have', { n: have }))}</span>` : ''}
     </button>`;
+}
+
+/**
+ * One obstacle on the course shelf. The furniture card's three states — in the course already,
+ * locked, or a price — plus the line that says what the pet will do on it, the way a snack card
+ * says what a snack does.
+ */
+function courseCard(entry, pet, petLabel) {
+  const owned = courseOwns(pet, entry.id);
+  const locked = !isCourseUnlocked(entry.id, state.tiers.clock);
+  const poor = !canAfford(state.coins, entry.price);
+  const status = owned
+    ? `<span class="shop-state">${escape(t('shop.ownedCourse', { name: petLabel }))}</span>`
+    : locked
+      ? `<span class="shop-state is-locked">${escape(t('shop.locked'))}</span>`
+      : `<span class="shop-price${poor ? ' is-poor' : ''}">${coinChip(entry.price)}</span>`;
+  const cls = ['shop-card', 'course-card', owned && 'is-owned', !owned && locked && 'is-locked']
+    .filter(Boolean)
+    .join(' ');
+  return `
+    <button class="${cls}" type="button" data-course="${entry.id}">
+      <span class="shop-art">${courseArt(entry.id)}</span>
+      <span class="shop-name">${escape(t(`course.${entry.id}`))}</span>
+      <span class="snack-about">${escape(t(`course.about.${entry.id}`))}</span>
+      ${status}
+    </button>`;
+}
+
+/** An obstacle on its own, both layers, in the colours of the home it is going to. */
+function courseArt(id) {
+  const pet = state.items[shopPetId];
+  const c = habitatOf(pet ?? { h: 12, m: 0 }).palette;
+  return `<svg viewBox="-19 -40 38 42" aria-hidden="true" focusable="false">${obstacleSvg(id, c)}</svg>`;
+}
+
+/**
+ * Tapping an obstacle asks first, and shows the pet's home with the whole course laid out as it
+ * would be with this piece in (or out of) it — so the child sees where it goes in the running
+ * order before paying for it.
+ */
+function askToBuyCourse(id) {
+  const entry = obstacleById.get(id);
+  const pet = state.items[shopPetId];
+  if (!entry || !pet) return;
+  const label = t(`course.${id}`);
+  const preview = (next, copy) =>
+    habitatSvg(habitatOf(next), { uid: 'confirm-course', label: copy, showCourse: true });
+
+  if (courseOwns(pet, id)) {
+    const copy = t('shop.sellConfirm', { item: label, price: entry.price });
+    pendingPurchase = { id, mode: 'courseSell' };
+    showConfirm(preview(sellObstacle(pet, id), copy), copy, t('shop.sell'));
+    return;
+  }
+  if (!isCourseUnlocked(id, state.tiers.clock)) return note(t('shop.lockedHelp'));
+  if (courseIsFull(pet)) return note(t('shop.fullCourse', { name: petName(pet, t.lang) }));
+  if (!canAfford(state.coins, entry.price)) return note(t('shop.tooDear'));
+
+  pendingPurchase = { id, mode: 'course' };
+  const copy = t('shop.confirmCourse', { item: label, name: petName(pet, t.lang), price: entry.price });
+  showConfirm(preview(buyObstacle(pet, id), copy), copy, t('shop.buy'));
+}
+
+/** The obstacle course's half of `commit`: the same refusals re-checked, the same refund rule. */
+function commitCourse() {
+  const { id, mode } = pendingPurchase;
+  const entry = obstacleById.get(id);
+  const pet = state.items[shopPetId];
+  if (!entry || !pet) return closeConfirm();
+  if (mode === 'courseSell') {
+    if (!courseOwns(pet, id)) return closeConfirm();
+    state.items[shopPetId] = sellObstacle(pet, id);
+    state.coins = earn(state.coins, entry.price);
+    note(t('shop.sold', { price: entry.price }));
+  } else {
+    if (!canAfford(state.coins, entry.price) || courseIsFull(pet) || courseOwns(pet, id)) return closeConfirm();
+    state.items[shopPetId] = buyObstacle(pet, id);
+    state.coins = spend(state.coins, entry.price);
+    audio.play('buy');
+    buzz([12, 40, 18]);
+    note(t('shop.boughtCourse', { name: petName(pet, t.lang) }));
+  }
+  save();
+  closeConfirm();
+  renderShop();
+  renderStall();
+  renderZoo();
+  if (habitatId === shopPetId) refreshHabitat();
 }
 
 /** A snack drawn on its own, in a box that fits the ~9-unit treats. */
@@ -3165,6 +3283,7 @@ function closeConfirm() {
 
 function commit() {
   if (pendingPurchase?.mode === 'snack') return buySnackNow();
+  if (pendingPurchase?.mode === 'course' || pendingPurchase?.mode === 'courseSell') return commitCourse();
   const entry = pendingPurchase && shopItemById.get(pendingPurchase.id);
   if (!entry) return closeConfirm();
   const { id, mode } = pendingPurchase;
@@ -3232,6 +3351,7 @@ el.shopGrid.addEventListener('click', (event) => {
   const card = event.target.closest('.shop-card');
   if (!card) return;
   if (card.dataset.snack) askToBuySnack(card.dataset.snack);
+  else if (card.dataset.course) askToBuyCourse(card.dataset.course);
   else askToBuy(card.dataset.id);
 });
 
@@ -3366,7 +3486,7 @@ function renderHabitatBar(item) {
     ? t('habitat.eggHint')
     : napping
       ? t('habitat.sleeping', { name })
-      : t('habitat.hint', { name });
+      : t(courseOf(item).length ? 'habitat.hintCourse' : 'habitat.hint', { name });
   return { name, isEgg };
 }
 
@@ -3396,7 +3516,7 @@ function openHabitat(id) {
     weather: sky.weather,
     soak: sky.soak,
     title: escape(isEgg ? eggTitle(item) : name),
-    words: { burp: t('habitat.burp'), nom: t('habitat.nom') },
+    words: { burp: t('habitat.burp'), nom: t('habitat.nom'), course: escape(t('course.start', { name })) },
   });
   showScene('habitat');
   renderTray();

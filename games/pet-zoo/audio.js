@@ -196,6 +196,63 @@ const SOUNDS = {
     tone(ac, { type: 'sine', freq: 300, endFreq: 430, duration: 0.3, gain: 0.045 });
     tone(ac, { type: 'sine', freq: 400, endFreq: 280, duration: 0.36, gain: 0.04, delay: 0.26 });
   },
+
+  // The obstacle course. Every sound short and soft, because a run plays a dozen of them in
+  // ten seconds and none of them may outstay the move it belongs to.
+
+  // On your marks: two quick rising taps as the pieces pop up.
+  ready(ac) {
+    tone(ac, { type: 'triangle', freq: 660, duration: 0.07, gain: 0.06 });
+    tone(ac, { type: 'triangle', freq: 990, duration: 0.1, gain: 0.06, delay: 0.1 });
+  },
+  // Feet leaving the ground.
+  hop(ac) {
+    tone(ac, { type: 'sine', freq: 260, endFreq: 470, duration: 0.09, gain: 0.05 });
+  },
+  // Through the hoop: one bright bell.
+  ding(ac) {
+    tone(ac, { type: 'sine', freq: 1568, duration: 0.3, gain: 0.05 });
+    tone(ac, { type: 'sine', freq: 2349, duration: 0.18, gain: 0.02 });
+  },
+  // Shuffling about inside the tunnel: a few dry scratches.
+  rustle(ac) {
+    for (let i = 0; i < 4; i += 1) {
+      tone(ac, { type: 'sawtooth', freq: 900 + (i % 2) * 300, endFreq: 600, duration: 0.04, gain: 0.012, delay: i * 0.06 });
+    }
+  },
+  // The seesaw going over: a slow wooden creak bending down.
+  creak(ac) {
+    tone(ac, { type: 'square', freq: 210, endFreq: 140, duration: 0.3, gain: 0.02 });
+    tone(ac, { type: 'triangle', freq: 120, duration: 0.12, gain: 0.04, delay: 0.26 });
+  },
+  // Down the slide: a long falling whistle.
+  whoosh(ac) {
+    tone(ac, { type: 'sine', freq: 1300, endFreq: 260, duration: 0.55, gain: 0.05 });
+  },
+  // Into the ball pit: a soft hollow pock, and a scatter of small ones after it.
+  plop(ac) {
+    tone(ac, { type: 'sine', freq: 420, endFreq: 190, duration: 0.12, gain: 0.07 });
+    for (let i = 0; i < 3; i += 1) {
+      tone(ac, { type: 'triangle', freq: 700 + i * 160, endFreq: 420, duration: 0.05, gain: 0.025, delay: 0.1 + i * 0.07 });
+    }
+  },
+  // A landing in the rain.
+  splash(ac) {
+    for (let i = 0; i < 3; i += 1) {
+      tone(ac, { type: 'sawtooth', freq: 1800 - i * 400, endFreq: 500, duration: 0.06, gain: 0.012, delay: i * 0.03 });
+    }
+  },
+  // A flub: a hollow cartoon bonk. Never a buzzer, the same as `oops` — it is meant to be funny.
+  knock(ac) {
+    tone(ac, { type: 'triangle', freq: 300, endFreq: 150, duration: 0.12, gain: 0.08 });
+    tone(ac, { type: 'sine', freq: 880, endFreq: 660, duration: 0.18, gain: 0.03, delay: 0.1 });
+  },
+  // Over the finish line: a little brass-ish fanfare.
+  fanfare(ac) {
+    arpeggio(ac, [523, 659, 784], { type: 'triangle', gain: 0.09, spacing: 0.1, duration: 0.16 });
+    tone(ac, { type: 'triangle', freq: 1047, duration: 0.45, gain: 0.09, delay: 0.32 });
+    tone(ac, { type: 'sine', freq: 1319, duration: 0.4, gain: 0.04, delay: 0.32 });
+  },
 };
 
 export const audio = {

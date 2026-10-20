@@ -35,6 +35,8 @@ import {
   WALK_Y,
 } from './habitat.js';
 import { audio } from './audio.js';
+import { courseLayout, favouriteObstacleOf, flubCues, flubMs, flubPose, MOVES as COURSE_MOVES, pickFlub } from './course.js';
+import { ballColors, COURSE_PARTS } from './course-parts.js';
 import { tasteOf } from './snacks.js';
 import { shelters, slows } from './weather.js';
 import { buzz, confetti, heartBurst, pop, reduceMotion, svgEl, wiggle } from './juice.js';
@@ -85,6 +87,12 @@ const FLING_VY = 120; // an upward flick faster than this sends a treat flying i
 const CATCH_SPEED = 56; // flat out to get under a treat in the air
 const LEAP_MS = 420;
 const LEAP_HEIGHT = 12;
+const RUN_SPEED = 56; // between obstacles: flat out, it is a race
+const CHEER_MS = 1500; // at the finish line
+const FOLD_MS = 420; // the course packing itself away again
+const POP_STAGGER = 110; // the pieces pop up one after another, left to right
+const AUTO_MIN = 45000; // how long an idle pet waits before it might run its course by itself
+const AUTO_MAX = 90000;
 
 /**
  * How each body shape eats. Same meal, same states — only the number of mouthfuls, their
@@ -184,6 +192,9 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   let drag = null; // { pointerId, kind, node, samples: [] }
   let fetchWanted = false;
   let regrowAt = new Map();
+  let course = null; // { pieces, segs, at, favourite, loved } — a run in progress
+  let coursePose = null; // the pet's pose on an obstacle this frame: lift, lean, squash, hidden
+  let courseAutoAt = 0; // not before this does an idle pet set its course up by itself
 
   /* ------------------------------------------------------------ coordinates */
 
@@ -307,6 +318,8 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   const shelterSpot = () => habitat?.shelter?.x ?? habitat?.home?.x ?? 100;
 
   // What outranks what, in order:
+  //   0. a run of the obstacle course. It can only start when nothing below is under way,
+  //      and nothing interrupts it once it has but the nap or the scene closing.
   //   1. a mouthful already in progress. Nothing interrupts it but the child taking the food
   //      back, the nap starting, or the scene closing.
   //   2. food lying on the ground. It outranks the ball, and it outranks the umbrella — a pet
@@ -316,6 +329,14 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   //   4. sheltering, and the amble.
   function stepMind(dt) {
     if (!pet || napping || mind.state === 'enjoy') return;
+
+    // A run, once started, outranks everything: food dropped meanwhile waits on the ground and
+    // a thrown ball waits where it stopped, and the checks below pick both up the moment the
+    // course is packed away.
+    if (course) {
+      stepCourse(dt);
+      return;
+    }
 
     // Sleeping off a feast. Food dropped meanwhile waits on the ground until it wakes.
     if (mind.state === 'coma') {
@@ -365,6 +386,12 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       case 'idle':
         if (still) return;
         if (now() < mind.until) return;
+        // Now and then a pet with a course sets it up and has a go on its own — but only in
+        // fine weather, and never with food about or a ball waiting to be fetched.
+        if (wantsCourse()) {
+          startCourse();
+          return;
+        }
         // In rain or hail an idle pet mostly makes for the umbrella — mostly, not always,
         // because a pet that never once potters about in the wet is a pet that looks broken.
         if (shelters(weather) && Math.random() < SHELTER_ODDS) {
@@ -1199,7 +1226,7 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   }
 
   function aimCatch(treat) {
-    if (!pet || napping || meal || mind.state === 'coma' || mind.state === 'enjoy') return;
+    if (!pet || napping || meal || course || mind.state === 'coma' || mind.state === 'enjoy') return;
     if (SHOW_STATES.has(mind.state) || tasteFor(treat) === 'yuck') return;
     const x = catchPoint(treat);
     const dir = Math.sign(x - pet.x) || pet.facing || 1;
@@ -1532,11 +1559,322 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
     root.prepend(defs);
   }
 
+  /* ----------------------------------------------------------------- course */
+
+  // The obstacle course. Between runs it is a flag; a tap (or, now and then, the pet itself)
+  // pops the pieces up across the walk line, and the run is a list of segments played in
+  // order: run to the start, then for each piece run to it and go over it — fluffing it first,
+  // once in a while — then celebrate at the finish, pack it all away and amble back in.
+  //
+  // How the pet gets over each piece is course.js's: a pose as a function of progress. All
+  // this part does is play those poses, move the pieces' own parts to match, and fire the cues.
+
+  /** Whether a run could start right now. Anything already going on comes first. */
+  function courseBlocked() {
+    if (!pet || !habitat || !actors || napping || item?.hatchedAt === null) return true;
+    if (!habitat.course?.length || course || meal) return true;
+    if (MEAL_STATES.has(mind.state) || SHOW_STATES.has(mind.state)) return true;
+    return ['coma', 'catch', 'enjoy', 'fetchfood'].includes(mind.state);
+  }
+
+  /** The idle pet's own decision to have a go. Never in the wet, the fog or the snow. */
+  function wantsCourse() {
+    if (now() < courseAutoAt || courseBlocked()) return false;
+    if (shelters(weather) || slows(weather)) return false;
+    if (looseTreat() || (fetchWanted && ball?.resting)) return false;
+    return true;
+  }
+
+  function tapFlag() {
+    const flag = root?.querySelector('.crs-flag-art');
+    if (courseBlocked()) {
+      // Not now — it is busy. The flag shrugs, so the tap was not lost on nobody.
+      if (!still) wiggle(flag);
+      buzz(6);
+      return;
+    }
+    if (!still) wiggle(flag);
+    startCourse();
+  }
+
+  /** One piece, built from its two layers and put either side of the pet. */
+  function buildPiece(piece) {
+    const part = COURSE_PARTS[piece.id];
+    const c = habitat.palette;
+    const back = svgEl('g', { class: `hab-obstacle crs-${piece.id}` });
+    back.innerHTML = `<g class="crs-art">${part.back(c)}</g>`;
+    place(back, piece.x, WALK_Y);
+    actors.insertBefore(back, pet.wrap);
+    let front = null;
+    if (part.front) {
+      front = svgEl('g', { class: 'hab-obstacle hab-obstacle-front' });
+      front.innerHTML = `<g class="crs-art">${part.front(c)}</g>`;
+      place(front, piece.x, WALK_Y);
+      pet.wrap.after(front);
+    }
+    return { ...piece, back, front };
+  }
+
+  /** Each piece grows up out of the ground, one after another, left to right. */
+  function popUp(pieces) {
+    if (still) return;
+    pieces.forEach((piece, i) => {
+      for (const node of [piece.back, piece.front]) {
+        node
+          ?.querySelector('.crs-art')
+          ?.animate(
+            [
+              { transform: 'scale(0.2, 0)', opacity: 0 },
+              { transform: 'scale(1.08, 1.12)', opacity: 1, offset: 0.65 },
+              { transform: 'scale(1, 1)', opacity: 1 },
+            ],
+            { duration: 380, delay: i * POP_STAGGER, easing: 'cubic-bezier(.34,1.56,.64,1)', fill: 'backwards' }
+          );
+      }
+    });
+  }
+
+  function startCourse() {
+    if (courseBlocked()) return;
+    const layout = courseLayout(habitat.course);
+    const favourite = favouriteObstacleOf(habitat.id);
+    const pieces = layout.pieces.map(buildPiece);
+    popUp(pieces);
+    // Whatever was in its mouth is put down first, and a ball it was off after it goes back
+    // to once the run is done.
+    if (ball?.carried) dropBall();
+    if (mind.state === 'chase') fetchWanted = true;
+    setMood('happy');
+    audio.play('ready');
+    buzz(10);
+
+    const segs = [];
+    if (still) {
+      // The reduced-motion run: the pieces stand there, the pet is simply over the line.
+      segs.push({ kind: 'warp', to: layout.finish });
+    } else {
+      const flub = pickFlub(pieces, favourite);
+      // A beat for the pieces to finish popping up before anyone sets off.
+      segs.push({ kind: 'wait', ms: 260 + pieces.length * POP_STAGGER });
+      segs.push({ kind: 'go', to: layout.start });
+      pieces.forEach((piece, i) => {
+        segs.push({ kind: 'go', to: piece.x0 });
+        if (i === flub) segs.push({ kind: 'move', piece, flub: true });
+        segs.push({ kind: 'move', piece, flub: false });
+      });
+      segs.push({ kind: 'go', to: layout.finish });
+    }
+    // Back in off the finish line, which is further out than the pet ever wanders and close
+    // enough to the edge to crop it, so the celebrating happens where all of it can be seen.
+    segs.push({ kind: 'go', to: clamp(layout.finish, habitat.roam.x0, habitat.roam.x1) });
+    segs.push({ kind: 'cheer', ms: CHEER_MS });
+    segs.push({ kind: 'fold', ms: still ? 0 : FOLD_MS });
+
+    course = {
+      pieces,
+      segs,
+      at: -1,
+      favourite,
+      loved: pieces.some((piece) => piece.id === favourite),
+    };
+    mind = { state: 'course', until: 0, target: pet.x };
+    nextSeg();
+  }
+
+  function nextSeg() {
+    course.at += 1;
+    const seg = course.segs[course.at];
+    if (!seg) {
+      endCourse();
+      return;
+    }
+    seg.began = now();
+    seg.fired = 0;
+    if (seg.kind === 'move') {
+      const { move } = seg.piece;
+      // Snow and fog slow a run down the same way they slow an amble.
+      seg.ms = (seg.flub ? flubMs(move) : COURSE_MOVES[move].ms) / pace();
+      seg.cues = seg.flub ? flubCues(move) : COURSE_MOVES[move].cues;
+      if (!seg.flub && seg.piece.id === course.favourite) setMood('happy');
+    } else if (seg.kind === 'warp' || (seg.kind === 'go' && still)) {
+      pet.x = seg.to;
+      pet.facing = 1;
+      nextSeg();
+    } else if (seg.kind === 'cheer') {
+      cheer();
+    } else if (seg.kind === 'fold') {
+      fold();
+    }
+  }
+
+  function stepCourse(dt) {
+    const seg = course.segs[course.at];
+    if (!seg) return;
+    if (seg.kind === 'go') {
+      const delta = seg.to - pet.x;
+      if (Math.abs(delta) <= ARRIVE) {
+        pet.x = seg.to;
+        nextSeg();
+        return;
+      }
+      pet.facing = Math.sign(delta);
+      pet.x += pet.facing * Math.min(Math.abs(delta), RUN_SPEED * pace() * dt);
+      return;
+    }
+    if (seg.kind === 'move') {
+      const k = Math.min(1, (now() - seg.began) / seg.ms);
+      const { piece } = seg;
+      const p = seg.flub ? flubPose(piece.move, k, piece.span) : COURSE_MOVES[piece.move].pose(k, piece.span);
+      pet.facing = 1;
+      pet.x = piece.x0 + p.dx;
+      coursePose = p;
+      movePart(piece, p);
+      while (seg.fired < seg.cues.length && seg.cues[seg.fired].at <= k) {
+        cue(seg.cues[seg.fired], piece);
+        seg.fired += 1;
+      }
+      if (k >= 1) {
+        coursePose = null;
+        if (seg.flub) setMood('happy');
+        else if (piece.id === course.favourite) {
+          // Its very favourite. Hearts, right there over the piece.
+          heartBurst(pet.art, fx, { count: 3 });
+          audio.play('love');
+        }
+        nextSeg();
+      }
+      return;
+    }
+    if (now() - seg.began >= (seg.ms ?? 0)) nextSeg();
+  }
+
+  /** The piece's own moving part, kept in step with the pet on it. */
+  function movePart(piece, p) {
+    if (piece.move === 'tip') {
+      piece.back.querySelector('.crs-plank')?.setAttribute('transform', `rotate(${p.part.toFixed(2)} 0 -6)`);
+    } else if (piece.move === 'bounce') {
+      piece.back.querySelector('.crs-mat')?.setAttribute('transform', `translate(0 ${(p.part * 2.4).toFixed(2)})`);
+    } else if (piece.move === 'weave') {
+      piece.back.querySelectorAll('.crs-pole').forEach((pole, i) => {
+        const x = [-10.5, -3.5, 3.5, 10.5][i];
+        // Only the pole the pet is brushing past sways, and back the way it was pushed.
+        const near = Math.max(0, 1 - Math.abs(piece.x0 + p.dx - (piece.x + x)) / 5);
+        pole.setAttribute('transform', `translate(${x} 0) rotate(${(p.part * 9 * near).toFixed(1)})`);
+      });
+    }
+  }
+
+  /** Something that happens at one moment of a move: a sound, and sometimes a bit of business. */
+  function cue({ sound, fx: effect }, piece) {
+    if (sound) audio.play(sound);
+    if (!effect || still) return;
+    if (effect === 'land') {
+      buzz(5);
+      if (shelters(weather)) splash(pet.x);
+    } else if (effect === 'balls') {
+      sprayBalls(piece);
+    } else if (effect === 'rustle') {
+      piece.back.querySelector('.crs-tube')?.animate(
+        [
+          { transform: 'scale(1, 1)' },
+          { transform: 'scale(1.05, 0.95)' },
+          { transform: 'scale(0.97, 1.04)' },
+          { transform: 'scale(1, 1)' },
+        ],
+        { duration: 240, iterations: 3 }
+      );
+    } else if (effect === 'bonk') {
+      // The joke: it went wrong. A dazed face, a thump, and the piece itself rocking.
+      setMood('droopy');
+      buzz([10, 30, 10]);
+      piece.back.querySelector('.crs-art')?.animate(
+        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(4deg)' }, { transform: 'rotate(0deg)' }],
+        { duration: 420, easing: 'ease-out' }
+      );
+      if (piece.move === 'jump') {
+        piece.back.querySelector('.crs-bar')?.animate(
+          [{ transform: 'rotate(0deg)' }, { transform: 'rotate(18deg)' }, { transform: 'rotate(-8deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 700, easing: 'ease-out' }
+        );
+      }
+    }
+  }
+
+  /** Into the ball pit, and out it all comes. */
+  function sprayBalls(piece) {
+    const colors = ballColors(habitat.palette);
+    for (let i = 0; i < 6; i += 1) {
+      const node = svgEl('circle', { class: 'hab-crumb', r: '1.7', fill: colors[i % colors.length] });
+      litter(node, {
+        x: piece.x + (Math.random() - 0.5) * 16,
+        y: WALK_Y - 14,
+        vx: (Math.random() - 0.5) * 70,
+        vy: -70 - Math.random() * 50,
+        life: 1600,
+        bounces: 2,
+      });
+    }
+  }
+
+  /** A landing in the rain throws up a little water. */
+  function splash(x) {
+    const color = habitat.palette.waterLight;
+    for (let i = 0; i < 5; i += 1) {
+      const node = svgEl('circle', { class: 'hab-crumb', r: '0.9', fill: color });
+      litter(node, { x: x + (Math.random() - 0.5) * 8, y: WALK_Y - 1, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 30, life: 800 });
+    }
+    audio.play('splash');
+  }
+
+  /** Over the line. Bigger if its favourite was in the course. */
+  function cheer() {
+    pet.facing = pet.x > 100 ? -1 : 1;
+    cheerUp(HAPPY_MS);
+    audio.play('fanfare');
+    buzz([12, 40, 12, 40, 20]);
+    hop(course.loved ? 12 : 9);
+    heartBurst(pet.art, fx, { count: course.loved ? 5 : 3 });
+    if (course.loved) confetti(pet.art, fx, { power: 1.1 });
+  }
+
+  /** Everything folds back down into the ground, and goes. */
+  function fold() {
+    for (const piece of course.pieces) {
+      for (const node of [piece.back, piece.front]) {
+        if (!node) continue;
+        if (still) {
+          node.remove();
+          continue;
+        }
+        node
+          .querySelector('.crs-art')
+          ?.animate([{ transform: 'scale(1, 1)', opacity: 1 }, { transform: 'scale(0.3, 0)', opacity: 0 }], {
+            duration: FOLD_MS,
+            easing: 'ease-in',
+            fill: 'forwards',
+          })
+          .finished.catch(() => {})
+          .finally(() => node.remove());
+      }
+    }
+  }
+
+  function endCourse() {
+    for (const piece of course?.pieces ?? []) {
+      piece.back.remove();
+      piece.front?.remove();
+    }
+    course = null;
+    coursePose = null;
+    courseAutoAt = now() + AUTO_MIN + Math.random() * (AUTO_MAX - AUTO_MIN);
+    idleFor();
+  }
+
   /* --------------------------------------------------------------- pointers */
 
   function onDown(event) {
     if (!habitat || !pet) return;
-    const hit = event.target.closest?.('.hab-ball, .hab-treat, .hab-pet');
+    const hit = event.target.closest?.('.hab-ball, .hab-treat, .hab-pet, .hab-course-flag');
     if (!hit) return;
     event.preventDefault();
 
@@ -1547,6 +1885,14 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       if (!still) wiggle(pet.art.querySelector('.pet-inner'));
       return;
     }
+
+    if (hit.classList.contains('hab-course-flag')) {
+      tapFlag();
+      return;
+    }
+
+    // Busy. Mid-run the pet is not to be stroked out of the air; it is all yours at the finish.
+    if (hit.classList.contains('hab-pet') && course) return;
 
     root.setPointerCapture(event.pointerId);
 
@@ -1700,7 +2046,15 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
 
   function draw() {
     if (pet) {
-      place(pet.wrap, pet.x, WALK_Y - petLift(), pet.facing < 0 ? ' scale(-1 1)' : '');
+      const p = coursePose;
+      const flip = pet.facing < 0 ? ' scale(-1 1)' : '';
+      // On an obstacle the pet leans about its middle and squashes about its feet, so a
+      // somersault turns it over rather than swinging it round its toes.
+      const shape = p
+        ? ` rotate(${p.rot.toFixed(1)} 0 ${(-PET_FOOT.y * 0.45).toFixed(1)}) scale(${p.sx.toFixed(3)} ${p.sy.toFixed(3)})`
+        : '';
+      place(pet.wrap, pet.x, WALK_Y - petLift() - (p?.lift ?? 0), `${flip}${shape}`);
+      pet.wrap.style.visibility = p?.hide ? 'hidden' : '';
     }
     if (ball) {
       place(ball.wrap, ball.x, ball.y, ` rotate(${(ball.spin ?? 0).toFixed(1)})`);
@@ -1749,7 +2103,14 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       habitat = habitatOf(item);
       const uid = `hab${habitat.id.replace(':', '')}`;
 
-      host.innerHTML = habitatSvg(habitat, { uid, label, sleeping: napping, weather: sky, soak });
+      host.innerHTML = habitatSvg(habitat, {
+        uid,
+        label,
+        sleeping: napping,
+        weather: sky,
+        soak,
+        courseLabel: labels.course ?? '',
+      });
       root = host.querySelector('svg.habitat');
       actors = root.querySelector('.hab-actors');
       root.classList.toggle('is-night', Boolean(habitat.light.night));
@@ -1781,6 +2142,9 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
 
       fetchWanted = false;
       regrowAt = new Map();
+      course = null;
+      coursePose = null;
+      courseAutoAt = now() + AUTO_MIN + Math.random() * (AUTO_MAX - AUTO_MIN);
       mind = { state: napping ? 'sleep' : 'idle', until: now() + IDLE_MIN, target: pet.x };
       last = now();
       raf = requestAnimationFrame(tick);
@@ -1811,6 +2175,10 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       drag = null;
       stroke = null;
       fetchWanted = false;
+      // The pieces went with the nodes above; the run goes with them, so a nap or a downpour
+      // that re-opens the scene starts it with the course folded away.
+      course = null;
+      coursePose = null;
     },
 
     /**
@@ -1878,6 +2246,17 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       target.addEventListener('pointermove', onMove);
       target.addEventListener('pointerup', onUp);
       target.addEventListener('pointercancel', onUp);
+      // The flag is a button to a keyboard too: it is the one thing in here that is.
+      target.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        if (!event.target.closest?.('.hab-course-flag')) return;
+        event.preventDefault();
+        if (napping) {
+          audio.play('stretch');
+          return;
+        }
+        tapFlag();
+      });
     },
   };
 }
