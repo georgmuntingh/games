@@ -1736,6 +1736,15 @@ main {
   font-size: 1rem;
 }
 
+/* Top left, the one corner nothing else uses: this pet has an obstacle course at home. */
+.pen-course {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.45rem;
+  width: 10px;
+  height: 30px;
+}
+
 .pen.is-egg .pen-name {
   color: var(--pz-ink-soft);
 }
@@ -2041,6 +2050,38 @@ body.in-habitat .zoo-bar {
   to {
     opacity: 0.62;
   }
+}
+
+/* ---- the obstacle course ----------------------------------------------- */
+
+/* Every piece grows up out of the ground and folds back down into it, and the flag waves about
+   its foot: so they all scale and turn about the bottom middle of themselves. */
+.hab-obstacle .crs-art,
+.hab-obstacle .crs-tube,
+.hab-obstacle .crs-bar,
+.crs-flag-art {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.hab-obstacle .crs-bar {
+  transform-origin: 0% 50%;
+}
+
+.habitat .hab-course-flag {
+  cursor: pointer;
+}
+
+.habitat .hab-course-flag:focus {
+  outline: none;
+}
+
+.habitat .hab-course-flag:focus-visible .crs-flag-art {
+  filter: drop-shadow(0 0 2px var(--pz-accent));
+}
+
+.hab-obstacle {
+  pointer-events: none;
 }
 
 /* Crumbs off a bitten treat: they land, sit a while for the pet to tidy, then fade. */
@@ -2778,16 +2819,18 @@ body.in-habitat .zoo-bar {
   margin: 0.5rem 0;
 }
 
-/* Two shelves. A tab rather than a filter: at this age the question "who is it for?" and
+/* The shelves. A tab rather than a filter: at this age the question "who is it for?" and
    the question "what is it?" must not be asked at the same time. */
 .shop-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   margin: 0.6rem 0 0.2rem;
 }
 
 .shop-tab {
-  flex: 1;
+  /* Four shelves now: side by side where there is room, two and two on a phone. */
+  flex: 1 1 calc(50% - 0.4rem);
   min-height: 44px;
   padding: 0.45rem 0.6rem;
   border: 2px solid transparent;
@@ -2796,6 +2839,12 @@ body.in-habitat .zoo-bar {
   color: var(--pz-ink-soft);
   font: inherit;
   font-weight: 700;
+}
+
+@media (min-width: 560px) {
+  .shop-tab {
+    flex: 1 1 0;
+  }
 }
 
 .shop-tab.is-on {
@@ -2928,6 +2977,11 @@ body.in-habitat .zoo-bar {
 .snack-card svg {
   width: 52px;
   height: 52px;
+}
+
+.course-card svg {
+  width: 56px;
+  height: 62px;
 }
 
 .snack-about {

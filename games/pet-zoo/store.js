@@ -9,6 +9,7 @@ import { DEFAULT_WALK_SPEED, isWalkSpeed } from './column.js';
 import { DEFAULT_LANGUAGE } from './i18n.js';
 import { admireFor, ADMIRE_SECONDS_DEFAULT, PLAY_MINUTES_DEFAULT } from './session.js';
 import { sanitizeDecor, sanitizeZoo } from './shop.js';
+import { sanitizeCourse } from './course.js';
 import { sanitizePantry } from './snacks.js';
 import { normalize as normalizeCoins } from './wallet.js';
 import { crackFor } from './srs.js';
@@ -211,7 +212,8 @@ function renameSubject(map, from, to) {
  * predates the cracking egg and is reconstructed from the streak the egg had already built, so an
  * egg mid-way through a save from an older build comes back visibly part-broken. `decor` predates
  * the shop and starts empty, and is filtered on every load rather than trusted: an id this build
- * cannot draw must never reach a habitat.
+ * cannot draw must never reach a habitat. `course` predates the obstacle course, and is treated
+ * exactly like `decor`.
  */
 export function migrateItems(items) {
   const out = {};
@@ -226,6 +228,9 @@ export function migrateItems(items) {
     const cracks =
       typeof item?.cracks === 'number' ? item.cracks : crackFor(item?.correctStreak ?? 0);
     const decor = sanitizeDecor(item?.decor);
+    // The obstacle course, filtered the same way and for the same reason. Absent on every pet
+    // from before the course was sold, which is simply a pet with no course yet.
+    const course = sanitizeCourse(item?.course);
     // Which of an item's cases have been shown. Filtered rather than trusted, like the decor:
     // a hand-edited save must not be able to declare full coverage and skip the practice the
     // coverage gate exists to make happen.
@@ -236,9 +241,11 @@ export function migrateItems(items) {
       typeof item?.cracks === 'number' &&
       Array.isArray(item?.decor) &&
       decor.length === item.decor.length &&
+      Array.isArray(item?.course) &&
+      course.length === item.course.length &&
       Array.isArray(item?.covered) &&
       covered.length === item.covered.length;
-    out[id] = current ? item : { ...item, subject, feeds, cracks, decor, covered };
+    out[id] = current ? item : { ...item, subject, feeds, cracks, decor, course, covered };
   }
   return out;
 }

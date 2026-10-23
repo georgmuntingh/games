@@ -202,6 +202,7 @@ import {
   BIOME_IDS,
   biomeOfSpecies,
   CENTRE_KEEP,
+  courseFlagSpotFor,
   furnitureFor,
   furnitureSpotsFor,
   habitatFor,
@@ -345,6 +346,26 @@ import {
   TOPPER_CROWN,
   TOPPERS,
 } from '../pet-parts.js';
+import {
+  buyObstacle,
+  COURSE,
+  COURSE_IDS,
+  courseLayout,
+  courseOf,
+  favouriteObstacleOf,
+  flubCues,
+  flubMs,
+  flubPose,
+  isCourseUnlocked,
+  LANE,
+  MAX_COURSE,
+  MOVES as COURSE_MOVES,
+  pickFlub,
+  sanitizeCourse,
+  SEESAW_TILT,
+  sellObstacle,
+} from '../course.js';
+import { COURSE_FLAG, COURSE_PARTS, obstacleSvg } from '../course-parts.js';
 import {
   DEFAULT_LANGUAGE,
   hourWord,
@@ -1656,7 +1677,7 @@ test('neither language is missing a string the other has', () => {
 test('no string is left untranslated — every Norwegian value differs from the English', () => {
   const t = { nb: translator('nb'), en: translator('en') };
   // Bar the handful that are the same word in both, or carry only placeholders.
-  const shared = new Set(['unlock.copy', 'coins.earned', 'shop.statue', 'habitat.ariaWeather']);
+  const shared = new Set(['unlock.copy', 'coins.earned', 'shop.statue', 'habitat.ariaWeather', 'course.tunnel', 'course.trampoline']);
   const identical = languageKeys('nb').filter(
     (key) => !shared.has(key) && t.nb(key) === t.en(key)
   );
@@ -2270,7 +2291,7 @@ test('an old pet loads at the form it had already earned', () => {
 });
 
 test('migration leaves an already-migrated item completely alone', () => {
-  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], covered: [], hatchedAt: 1 };
+  const item = { subject: 'clock', h: 4, m: 15, reps: 0, feeds: 5, cracks: 2, decor: [], course: [], covered: [], hatchedAt: 1 };
   assertEqual(migrateItems({ '4:15': item })['4:15'], item, 'it was needlessly rewritten');
 });
 
@@ -6567,6 +6588,225 @@ test('the choices survive a reload, clamped', () => {
   assertEqual(back.practice.clock.on, false);
   assertEqual(back.practice.clock.floor, LAST_TIER, 'a floor past the ladder was kept');
   assertEqual(back.practice.math.floor, 1);
+});
+
+describe('the obstacle course — the shelf and the three-piece cap');
+
+test('every obstacle is priced, tiered, drawn, named and runnable', () => {
+  const t = { nb: translator('nb'), en: translator('en') };
+  for (const entry of COURSE) {
+    assert(entry.price > 0 && Number.isInteger(entry.price), `${entry.id} costs ${entry.price}`);
+    assert(entry.tier >= 0 && entry.tier <= LAST_TIER, `${entry.id} is on tier ${entry.tier}`);
+    assert(COURSE_PARTS[entry.id]?.back, `${entry.id} is sold but never drawn`);
+    assert(COURSE_MOVES[entry.move], `${entry.id} has no move to run it with`);
+    for (const lang of ['nb', 'en']) {
+      for (const key of [`course.${entry.id}`, `course.about.${entry.id}`]) {
+        assert(t[lang](key) !== key, `${key} is missing in ${lang}`);
+      }
+    }
+  }
+  assertEqual(new Set(COURSE_IDS).size, COURSE_IDS.length, 'an obstacle is listed twice');
+  for (let tier = 0; tier <= LAST_TIER; tier += 1) {
+    assert(COURSE.some((entry) => entry.tier === tier), `nothing new on the course shelf at tier ${tier}`);
+  }
+  assert(COURSE.some((entry) => isCourseUnlocked(entry.id, 0)), 'nothing to buy at the very first tier');
+  assert(!isCourseUnlocked('nonsense', LAST_TIER), 'an unknown obstacle unlocked');
+});
+
+test('a course takes three pieces, once each, and buying never mutates the pet', () => {
+  const pet = { decor: ['house'] };
+  let next = buyObstacle(pet, 'hurdle');
+  assertEqual(courseOf(next).join(), 'hurdle');
+  assertEqual(pet.course, undefined, 'the pet handed in was mutated');
+  assertEqual(buyObstacle(next, 'hurdle'), next, 'the same piece was bought twice');
+  next = buyObstacle(buyObstacle(next, 'tunnel'), 'slide');
+  assertEqual(courseOf(next).length, MAX_COURSE);
+  assertEqual(buyObstacle(next, 'hoop'), next, 'a fourth piece got in');
+  const empty = {};
+  assertEqual(buyObstacle(empty, 'house'), empty, 'refusing must hand the pet back untouched');
+  assertEqual(courseOf(buyObstacle(empty, 'house')).length, 0, 'furniture went into the course');
+  assertEqual(next.decor.join(), 'house', 'and a course must not touch the furniture');
+});
+
+test('selling takes the piece out and closes the gap, keeping the running order', () => {
+  const full = { course: ['hurdle', 'tunnel', 'slide'] };
+  assertEqual(courseOf(sellObstacle(full, 'tunnel')).join(), 'hurdle,slide');
+  assertEqual(sellObstacle(full, 'hoop'), full, 'sold something that was not there');
+  assertEqual(courseOf(buyObstacle(sellObstacle(full, 'hurdle'), 'hurdle')).join(), 'tunnel,slide,hurdle');
+});
+
+test('a hand-edited course comes back clean', () => {
+  assertEqual(sanitizeCourse(['hurdle', 'hurdle', 'trebuchet', 'house', 'tunnel', 'hoop', 'slide']).join(), 'hurdle,tunnel,hoop');
+  for (const junk of [null, undefined, 7, 'hurdle', { 0: 'hurdle' }]) {
+    assertEqual(sanitizeCourse(junk).length, 0, `${JSON.stringify(junk)} made a course`);
+  }
+});
+
+test('a pet’s favourite obstacle is its own, and the same every time', () => {
+  assertEqual(favouriteObstacleOf('4:15'), favouriteObstacleOf('4:15'));
+  const seen = new Set(ALL_ITEMS.map(({ h, m }) => favouriteObstacleOf(timeId(h, m))));
+  for (const id of seen) assert(COURSE_IDS.includes(id), `${id} is not an obstacle`);
+  assert(seen.size >= COURSE_IDS.length - 2, `only ${seen.size} different favourites across the zoo`);
+});
+
+describe('the obstacle course — laid out and run');
+
+test('any three pieces fit the lane, inside the safe box, without touching', () => {
+  assert(LANE.x0 >= SAFE.x0 && LANE.x1 <= SAFE.x1, 'the lane runs off the safe box');
+  for (const a of COURSE_IDS) {
+    for (const b of COURSE_IDS) {
+      for (const c of COURSE_IDS) {
+        if (a === b || b === c || a === c) continue;
+        const { start, finish, pieces } = courseLayout([a, b, c]);
+        assertEqual(pieces.map((piece) => piece.id).join(), [a, b, c].join(), 'the running order is not the buying order');
+        let edge = start;
+        for (const piece of pieces) {
+          assert(piece.x0 >= edge, `${a},${b},${c}: ${piece.id} overlaps what is before it`);
+          edge = piece.x1;
+        }
+        assert(edge <= finish, `${a},${b},${c} runs past the finish line`);
+      }
+    }
+  }
+  assertEqual(courseLayout([]).pieces.length, 0);
+});
+
+test('every move leaves the ground where it starts and lands level where it ends', () => {
+  for (const entry of COURSE) {
+    const { pose, ms, cues } = COURSE_MOVES[entry.move];
+    for (const [k, dx] of [[0, 0], [1, entry.span]]) {
+      const p = pose(k, entry.span);
+      assertClose(p.dx, dx, 1e-6, `${entry.id} is not at its ${k ? 'exit' : 'entry'}`);
+      assertClose(p.lift, 0, 1e-6, `${entry.id} is in the air at ${k}`);
+      assertClose(((p.rot % 360) + 360) % 360, 0, 1e-6, `${entry.id} is leaning at ${k}`);
+      assertClose(p.sx, 1, 1e-6, `${entry.id} is squashed at ${k}`);
+      assertClose(p.sy, 1, 1e-6, `${entry.id} is squashed at ${k}`);
+      assert(!p.hide, `${entry.id} is out of sight at ${k}`);
+    }
+    for (let k = 0; k <= 1; k += 0.01) {
+      const p = pose(k, entry.span);
+      assert(p.lift >= 0 && p.lift < WALK_Y - 20, `${entry.id} left the scene at ${k.toFixed(2)}`);
+      assert(p.dx >= -1e-6 && p.dx <= entry.span + 1e-6, `${entry.id} went backwards off its piece`);
+    }
+    assert(ms > 0 && cues.every((c) => c.at >= 0 && c.at <= 1), `${entry.id} has a cue outside its move`);
+  }
+});
+
+test('a flub tumbles back to the start, and only ever happens off the favourite', () => {
+  for (const entry of COURSE) {
+    const end = flubPose(entry.move, 1, entry.span);
+    assertClose(end.dx, 0, 1e-6, `${entry.id}'s flub ends somewhere other than the start`);
+    assertClose(end.lift, 0, 1e-6, `${entry.id}'s flub ends in the air`);
+    assert(flubMs(entry.move) > COURSE_MOVES[entry.move].ms * 0.4, `${entry.id}'s flub is over too soon`);
+    assert(flubCues(entry.move).some((c) => c.sound === 'knock'), `${entry.id}'s flub never bonks`);
+  }
+  const pieces = courseLayout(['hurdle', 'tunnel', 'slide']).pieces;
+  assertEqual(pickFlub(pieces, 'hurdle', () => 0.99), -1, 'a high roll still flubbed');
+  for (let i = 0; i < 200; i += 1) {
+    const at = pickFlub(pieces, 'tunnel', Math.random);
+    assert(at === -1 || pieces[at].id !== 'tunnel', 'it flubbed its favourite');
+  }
+  assertEqual(pickFlub(courseLayout(['tunnel']).pieces, 'tunnel', () => 0), -1, 'a favourite-only course flubbed');
+});
+
+describe('the obstacle course — in the habitat');
+
+test('a flag stands in the home only once there is a course', () => {
+  const bare = habitatSvg(habitatOf({ h: 4, m: 15, decor: [] }), { uid: 'u' });
+  assert(!bare.includes('hab-course-flag'), 'a pet with no course has a flag');
+  const svg = habitatSvg(habitatOf({ h: 4, m: 15, course: ['hurdle'] }), { uid: 'u', courseLabel: 'Go' });
+  assert(svg.includes('hab-course-flag'), 'a pet with a course has no flag');
+  assert(svg.includes('role="button"') && svg.includes('aria-label="Go"'), 'the flag is not a button');
+  assert(!svg.includes('hab-course-preview'), 'the pieces stand in the home between runs');
+  assert(
+    habitatSvg(habitatOf({ h: 4, m: 15, course: ['hurdle'] }), { uid: 'u', showCourse: true }).includes('hab-course-preview'),
+    'the shop preview shows no course'
+  );
+});
+
+test('the flag stands clear of everything the pet uses, in every home', () => {
+  for (const layout of LAYOUTS) {
+    const ground = furnitureSpotsFor(layout);
+    const x = courseFlagSpotFor(layout);
+    assert(x >= SAFE.x0 + 4 && x <= SAFE.x1 - 4, `the flag at ${x} is cropped on a narrow screen`);
+    assert(x < CENTRE_KEEP.x0 || x > CENTRE_KEEP.x1, `the flag at ${x} is in the pet's way`);
+    const busy = [layout.nest, layout.larder, layout.ball, homeSpotFor(layout, ROAM), ...ground];
+    const gap = Math.min(...busy.map((b) => Math.abs(b - x)));
+    assert(gap >= 10, `the flag stands ${gap} from something on the walk line`);
+  }
+  // Buying furniture never moves the flag, and buying a course never moves the furniture.
+  for (const { h, m } of ALL_ITEMS.slice(0, 24)) {
+    const plain = habitatOf({ h, m });
+    const kitted = habitatOf({ h, m, decor: ['house', 'pond'], course: ['hurdle', 'slide'] });
+    assertEqual(plain.courseFlag.x, kitted.courseFlag.x, `${plain.id}'s flag moved`);
+    assertEqual(
+      habitatOf({ h, m, decor: ['house', 'pond'] }).furniture.map((f) => f.x).join(),
+      kitted.furniture.map((f) => f.x).join(),
+      `${plain.id}'s furniture moved for a course`
+    );
+  }
+});
+
+test('the umbrella stands clear of the flag too', () => {
+  for (const { h, m } of ALL_ITEMS) {
+    const hab = habitatOf({ h, m, decor: ['house', 'pond'], course: ['hurdle'] });
+    const gap = Math.abs(hab.shelter.x - hab.courseFlag.x);
+    assert(gap >= 8, `${hab.id} stood its umbrella ${gap} from the flag`);
+  }
+});
+
+test('the seesaw is drawn at rest the way the pet finds it', () => {
+  // Its plank's resting tilt is the move's opening tilt, or the plank jumps as the pet steps on.
+  const svg = obstacleSvg('seesaw', habitatFor(4, 15).palette);
+  assert(svg.includes(`rotate(-${SEESAW_TILT.toFixed(2)} 0 -6)`), 'the plank and the move disagree');
+  assertClose(COURSE_MOVES.tip.pose(0.01, 30).part, -SEESAW_TILT, 1e-9);
+});
+
+test('the flag and every piece draw in every palette', () => {
+  const c = habitatFor(4, 15).palette;
+  assert(!COURSE_FLAG(c).includes('undefined'), 'the flag reached for a colour that is not there');
+  for (const id of COURSE_IDS) {
+    const svg = obstacleSvg(id, c);
+    assert(svg.length > 40 && !svg.includes('undefined') && !svg.includes('NaN'), `${id} drew badly`);
+  }
+});
+
+describe('the obstacle course — what a save has to remember');
+
+test('a save from before the course backfills an empty one', () => {
+  const migrated = migrateItems({ '4:15': { h: 4, m: 15, reps: 2, feeds: 3, cracks: 2, decor: ['house'] } });
+  assertEqual(JSON.stringify(migrated['4:15'].course), '[]');
+  assertEqual(migrated['4:15'].decor.join(), 'house', 'and the furniture is left alone');
+});
+
+test('a course survives a save and a reload, and a hand-edited one is cleaned on load', () => {
+  withStorage((storage) => {
+    const state = {
+      ...freshState(1000),
+      items: {
+        '4:15': { h: 4, m: 15, feeds: 1, cracks: 2, course: ['slide', 'hurdle'], hatchedAt: 1 },
+        '9:30': { h: 9, m: 30, feeds: 1, cracks: 2, course: ['hoop', 'hoop', 'catapult'], hatchedAt: 1 },
+      },
+    };
+    write(state, storage);
+    const back = load(2000, storage);
+    assertEqual(back.items['4:15'].course.join(), 'slide,hurdle', 'the running order was lost');
+    assertEqual(back.items['9:30'].course.join(), 'hoop');
+  });
+});
+
+test('a course travels with the zoo, and cannot be smuggled in', () => {
+  const state = {
+    ...freshState(1000),
+    items: { '4:15': { h: 4, m: 15, feeds: 1, cracks: 0, course: ['beam', 'tunnel'], hatchedAt: 1 } },
+  };
+  const arrived = applyImport(freshState(5000), exportPayload(state, 2000), 5000);
+  assertEqual(arrived.items['4:15'].course.join(), 'beam,tunnel');
+  // Through the file, the way a real import arrives: that is where a hand edit gets cleaned.
+  const payload = JSON.parse(JSON.stringify(exportPayload(state, 2000)));
+  payload.items['4:15'].course = ['beam', 'rocket', 'beam', 'house', 'hoop', 'slide', 'stones'];
+  const parsed = parseTransfer(JSON.stringify(payload));
+  assertEqual(applyImport(freshState(5000), parsed, 5000).items['4:15'].course.join(), 'beam,hoop,slide');
 });
 
 describe('snacks — the shelf and the pantry');

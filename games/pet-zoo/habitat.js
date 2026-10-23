@@ -53,6 +53,8 @@ import {
 import { hash, portraitOf, SPECIES, speciesFor, traitIndexFor } from './pets.js';
 import { shelters, veilFor, WEATHERS } from './weather.js';
 import { itemById as shopItemById, MAX_DECOR, sanitizeDecor, slotOf } from './shop.js';
+import { courseLayout, sanitizeCourse } from './course.js';
+import { COURSE_FLAG, obstacleSvg } from './course-parts.js';
 
 export { HORIZON, PET_FOOT, PET_SIZE, ROAM, SAFE, VIEW, WALK_Y };
 
@@ -398,6 +400,39 @@ export function backdropSpotFor(layout, groundSpots = furnitureSpotsFor(layout))
   return n(best);
 }
 
+// How far the start flag keeps from everything on the walk line. Less than FURNITURE_GAP,
+// because a flag is a pole, not a house — and because 12 is not to be had in every layout once
+// the two furniture spots are taken out of it.
+const FLAG_GAP = 10;
+
+/**
+ * Where an obstacle course's start flag stands. One spot, derived like every other, and always
+ * the same spot whether or not the pet owns a course yet — so buying the first obstacle puts a
+ * flag in, and moves nothing.
+ *
+ * It keeps clear of everything the pet uses and of both furniture spots, bought or not, so a
+ * flag can never turn up on top of something the child saved for, nor stop them buying the
+ * second piece. Out of the middle, like the other spots; and a little way off the backdrop spot
+ * where it can be, since the flag's pennant flies up at about the height a far tower stands.
+ */
+export function courseFlagSpotFor(layout, groundSpots = furnitureSpotsFor(layout)) {
+  const busy = [layout.nest, layout.larder, layout.ball, homeSpotFor(layout, ROAM), ...groundSpots];
+  const far = backdropSpotFor(layout, groundSpots);
+  let best = SAFE.x0 + 6;
+  let bestScore = -Infinity;
+  for (let x = SAFE.x0 + 6; x <= SAFE.x1 - 6; x += 2) {
+    if (x >= CENTRE_KEEP.x0 && x <= CENTRE_KEEP.x1) continue;
+    const gap = Math.min(...busy.map((b) => Math.abs(b - x)));
+    const score =
+      Math.min(gap, FLAG_GAP + 2) * 2 + Math.min(Math.abs(far - x), FURNITURE_GAP) - Math.abs(x - 100) * 0.05;
+    if (score > bestScore) {
+      bestScore = score;
+      best = x;
+    }
+  }
+  return n(best);
+}
+
 /**
  * Where the umbrella stands when it rains.
  *
@@ -417,6 +452,9 @@ export function shelterSpotFor(habitat) {
     habitat.props.ball.x,
     habitat.home.x,
     ...(habitat.furniture ?? []).map((f) => f.x),
+    // Only once there is a flag to stand clear of: a pet with no course keeps the umbrella spot
+    // it always had.
+    ...(habitat.course?.length && habitat.courseFlag ? [habitat.courseFlag.x] : []),
   ];
   // The *pole* is what has to be reachable, so it goes anywhere in the roam band; the canopy
   // is free to overhang it, the way scenery overhangs the edges of the field, and still lands
@@ -572,8 +610,11 @@ export function habitatFrom({ key, species, index, hour }) {
     // owns nothing, which is why 144 of them still cost no bytes.
     furniture: [],
     backdrop: null,
+    course: [],
     spots: furnitureSpotsFor(layout),
     backdropSpot: backdropSpotFor(layout),
+    // Set back a touch from the walk line, so the pet runs in front of it rather than through it.
+    courseFlag: { x: courseFlagSpotFor(layout), y: WALK_Y - 3 },
     // Where an umbrella would go if it rained. Recomputed by habitatOf once the bought
     // furniture is in, since it has to stand clear of that too.
     shelter: { x: shelterSpotFor({ props, home, furniture: [] }), y: WALK_Y },
@@ -602,6 +643,7 @@ export function habitatOf(item) {
     ...generated,
     furniture: furnitureFor(generated, item?.decor),
     backdrop: backdropFor(generated, item?.decor),
+    course: sanitizeCourse(item?.course),
   };
   // After the furniture, never before: the umbrella's whole job is to stand clear of it.
   const base = { ...withFurniture, shelter: { x: shelterSpotFor(withFurniture), y: WALK_Y } };
@@ -656,7 +698,15 @@ const piece = (id, x, y, scale, flip, colors) => {
  */
 export function habitatSvg(
   habitat,
-  { uid = 'h', label = '', sleeping = false, weather = null, soak = 0 } = {}
+  {
+    uid = 'h',
+    label = '',
+    sleeping = false,
+    weather = null,
+    soak = 0,
+    courseLabel = '',
+    showCourse = false,
+  } = {}
 ) {
   const c = habitat.palette;
   const phase = PHASES[habitat.light.phase] ?? PHASES.noon;
@@ -747,7 +797,10 @@ export function habitatSvg(
         ? `<g class="hab-shelter" transform="translate(${shelter.x} ${shelter.y})">${UMBRELLA(c)}</g>`
         : ''
     }
+    ${courseFlagMarkup(habitat, c, courseLabel)}
   </g>
+
+  ${showCourse ? coursePreviewMarkup(habitat, c) : ''}
 
   <g class="hab-actors"></g>
 
@@ -772,6 +825,32 @@ export function habitatSvg(
   }
   <rect class="hab-dusk" x="0" y="0" width="${VIEW.w}" height="${VIEW.h}" fill="#1b1930" />
 </svg>`;
+}
+
+/**
+ * The start flag, when the pet owns a course. Its pennant flies toward the middle of the field,
+ * so on whichever side it stands it points at where the run will be. A button to a screen
+ * reader, with the label the caller translated; the scene answers the tap.
+ */
+function courseFlagMarkup(habitat, c, label) {
+  const flag = habitat.course?.length ? habitat.courseFlag : null;
+  if (!flag) return '';
+  const flip = flag.x > 100 ? ' scale(-1 1)' : '';
+  const name = label ? ` role="button" tabindex="0" aria-label="${label}"` : '';
+  return `<g class="hab-course-flag hab-grab" transform="translate(${flag.x} ${flag.y})${flip}"${name}><g class="crs-flag-art">${COURSE_FLAG(c)}</g></g>`;
+}
+
+/**
+ * The whole course standing at once, the way it pops up for a run. Only ever drawn for the
+ * shop's preview: in a live habitat the scene builds these as actors so the pet can go through
+ * them, and between runs they are folded away.
+ */
+function coursePreviewMarkup(habitat, c) {
+  const { pieces } = courseLayout(habitat.course);
+  if (!pieces.length) return '';
+  return `<g class="hab-course-preview">${pieces
+    .map((piece) => `<g transform="translate(${n(piece.x)} ${WALK_Y})">${obstacleSvg(piece.id, c)}</g>`)
+    .join('')}</g>`;
 }
 
 /** One treat, ready to be dropped into the actors layer. */
