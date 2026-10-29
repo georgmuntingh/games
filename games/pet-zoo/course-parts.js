@@ -138,7 +138,8 @@ export const COURSE_PARTS = {
       <path d="M-3.6 -2 L-3.6 -3.4 M3.6 -2 L3.6 -3.4" stroke="${c.stone}" stroke-width="0.8" />`,
     // The water in front, so the pet is seen to run through it and not behind it.
     front: (c, { frozen } = {}) => {
-      const jet = frozen ? icy(c).sparkle : c.waterLight;
+      // Snowflakes in the snow's own shadow colour, or they vanish against it.
+      const jet = frozen ? icy(c).snowShade : c.waterLight;
       return `
       <g class="crs-spray">
         ${[-12, -7, -2.4, 2.4, 7, 12]
@@ -248,9 +249,10 @@ export const COURSE_PARTS = {
     back: (c, { frozen } = {}) =>
       frozen
         ? `
-      <ellipse cx="0" cy="-1" rx="14" ry="2.6" fill="${icy(c).snow}" />
-      <ellipse cx="0" cy="-1.2" rx="12.2" ry="1.9" fill="${icy(c).ice}" />
-      <path d="M-8 -1.6 L-4 -0.8 M2 -1.8 L7 -1" stroke="${icy(c).sparkle}" stroke-width="0.5" opacity="0.9" />`
+      <ellipse cx="0" cy="-1.2" rx="14.4" ry="3.2" fill="${icy(c).snowShade}" />
+      <ellipse cx="0" cy="-1.4" rx="12.6" ry="2.4" fill="${icy(c).iceDeep}" />
+      <ellipse cx="-1" cy="-1.7" rx="10" ry="1.6" fill="${icy(c).ice}" />
+      <path d="M-8 -2.2 L-4 -1.2 M2 -2.4 L7 -1.4" stroke="${icy(c).sparkle}" stroke-width="0.6" opacity="0.9" />`
         : `
       <ellipse cx="0" cy="-0.4" rx="14" ry="2" fill="${c.groundRim}" />
       <ellipse cx="0" cy="-${POOL_RIM}" rx="13.4" ry="2.6" fill="${c.bloom}" />
