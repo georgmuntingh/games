@@ -9,8 +9,23 @@
 //
 // A piece may have a `front` as well as a `back`. The back is drawn behind the pet and the front
 // in front of it — which is all it takes for the pet to go *through* the hoop and *into* the
-// ball pit rather than past them. Moving parts carry a class the scene can find: the seesaw's
-// plank, the trampoline's mat, the weave poles.
+// ball pit rather than past them. Moving parts carry a class, and the piece's `rig` says where
+// each one is for a pose from course.js: `{ '.crs-plank': 'rotate(…)' }`, or a list for a class
+// that several things share. The scene writes those transforms on every frame of a move, in
+// both layers; the drawing itself is always the part at rest, which is where a move starts.
+//
+// Every number a rig turns a pose into lives here, next to the drawing it moves, so the plank
+// and the pivot it turns about can never be changed one without the other.
+
+/** The weave poles, from the left: passed on alternate sides. */
+const POLES = [-10.5, -3.5, 3.5, 10.5];
+
+/** The limbo bar: its left peg, which it pivots on when knocked, and how far it falls to lie on the ground. */
+const LIMBO = { x: -8.6, y: -14.9, len: 17.2 };
+const LIMBO_FALL = (Math.asin(14 / LIMBO.len) * 180) / Math.PI;
+
+/** Where the tyre hangs from. */
+const TYRE_PIVOT = -37;
 
 /** The start flag, the only part of a course that stands in the habitat between runs. */
 export const COURSE_FLAG = (c) => `
@@ -34,6 +49,23 @@ export const COURSE_PARTS = {
       </g>
       <circle cx="-7" cy="-13.4" r="1.3" fill="${c.bloom}" />
       <circle cx="7" cy="-13.4" r="1.3" fill="${c.bloom}" />`,
+  },
+
+  limbo: {
+    back: (c) => `
+      <ellipse cx="-8.6" cy="-0.3" rx="2.4" ry="0.9" fill="${c.groundRim}" />
+      <ellipse cx="8.6" cy="-0.3" rx="2.4" ry="0.9" fill="${c.groundRim}" />
+      <path d="M-8.6 0 L-8.6 -19 M8.6 0 L8.6 -19" stroke="${c.wood}" stroke-width="1.6" stroke-linecap="round" />
+      <path d="M-8.6 -14 L-6.8 -14 M8.6 -14 L6.8 -14" stroke="${c.nestDark}" stroke-width="1" stroke-linecap="round" />
+      <circle cx="-8.6" cy="-19.4" r="1.3" fill="${c.bloom}" />
+      <circle cx="8.6" cy="-19.4" r="1.3" fill="${c.bloom}" />`,
+    // The bar in front, so the pet is seen to go under it rather than behind it.
+    front: (c) => `
+      <g class="crs-limbo">
+        <path d="M-8.6 -14.9 L8.6 -14.9" stroke="${c.accent}" stroke-width="1.8" stroke-linecap="round" />
+        <path d="M-5.6 -14.9 L-3 -14.9 M0 -14.9 L2.6 -14.9 M5.4 -14.9 L7.4 -14.9" stroke="#fff8e0" stroke-width="1.8" opacity="0.8" />
+      </g>`,
+    rig: (p) => ({ '.crs-limbo': `rotate(${(LIMBO_FALL * p.part).toFixed(2)} ${LIMBO.x} ${LIMBO.y})` }),
   },
 
   stones: {
@@ -73,8 +105,36 @@ export const COURSE_PARTS = {
             stroke-dasharray="3 4" opacity="0.7" />`,
   },
 
+  table: {
+    back: (c) => `
+      <ellipse cx="0" cy="-0.3" rx="10.6" ry="1.4" fill="${c.groundRim}" />
+      <path d="M-7 0 L-7 -8 M7 0 L7 -8 M-3.6 0 L-3.6 -7 M3.6 0 L3.6 -7" stroke="${c.wood}" stroke-width="1.5" stroke-linecap="round" />
+      <path d="M-9.6 -9 L9.6 -9 L9 -7.2 L-9 -7.2 Z" fill="${c.nest}" />
+      <path d="M-9.6 -9 L9.6 -9" stroke="${c.nestLight}" stroke-width="0.9" stroke-linecap="round" />
+      <path d="M-9 -7.6 L9 -7.6" stroke="${c.accent}" stroke-width="0.9" stroke-dasharray="2 1.6" />`,
+  },
+
+  tyre: {
+    back: (c) => `
+      <ellipse cx="0" cy="-0.3" rx="11" ry="1.4" fill="${c.groundRim}" />
+      <path d="M-9.6 0 L-9.6 -37.6 M9.6 0 L9.6 -37.6" stroke="${c.wood}" stroke-width="1.6" stroke-linecap="round" />
+      <path d="M-10.4 -37.4 L10.4 -37.4" stroke="${c.wood}" stroke-width="2" stroke-linecap="round" />
+      <g class="crs-tyre">
+        <path d="M-1.6 -37 L-2.4 -30.4 M1.6 -37 L2.4 -30.4" stroke="${c.stone}" stroke-width="0.7" />
+        <path d="M0 -30.6 A4.6 9.6 0 0 0 0 -11.4" fill="none" stroke="${c.nestDark}" stroke-width="3.4" />
+      </g>`,
+    front: (c) => `
+      <g class="crs-tyre">
+        <path d="M0 -11.4 A4.6 9.6 0 0 0 0 -30.6" fill="none" stroke="${c.nestDark}" stroke-width="3.4" />
+        <path d="M0 -11.4 A4.6 9.6 0 0 0 0 -30.6" fill="none" stroke="${c.groundRim}" stroke-width="3.4"
+              stroke-dasharray="1.2 1.6" opacity="0.8" />
+        <path d="M2.2 -14 A3 7 0 0 0 2.2 -28" fill="none" stroke="#fff8e0" stroke-width="0.6" opacity="0.4" />
+      </g>`,
+    rig: (p) => ({ '.crs-tyre': `rotate(${p.part.toFixed(2)} 0 ${TYRE_PIVOT})` }),
+  },
+
   weave: {
-    back: (c) => [-10.5, -3.5, 3.5, 10.5]
+    back: (c) => POLES
       .map(
         (x, i) => `
       <g class="crs-pole" transform="translate(${x} 0)">
@@ -84,6 +144,13 @@ export const COURSE_PARTS = {
       </g>`
       )
       .join(''),
+    // Only the pole the pet is brushing past sways, and back the way it was pushed.
+    rig: (p, span) => ({
+      '.crs-pole': POLES.map((x) => {
+        const near = Math.max(0, 1 - Math.abs(p.dx - span / 2 - x) / 5);
+        return `translate(${x} 0) rotate(${(p.part * 9 * near).toFixed(1)})`;
+      }),
+    }),
   },
 
   ramp: {
@@ -94,6 +161,18 @@ export const COURSE_PARTS = {
       <path d="M-7.4 -3.4 L-6.4 -2 M-3.4 -6.2 L-2.4 -4.8 M0.6 -9.2 L1.6 -7.8" stroke="${c.nestLight}" stroke-width="1" stroke-linecap="round" />
       <path d="M6 0 L6 -11.6" stroke="${c.nestDark}" stroke-width="0.8" opacity="0.5" />
       <path d="M7.8 -13 L7.8 -18.6 L12 -17 L7.8 -15.6" fill="${c.accent}" />`,
+  },
+
+  aframe: {
+    back: (c) => `
+      <ellipse cx="0" cy="-0.3" rx="14" ry="1.6" fill="${c.groundRim}" />
+      <path d="M-13 0 L0 -14 L13 0 L10.6 0 L0 -11.4 L-10.6 0 Z" fill="${c.wood}" />
+      <path d="M-10.6 0 L0 -11.4 L10.6 0 Z" fill="${c.nestDark}" opacity="0.35" />
+      <path d="M-13 0 L0 -14 L13 0" fill="none" stroke="${c.nestLight}" stroke-width="0.8" stroke-linejoin="round" />
+      <path d="M-13 0 L-9.3 -4 M13 0 L9.3 -4" stroke="${c.accent}" stroke-width="2.2" stroke-linecap="round" />
+      <path d="M-6.4 -6.9 L-5.2 -5.6 M-3.2 -10.3 L-2 -9 M6.4 -6.9 L5.2 -5.6 M3.2 -10.3 L2 -9"
+            stroke="${c.nestLight}" stroke-width="0.9" stroke-linecap="round" />
+      <path d="M-4.4 -4.4 L4.4 -4.4" stroke="${c.stone}" stroke-width="0.9" stroke-linecap="round" />`,
   },
 
   beam: {
@@ -117,6 +196,7 @@ export const COURSE_PARTS = {
         <path d="M-13.6 -7.2 L-13.6 -10.4 M13.6 -7.2 L13.6 -10.4" stroke="${c.accent}" stroke-width="1.4" stroke-linecap="round" />
       </g>
       <circle cx="0" cy="-6" r="1.2" fill="${c.nestDark}" />`,
+    rig: (p) => ({ '.crs-plank': `rotate(${p.part.toFixed(2)} 0 -6)` }),
   },
 
   trampoline: {
@@ -128,6 +208,7 @@ export const COURSE_PARTS = {
       </g>
       <ellipse cx="0" cy="-6" rx="11" ry="2.6" fill="none" stroke="#fff8e0" stroke-width="0.8"
                stroke-dasharray="2.4 2" opacity="0.7" />`,
+    rig: (p) => ({ '.crs-mat': `translate(0 ${(p.part * 2.4).toFixed(2)})` }),
   },
 
   slide: {

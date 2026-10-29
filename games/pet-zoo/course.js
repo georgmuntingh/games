@@ -25,14 +25,19 @@ import { hashSeed, rngFrom } from './seed.js';
 /**
  * `span` is how much of the walk line one piece takes, entry to exit — the pet starts its move
  * at the left edge of it and finishes at the right. `move` is the pose the pet runs it with.
+ * Listed by tier and then price, which is the order the shelf shows them in.
  */
 export const COURSE = [
   { id: 'hurdle', price: 40, tier: 0, move: 'jump', span: 20 },
+  { id: 'limbo', price: 40, tier: 0, move: 'duck', span: 22 },
   { id: 'stones', price: 45, tier: 0, move: 'hop', span: 28 },
   { id: 'tunnel', price: 50, tier: 0, move: 'crawl', span: 28 },
   { id: 'hoop', price: 60, tier: 1, move: 'leap', span: 22 },
+  { id: 'table', price: 60, tier: 1, move: 'pause', span: 24 },
+  { id: 'tyre', price: 65, tier: 1, move: 'tyre', span: 22 },
   { id: 'weave', price: 70, tier: 1, move: 'weave', span: 28 },
   { id: 'ramp', price: 75, tier: 1, move: 'climb', span: 28 },
+  { id: 'aframe', price: 75, tier: 1, move: 'scramble', span: 28 },
   { id: 'beam', price: 85, tier: 2, move: 'balance', span: 30 },
   { id: 'seesaw', price: 90, tier: 2, move: 'tip', span: 30 },
   { id: 'trampoline', price: 110, tier: 2, move: 'bounce', span: 24 },
@@ -131,7 +136,8 @@ export function courseLayout(ids, lane = LANE) {
 //   sx/sy squash and stretch, about the feet
 //   hide  out of sight — inside the tunnel
 //   part  how far the obstacle's own moving part has gone: the seesaw's tilt in degrees, the
-//         trampoline mat's sag from 0 to 1, the poles' wobble
+//         trampoline mat's sag from 0 to 1, the poles' wobble, the tyre's swing. What it means
+//         is the piece's own business; course-parts.js turns it into a transform
 //
 // Every move starts and ends standing on the ground, level and the right shape, so a run can go
 // straight from one to the next. tests/ holds every one of them to that.
@@ -144,6 +150,42 @@ const smooth = (t) => t * t * (3 - 2 * t);
 
 const pose = (over = {}) => ({ dx: 0, lift: 0, rot: 0, sx: 1, sy: 1, hide: false, part: 0, ...over });
 
+/**
+ * A move made of phases played one after another, each with its own length, its own pose over
+ * its own 0..1 and its own cues — which is how most of the longer moves and every flub read
+ * best: hop up, sit, count, hop down. Comes back in the same shape as any other move.
+ */
+function timeline(steps) {
+  const ms = steps.reduce((sum, step) => sum + step.ms, 0);
+  const cues = [];
+  let from = 0;
+  for (const step of steps) {
+    for (const cue of step.cues ?? []) cues.push({ ...cue, at: (from + cue.at * step.ms) / ms });
+    from += step.ms;
+  }
+  return {
+    ms,
+    cues,
+    pose: (k, span) => {
+      let left = unit(k) * ms;
+      for (const step of steps) {
+        if (left <= step.ms || step === steps[steps.length - 1]) return step.pose(unit(left / step.ms), span);
+        left -= step.ms;
+      }
+      return pose();
+    },
+  };
+}
+
+/** Back to the entry from wherever a flub went wrong, head over heels. */
+const tumbleBack = (from, t, over = {}) => {
+  const e = smooth(t);
+  return pose({ dx: from.dx * (1 - e), lift: from.lift * (1 - e) + arc(t) * 6, rot: -40 * Math.sin(Math.PI * t), ...over });
+};
+
+/** Picking itself up afterwards: a wobble and a shake, ending level and the right shape. */
+const shakeOff = (t, over = {}) => pose({ rot: 8 * Math.sin(t * 6 * Math.PI) * (1 - t), sy: 1 - 0.08 * arc(unit(t * 2)), ...over });
+
 /** The seesaw's tilt either way: its plank, 30 long and pivoted 6 up, reaches the ground at each end. */
 export const SEESAW_TILT = (Math.asin(6 / 15) * 180) / Math.PI;
 
@@ -152,11 +194,17 @@ const MAT = 6;
 const BEAM = 7;
 const SLIDE_TOP = 20;
 const RAMP_TOP = 13;
+/** The pause table's top, the A-frame's peak, and how far the tyre swings when it is brushed. */
+export const TABLE_TOP = 9;
+export const PEAK = 14;
+const TYRE_SWING = 16;
 
 /**
  * Each move: how long it takes, its pose at progress `k` (0..1) across an obstacle `span` wide,
- * and its cues — the moments a sound plays or the scene adds something (`land` for a splash in
- * the rain, `balls` for the ball pit spraying, `rustle` for the tunnel shaking).
+ * and its cues — the moments a sound plays, a word pops up over the pet (`say`), or the scene
+ * adds something (`land` for a splash in the rain, `balls` for the ball pit spraying, `rustle`
+ * for the tunnel shaking). A move may carry its own `flub`, in exactly the same shape: what
+ * going wrong on that piece looks like. One without falls back to the general tumble below.
  */
 export const MOVES = {
   jump: {
@@ -331,6 +379,185 @@ export const MOVES = {
       return pose({ dx: half + half * t, lift: arc(t) * 18, rot: -10 * Math.sin(Math.PI * t) });
     },
   },
+
+  duck: {
+    // Down low, leaning back, shuffle under the bar, and spring up the far side. `part` is the
+    // bar itself: 0 up on its pegs, 1 knocked down to the ground.
+    ...timeline([
+      {
+        ms: 380,
+        pose: (t, span) => pose({ dx: span * 0.2 * t, sy: 1 - 0.55 * smooth(t), sx: 1 + 0.2 * smooth(t), rot: -16 * smooth(t) }),
+      },
+      {
+        ms: 900,
+        cues: [{ at: 0.1, sound: 'rustle' }, { at: 0.6, sound: 'rustle' }],
+        pose: (t, span) => {
+          const step = Math.abs(Math.sin(6 * Math.PI * t));
+          return pose({ dx: span * (0.2 + 0.6 * t), sy: 0.45 + 0.04 * step, sx: 1.2, rot: -16 + 4 * Math.sin(6 * Math.PI * t) });
+        },
+      },
+      {
+        ms: 380,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const e = smooth(t);
+          return pose({ dx: span * (0.8 + 0.2 * t), lift: arc(t) * 6, sy: 0.45 + 0.55 * e, sx: 1.2 - 0.2 * e, rot: -16 * (1 - e) });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        // Not low enough. Its head finds the bar.
+        ms: 380,
+        cues: [{ at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * 0.2 * t, sy: 1 - 0.2 * smooth(t), sx: 1 + 0.06 * smooth(t), rot: -6 * smooth(t) }),
+      },
+      {
+        // The bar clatters off its pegs, and the pet sits down hard where it started.
+        ms: 480,
+        cues: [{ at: 0.2, sound: 'rustle' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span * 0.2, lift: 0 }, t, { part: smooth(unit(t * 2.5)) }),
+      },
+      {
+        // A shake, and the bar springs back up for another go.
+        ms: 760,
+        cues: [{ at: 0.6, sound: 'boing' }],
+        pose: (t) => shakeOff(unit(t / 0.55), { part: 1 - smooth(seg(t, 0.6, 0.9)) }),
+      },
+    ]),
+  },
+
+  pause: {
+    // Up onto the table, sit for three, and off. The count is the scene's to say out loud.
+    ...timeline([
+      {
+        ms: 420,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2) * t, lift: TABLE_TOP * smooth(t) + arc(t) * 8, sy: 1 + 0.06 * arc(t), sx: 1 - 0.05 * arc(t) }),
+      },
+      {
+        ms: 1650,
+        cues: ['3', '2', '1'].map((say, i) => ({ at: 0.04 + i / 3, sound: 'tick', say })),
+        pose: (t, span) => {
+          // Sat down, a little bounce on each number.
+          const beat = (t * 3) % 1;
+          const sit = smooth(seg(t, 0, 0.08)) * (1 - smooth(seg(t, 0.94, 1)));
+          return pose({ dx: span / 2, lift: TABLE_TOP + 1.6 * arc(unit(beat / 0.3)) * sit, sy: 1 - 0.1 * sit, sx: 1 + 0.06 * sit });
+        },
+      },
+      {
+        ms: 460,
+        cues: [{ at: 0, sound: 'ding' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span / 2 + (span / 2) * t, lift: TABLE_TOP * (1 - smooth(t)) + arc(t) * 8 }),
+      },
+    ]),
+    flub: timeline([
+      {
+        // Short. It meets the table's edge instead of its top.
+        ms: 360,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * 0.25 * t, lift: 7 * Math.sin(0.75 * Math.PI * t), rot: 8 * t }),
+      },
+      {
+        ms: 460,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span * 0.25, lift: 7 * Math.sin(0.75 * Math.PI) }, t, { rot: 8 * (1 - t) - 40 * Math.sin(Math.PI * t) }),
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  tyre: {
+    // Through the tyre, like the hoop — but this one hangs, so it swings on after.
+    ms: 760,
+    cues: [{ at: 0, sound: 'hop' }, { at: 0.5, sound: 'boing' }, { at: 1, fx: 'land' }],
+    pose: (k, span) => {
+      const after = seg(k, 0.5, 1);
+      return pose({
+        dx: span * k,
+        lift: arc(k) * 13,
+        rot: -10 * Math.sin(2 * Math.PI * k),
+        sx: 1 + 0.1 * arc(k),
+        sy: 1 - 0.1 * arc(k),
+        // Pushed the way it went, then back and forth, dying away.
+        part: k < 0.5 ? 0 : -TYRE_SWING * Math.sin(3 * Math.PI * after) * (1 - after),
+      });
+    },
+    flub: timeline([
+      {
+        // Mid-takeoff, the tyre — still swinging from someone — comes back the other way.
+        ms: 300,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * 0.3 * t, lift: arc(0.3 * t) * 13, part: TYRE_SWING * 1.2 * smooth(t) }),
+      },
+      {
+        ms: 520,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) =>
+          tumbleBack({ dx: span * 0.3, lift: arc(0.3) * 13 }, t, { part: TYRE_SWING * 1.2 * Math.cos(2 * Math.PI * t) * (1 - smooth(t)) }),
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  scramble: {
+    // Up one steep side of the A, a look round at the top, and down the other on its tummy.
+    // The slopes run from 1 in from each end up to the peak at the middle.
+    ...timeline([
+      {
+        ms: 1000,
+        cues: [{ at: 0, sound: 'hop' }, { at: 0.45, sound: 'rustle' }],
+        pose: (t, span) => {
+          const dx = (span / 2) * t;
+          const lean = smooth(seg(t, 0, 0.12)) * (1 - smooth(seg(t, 0.85, 1)));
+          return pose({ dx, lift: PEAK * unit((dx - 1) / (span / 2 - 1)) + 1.2 * Math.abs(Math.sin(5 * Math.PI * t)), rot: -26 * lean });
+        },
+      },
+      {
+        ms: 380,
+        pose: (t, span) => pose({ dx: span / 2, lift: PEAK, sy: 1 - 0.06 * arc(t), sx: 1 + 0.04 * arc(t) }),
+      },
+      {
+        ms: 520,
+        cues: [{ at: 0, sound: 'whoosh' }],
+        pose: (t, span) => {
+          const along = t * t;
+          const e = smooth(seg(t, 0, 0.15));
+          return pose({ dx: span / 2 + (span / 2 - 1) * along, lift: PEAK * (1 - along), rot: 30 * e, sy: 1 - 0.08 * e, sx: 1 + 0.06 * e });
+        },
+      },
+      {
+        ms: 260,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const e = smooth(t);
+          return pose({ dx: span - 1 + t, lift: arc(t) * 4, rot: 30 * (1 - e), sy: 0.92 + 0.08 * e, sx: 1.06 - 0.06 * e });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        // Halfway up, its feet go.
+        ms: 620,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const dx = (span / 4) * t;
+          return pose({ dx, lift: PEAK * unit((dx - 1) / (span / 2 - 1)) + Math.abs(Math.sin(3 * Math.PI * t)), rot: -26 * smooth(seg(t, 0, 0.2)) });
+        },
+      },
+      {
+        // And down it comes again, backwards, on its tummy.
+        ms: 560,
+        cues: [{ at: 0.1, sound: 'whoosh' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const dx = (span / 4) * (1 - t * t);
+          const up = 1 - smooth(seg(t, 0.75, 1));
+          return pose({ dx, lift: PEAK * unit((dx - 1) / (span / 2 - 1)), rot: -26 * up, sy: 1 - 0.1 * up, sx: 1 + 0.06 * up });
+        },
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
 };
 
 /* --------------------------------------------------------------------- flub */
@@ -338,16 +565,20 @@ export const MOVES = {
 // Now and then a pet gets it wrong, and the getting-it-wrong is the joke: partway in it bonks,
 // tumbles back to where it started, shakes itself off — and then does the thing properly. It
 // never fails outright and never gives up, so a flub is a moment of slapstick, not a loss.
+//
+// A move with a `flub` of its own goes wrong its own way: the limbo bar clattering down, the
+// tyre swinging back into it. What follows is the general one, for a move without.
 const FLUB_INTO = 0.4; // how far into the move it gets before it goes wrong
 const FLUB_BACK_MS = 460;
 const FLUB_SHAKE_MS = 700;
 const FLUB_ODDS = 0.13; // per obstacle that is not the favourite
 const FLUB_MAX = 0.4; // and never more often than this per run, however many there are
 
-export const flubMs = (move) => (MOVES[move]?.ms ?? 1000) * FLUB_INTO + FLUB_BACK_MS + FLUB_SHAKE_MS;
+export const flubMs = (move) => MOVES[move]?.flub?.ms ?? (MOVES[move]?.ms ?? 1000) * FLUB_INTO + FLUB_BACK_MS + FLUB_SHAKE_MS;
 
 /** When the bonk happens and when the pet is back on its feet, as fractions of `flubMs`. */
 export function flubCues(move) {
+  if (MOVES[move]?.flub) return MOVES[move].flub.cues;
   const total = flubMs(move);
   const bonk = ((MOVES[move]?.ms ?? 1000) * FLUB_INTO) / total;
   return [
@@ -358,6 +589,7 @@ export function flubCues(move) {
 
 /** The flub's pose, built from the move's own: the first part of it, then the tumble back. */
 export function flubPose(move, k, span) {
+  if (MOVES[move]?.flub) return MOVES[move].flub.pose(k, span);
   const base = MOVES[move] ?? MOVES.jump;
   const total = flubMs(move);
   const into = (base.ms * FLUB_INTO) / total;

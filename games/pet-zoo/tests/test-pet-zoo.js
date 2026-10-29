@@ -364,6 +364,7 @@ import {
   sanitizeCourse,
   SEESAW_TILT,
   sellObstacle,
+  TABLE_TOP,
 } from '../course.js';
 import { COURSE_FLAG, COURSE_PARTS, obstacleSvg } from '../course-parts.js';
 import {
@@ -6692,13 +6693,31 @@ test('every move leaves the ground where it starts and lands level where it ends
   }
 });
 
-test('a flub tumbles back to the start, and only ever happens off the favourite', () => {
+test('a flub starts at the entry and ends there, level, the right shape, and the piece at rest', () => {
   for (const entry of COURSE) {
-    const end = flubPose(entry.move, 1, entry.span);
+    const { move, span } = entry;
+    const rest = COURSE_MOVES[move].pose(0, span);
+    const start = flubPose(move, 0, span);
+    assertClose(start.dx, 0, 1e-6, `${entry.id}'s flub starts somewhere other than the entry`);
+    assertClose(start.lift, 0, 1e-6, `${entry.id}'s flub starts in the air`);
+    const end = flubPose(move, 1, span);
     assertClose(end.dx, 0, 1e-6, `${entry.id}'s flub ends somewhere other than the start`);
     assertClose(end.lift, 0, 1e-6, `${entry.id}'s flub ends in the air`);
-    assert(flubMs(entry.move) > COURSE_MOVES[entry.move].ms * 0.4, `${entry.id}'s flub is over too soon`);
-    assert(flubCues(entry.move).some((c) => c.sound === 'knock'), `${entry.id}'s flub never bonks`);
+    assertClose(((end.rot % 360) + 360) % 360, 0, 1e-6, `${entry.id}'s flub ends leaning`);
+    assertClose(end.sx, 1, 1e-6, `${entry.id}'s flub ends squashed`);
+    assertClose(end.sy, 1, 1e-6, `${entry.id}'s flub ends squashed`);
+    assert(!end.hide, `${entry.id}'s flub ends out of sight`);
+    // Or the retry starts with the piece somewhere the move does not expect it.
+    assertClose(end.part, rest.part, 1e-6, `${entry.id}'s flub leaves the piece out of place`);
+    for (let k = 0; k <= 1; k += 0.01) {
+      const p = flubPose(move, k, span);
+      assert(p.lift >= -1e-6 && p.lift < WALK_Y - 20, `${entry.id}'s flub left the scene at ${k.toFixed(2)}`);
+      assert(p.dx >= -1e-6 && p.dx <= span + 1e-6, `${entry.id}'s flub went off its piece at ${k.toFixed(2)}`);
+    }
+    assert(flubMs(move) > COURSE_MOVES[move].ms * 0.4, `${entry.id}'s flub is over too soon`);
+    const cues = flubCues(move);
+    assert(cues.every((c) => c.at >= 0 && c.at <= 1), `${entry.id}'s flub has a cue outside it`);
+    assertEqual(cues.filter((c) => c.fx === 'bonk').length, 1, `${entry.id}'s flub should go wrong exactly once`);
   }
   const pieces = courseLayout(['hurdle', 'tunnel', 'slide']).pieces;
   assertEqual(pickFlub(pieces, 'hurdle', () => 0.99), -1, 'a high roll still flubbed');
@@ -6707,6 +6726,16 @@ test('a flub tumbles back to the start, and only ever happens off the favourite'
     assert(at === -1 || pieces[at].id !== 'tunnel', 'it flubbed its favourite');
   }
   assertEqual(pickFlub(courseLayout(['tunnel']).pieces, 'tunnel', () => 0), -1, 'a favourite-only course flubbed');
+});
+
+test('the pause table counts down three, two, one', () => {
+  const said = COURSE_MOVES.pause.cues.filter((c) => c.say).map((c) => c.say);
+  assertEqual(said.join(), '3,2,1');
+  const ats = COURSE_MOVES.pause.cues.filter((c) => c.say).map((c) => c.at);
+  assert(ats.every((at, i) => !i || at > ats[i - 1]), 'the count is out of order');
+  for (const at of ats) {
+    assertClose(COURSE_MOVES.pause.pose(at, 24).lift, TABLE_TOP, 2, 'it counts somewhere other than on the table');
+  }
 });
 
 describe('the obstacle course — in the habitat');
@@ -6760,6 +6789,38 @@ test('the seesaw is drawn at rest the way the pet finds it', () => {
   const svg = obstacleSvg('seesaw', habitatFor(4, 15).palette);
   assert(svg.includes(`rotate(-${SEESAW_TILT.toFixed(2)} 0 -6)`), 'the plank and the move disagree');
   assertClose(COURSE_MOVES.tip.pose(0.01, 30).part, -SEESAW_TILT, 1e-9);
+});
+
+test('every moving part is drawn where its move picks it up', () => {
+  // The rig at the opening pose must put each part exactly where the drawing has it, or the
+  // part jumps the moment the pet steps on.
+  const c = habitatFor(4, 15).palette;
+  const matrixOf = (node) => node.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix();
+  for (const entry of COURSE) {
+    const rig = COURSE_PARTS[entry.id].rig?.(COURSE_MOVES[entry.move].pose(0, entry.span), entry.span);
+    if (!rig) continue;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.innerHTML = obstacleSvg(entry.id, c);
+    for (const [selector, transform] of Object.entries(rig)) {
+      const nodes = [...svg.querySelectorAll(selector)];
+      assert(nodes.length, `${entry.id}'s rig moves ${selector}, which is never drawn`);
+      nodes.forEach((node, i) => {
+        const drawn = matrixOf(node);
+        node.setAttribute('transform', Array.isArray(transform) ? transform[i] : transform);
+        const rigged = matrixOf(node);
+        for (const key of ['a', 'b', 'c', 'd', 'e', 'f']) {
+          assertClose(rigged[key], drawn[key], 0.02, `${entry.id}'s ${selector} jumps as the move starts (${key})`);
+        }
+      });
+    }
+  }
+});
+
+test('the course is shelved by tier, then price', () => {
+  for (let i = 1; i < COURSE.length; i += 1) {
+    const [a, b] = [COURSE[i - 1], COURSE[i]];
+    assert(a.tier < b.tier || (a.tier === b.tier && a.price <= b.price), `${b.id} is shelved out of order`);
+  }
 });
 
 test('the flag and every piece draw in every palette', () => {

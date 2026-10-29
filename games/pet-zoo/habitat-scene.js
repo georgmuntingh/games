@@ -1086,13 +1086,13 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   }
 
   /** A word in a bubble over the pet's head, floating up and away. */
-  function say(text, className = 'hab-say') {
+  function say(text, className = 'hab-say', lift = 0) {
     if (!actors || !pet) return;
     const node = svgEl('g', { class: `hab-bubble ${className}` });
     const width = Math.max(18, text.length * 4.2 + 8);
     node.innerHTML = `<rect x="${(-width / 2).toFixed(1)}" y="-6.5" width="${width.toFixed(1)}" height="11" rx="5.5" />
       <text x="0" y="1.6">${text.replace(/[<&>]/g, '')}</text>`;
-    place(node, clamp(pet.x, 16, 184), WALK_Y - 44);
+    place(node, clamp(pet.x, 16, 184), WALK_Y - 44 - lift);
     actors.append(node);
     const art = node;
     if (still) {
@@ -1748,25 +1748,25 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
     if (now() - seg.began >= (seg.ms ?? 0)) nextSeg();
   }
 
-  /** The piece's own moving part, kept in step with the pet on it. */
+  /** The piece's own moving parts, kept in step with the pet on it — in front of it and behind. */
   function movePart(piece, p) {
-    if (piece.move === 'tip') {
-      piece.back.querySelector('.crs-plank')?.setAttribute('transform', `rotate(${p.part.toFixed(2)} 0 -6)`);
-    } else if (piece.move === 'bounce') {
-      piece.back.querySelector('.crs-mat')?.setAttribute('transform', `translate(0 ${(p.part * 2.4).toFixed(2)})`);
-    } else if (piece.move === 'weave') {
-      piece.back.querySelectorAll('.crs-pole').forEach((pole, i) => {
-        const x = [-10.5, -3.5, 3.5, 10.5][i];
-        // Only the pole the pet is brushing past sways, and back the way it was pushed.
-        const near = Math.max(0, 1 - Math.abs(piece.x0 + p.dx - (piece.x + x)) / 5);
-        pole.setAttribute('transform', `translate(${x} 0) rotate(${(p.part * 9 * near).toFixed(1)})`);
-      });
+    const rig = COURSE_PARTS[piece.id]?.rig?.(p, piece.span);
+    if (!rig) return;
+    for (const node of [piece.back, piece.front]) {
+      if (!node) continue;
+      for (const [selector, transform] of Object.entries(rig)) {
+        node.querySelectorAll(selector).forEach((part, i) => {
+          part.setAttribute('transform', Array.isArray(transform) ? transform[i] : transform);
+        });
+      }
     }
   }
 
   /** Something that happens at one moment of a move: a sound, and sometimes a bit of business. */
-  function cue({ sound, fx: effect }, piece) {
+  function cue({ sound, fx: effect, say: words }, piece) {
     if (sound) audio.play(sound);
+    // Said over the pet wherever it is standing, up on the table included.
+    if (words) say(words, 'hab-say', coursePose?.lift ?? 0);
     if (!effect || still) return;
     if (effect === 'land') {
       buzz(5);
