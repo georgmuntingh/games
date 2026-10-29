@@ -1834,14 +1834,10 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       // The joke: it went wrong. A dazed face, a thump, and the piece itself rocking.
       setMood('droopy');
       buzz([10, 30, 10]);
-      piece.back.querySelector('.crs-art')?.animate(
-        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(4deg)' }, { transform: 'rotate(0deg)' }],
-        { duration: 420, easing: 'ease-out' }
-      );
-      if (piece.move === 'jump') {
-        piece.back.querySelector('.crs-bar')?.animate(
-          [{ transform: 'rotate(0deg)' }, { transform: 'rotate(18deg)' }, { transform: 'rotate(-8deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 700, easing: 'ease-out' }
+      for (const node of [piece.back, piece.front]) {
+        node?.querySelector('.crs-art')?.animate(
+          [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(4deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 420, easing: 'ease-out' }
         );
       }
     }

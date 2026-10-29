@@ -326,12 +326,47 @@ export const MOVES = {
     ms: 640,
     cues: [{ at: 0, sound: 'hop' }, { at: 1, fx: 'land' }],
     pose: (k, span) => pose({ dx: span * k, lift: arc(k) * 20, rot: -12 * Math.sin(2 * Math.PI * k), sx: 1 - 0.06 * arc(k), sy: 1 + 0.08 * arc(k) }),
+    flub: timeline([
+      {
+        // Not quite high enough. Its feet catch the bar.
+        ms: 340,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * 0.35 * t, lift: 9 * Math.sin(0.7 * Math.PI * t), rot: -10 * Math.sin(Math.PI * t) }),
+      },
+      {
+        // Off comes the bar, and back it tumbles.
+        ms: 480,
+        cues: [{ at: 0.3, sound: 'rustle' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span * 0.35, lift: 9 * Math.sin(0.7 * Math.PI) }, t, { part: smooth(unit(t * 2)) }),
+      },
+      {
+        // A shake, and the bar is popped back on its posts for another go.
+        ms: 780,
+        cues: [{ at: 0.65, sound: 'tick' }],
+        pose: (t) => shakeOff(unit(t / 0.55), { part: 1 - smooth(seg(t, 0.6, 0.85)) }),
+      },
+    ]),
   },
 
   leap: {
     ms: 760,
     cues: [{ at: 0, sound: 'hop' }, { at: 0.5, sound: 'ding' }, { at: 1, fx: 'land' }],
     pose: (k, span) => pose({ dx: span * k, lift: arc(k) * 13, rot: -10 * Math.sin(2 * Math.PI * k), sx: 1 + 0.1 * arc(k), sy: 1 - 0.1 * arc(k) }),
+    flub: timeline([
+      {
+        // Too low: straight into the rim.
+        ms: 380,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * 0.35 * t, lift: 7 * Math.sin(0.6 * Math.PI * t), rot: -8 * Math.sin(Math.PI * t) }),
+      },
+      {
+        // Back it bounces, and the hoop spins round and round on its stand.
+        ms: 480,
+        cues: [{ at: 0.1, sound: 'ding' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span * 0.35, lift: 7 * Math.sin(0.6 * Math.PI) }, t, { part: turn(720 * smooth(t)) }),
+      },
+      { ms: 760, pose: (t) => shakeOff(t, { part: turn(720 + 360 * smooth(t)) }) },
+    ]),
   },
 
   hop: {
@@ -344,6 +379,27 @@ export const MOVES = {
       const bounce = Math.abs(Math.sin(4 * Math.PI * unit(k)));
       return pose({ dx: span * k, lift: bounce * 9, sy: 1 + 0.05 * bounce, sx: 1 - 0.04 * bounce });
     },
+    flub: timeline([
+      {
+        ms: 400,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: span * 0.25 * t, lift: arc(t) * 9 }),
+      },
+      {
+        // The stone is wet. Down it goes, into the puddle.
+        ms: 380,
+        cues: [{ at: 0.6, sound: 'splash', fx: 'bonk' }, { at: 0.62, fx: 'spray' }],
+        pose: (t, span) =>
+          pose({ dx: span * (0.25 + 0.1 * smooth(t)), lift: arc(t) * 3, rot: -22 * Math.sin(Math.PI * t), sy: 1 - 0.2 * smooth(seg(t, 0.5, 1)), sx: 1 + 0.08 * smooth(seg(t, 0.5, 1)) }),
+      },
+      {
+        // And climbs out again, back the way it came, dripping.
+        ms: 520,
+        cues: [{ at: 0.2, fx: 'drip' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * 0.35 * (1 - smooth(t)), lift: arc(t) * 6, rot: -14 * Math.sin(Math.PI * t), sy: 0.8 + 0.2 * smooth(t), sx: 1.08 - 0.08 * smooth(t) }),
+      },
+      { ms: 700, cues: [{ at: 0.15, fx: 'drip' }], pose: (t) => shakeOff(t, { sx: 1 + 0.1 * Math.sin(8 * Math.PI * t) * (1 - t) }) },
+    ]),
   },
 
   crawl: {
@@ -355,6 +411,25 @@ export const MOVES = {
       const t = seg(k, 0.82, 1);
       return pose({ dx: span * k, lift: arc(t) * 6, sy: 0.6 + 0.4 * smooth(t), sx: 1.12 - 0.12 * smooth(t) });
     },
+    flub: timeline([
+      {
+        ms: 520,
+        pose: (t, span) => pose({ dx: span * 0.3 * t, sy: 1 - 0.4 * smooth(unit(t / 0.6)), sx: 1 + 0.12 * smooth(unit(t / 0.6)), hide: t > 0.8 }),
+      },
+      {
+        // Stuck. The whole tunnel heaves about.
+        ms: 760,
+        cues: [{ at: 0.1, sound: 'rustle', fx: 'rustle' }, { at: 0.5, sound: 'knock', fx: 'bonk' }, { at: 0.7, sound: 'rustle', fx: 'rustle' }],
+        pose: (t, span) => pose({ dx: span * 0.3, sy: 0.6, sx: 1.12, hide: true, part: Math.sin(t * 30) }),
+      },
+      {
+        // Out it pops, backwards, the way it went in.
+        ms: 440,
+        cues: [{ at: 0, sound: 'plop' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * 0.3 * (1 - smooth(t)), lift: arc(t) * 8, rot: -30 * Math.sin(Math.PI * t), sy: 0.6 + 0.4 * smooth(t), sx: 1.12 - 0.12 * smooth(t) }),
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
   },
 
   weave: {
@@ -366,6 +441,27 @@ export const MOVES = {
       const wave = Math.sin(4 * Math.PI * unit(k));
       return pose({ dx: span * k, lift: 1.5 * Math.abs(wave), rot: 10 * wave, part: wave });
     },
+    flub: timeline([
+      {
+        // The first two poles, beautifully…
+        ms: 480,
+        pose: (t, span) => MOVES.weave.pose(0.25 * t, span),
+      },
+      {
+        // …and then the wrong side of the third. Tangled.
+        ms: 560,
+        cues: [{ at: 0.2, sound: 'knock', fx: 'bonk' }, { at: 0.4, sound: 'tick' }, { at: 0.7, sound: 'tick' }],
+        pose: (t, span) =>
+          pose({ dx: span * 0.25 + 3 * arc(t), lift: 1.5 * Math.abs(Math.sin(6 * Math.PI * t)), rot: 18 * Math.sin(5 * Math.PI * t) * (1 - t), part: 2 * Math.sin(10 * Math.PI * t) * (1 - t) }),
+      },
+      {
+        // Backing out of it, very carefully.
+        ms: 520,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * 0.25 * (1 - smooth(t)), lift: Math.abs(Math.sin(3 * Math.PI * t)), rot: -6 * Math.sin(Math.PI * t) }),
+      },
+      { ms: 600, pose: (t) => shakeOff(t) },
+    ]),
   },
 
   climb: {
@@ -383,6 +479,24 @@ export const MOVES = {
       const t = seg(k, 0.7, 1);
       return pose({ dx: up.to + (span - up.to) * t, lift: RAMP_TOP * (1 - t) + arc(t) * 8, rot: 14 * Math.sin(Math.PI * t) });
     },
+    flub: timeline([
+      {
+        ms: 600,
+        pose: (t, span) => MOVES.climb.pose(0.45 * t, span),
+      },
+      {
+        // Its feet go, and down the ramp it comes on its tummy, backwards.
+        ms: 640,
+        cues: [{ at: 0, sound: 'knock', fx: 'bonk' }, { at: 0.1, sound: 'whoosh' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const top = MOVES.climb.pose(0.45, span).dx;
+          const dx = top * (1 - t * t);
+          const along = unit((dx - 2) / 18);
+          return pose({ dx, lift: RAMP_TOP * along, rot: along > 0 ? -18 : -18 * (1 - smooth(seg(t, 0.85, 1))), sy: 0.85, sx: 1.06 });
+        },
+      },
+      { ms: 700, pose: (t) => shakeOff(t, { sy: 0.85 + 0.15 * smooth(t) - 0.04 * arc(unit(t * 2)), sx: 1.06 - 0.06 * smooth(t) }) },
+    ]),
   },
 
   balance: {
@@ -400,6 +514,35 @@ export const MOVES = {
       const t = seg(k, 0.85, 1);
       return pose({ dx: span - 6 + 6 * t, lift: BEAM * (1 - t) + arc(t) * 5 });
     },
+    flub: timeline([
+      {
+        ms: 860,
+        pose: (t, span) => MOVES.balance.pose(0.45 * t, span),
+      },
+      {
+        // Wobble… wobble… WOBBLE.
+        ms: 560,
+        cues: [{ at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const at = MOVES.balance.pose(0.45, span);
+          return pose({ dx: at.dx, lift: BEAM, rot: at.rot + 30 * t * Math.sin(4 * Math.PI * t) + (24 - at.rot) * smooth(seg(t, 0.85, 1)) });
+        },
+      },
+      {
+        // Off it falls, plump onto the grass.
+        ms: 320,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: MOVES.balance.pose(0.45, span).dx, lift: BEAM * (1 - t * t), rot: 24 * (1 - t), sy: 1 - 0.18 * t, sx: 1 + 0.08 * t }),
+      },
+      {
+        ms: 520,
+        pose: (t, span) => {
+          const e = smooth(t);
+          return pose({ dx: MOVES.balance.pose(0.45, span).dx * (1 - e), lift: Math.abs(Math.sin(3 * Math.PI * t)), sy: 0.82 + 0.18 * e, sx: 1.08 - 0.08 * e });
+        },
+      },
+      { ms: 600, pose: (t) => shakeOff(t) },
+    ]),
   },
 
   tip: {
@@ -425,6 +568,36 @@ export const MOVES = {
       const rot = k > 0.95 ? SEESAW_TILT * (1 - seg(k, 0.95, 1)) : SEESAW_TILT;
       return pose({ dx, lift: Math.max(0, heightAt(dx, SEESAW_TILT)), rot, part: SEESAW_TILT });
     },
+    flub: timeline([
+      {
+        ms: 860,
+        pose: (t, span) => MOVES.tip.pose(0.45 * t, span),
+      },
+      {
+        // Over the middle it starts to go — and the pet changes its mind.
+        ms: 320,
+        cues: [{ at: 0.2, sound: 'creak' }],
+        pose: (t, span) => {
+          const tilt = -SEESAW_TILT + 1.2 * SEESAW_TILT * smooth(t);
+          return pose({ dx: span / 2, lift: 6, rot: tilt, part: tilt });
+        },
+      },
+      {
+        // It jumps back, the plank slams down, and the far end flings it off.
+        ms: 240,
+        cues: [{ at: 0.7, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const tilt = 0.2 * SEESAW_TILT - 1.2 * SEESAW_TILT * smooth(t);
+          return pose({ dx: span / 2, lift: 6 + arc(t) * 2, rot: 0.2 * SEESAW_TILT * (1 - t), part: tilt });
+        },
+      },
+      {
+        ms: 560,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span / 2, lift: 6 }, t, { lift: 6 * (1 - smooth(t)) + arc(t) * 14, part: -SEESAW_TILT }),
+      },
+      { ms: 600, pose: (t) => shakeOff(t, { part: -SEESAW_TILT }) },
+    ]),
   },
 
   bounce: {
@@ -455,6 +628,33 @@ export const MOVES = {
       const t = seg(k, 0.85, 1);
       return pose({ dx: half + half * t, lift: MAT * (1 - t) + arc(t) * 10 });
     },
+    flub: timeline([
+      {
+        ms: 360,
+        pose: (t, span) => MOVES.bounce.pose(0.15 * t, span),
+      },
+      {
+        // One big bounce — the wrong way — and down on its bottom where it started.
+        ms: 760,
+        cues: [{ at: 0, sound: 'boing' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const from = MOVES.bounce.pose(0.15, span);
+          return pose({
+            dx: from.dx * (1 - smooth(t)),
+            lift: from.lift * (1 - t) + arc(t) * 24,
+            rot: -200 * smooth(t),
+            sy: 1 - 0.18 * smooth(seg(t, 0.85, 1)),
+            part: from.part * (1 - smooth(unit(t * 5))),
+          });
+        },
+      },
+      {
+        // Sat there a moment, the right way up again.
+        ms: 700,
+        cues: [{ at: 0, fx: 'land' }],
+        pose: (t) => pose({ rot: -200 + 200 * smooth(unit(t * 2.5)) - 6 * Math.sin(6 * Math.PI * t) * (1 - t), sy: 0.82 + 0.18 * smooth(seg(t, 0.4, 1)), sx: 1 + 0.08 * (1 - smooth(seg(t, 0.4, 1))) }),
+      },
+    ]),
   },
 
   slide: {
@@ -474,6 +674,28 @@ export const MOVES = {
       const t = seg(k, 0.9, 1);
       return pose({ dx: 28 + (span - 28) * t, lift: arc(t) * 3, sy: 0.94 + 0.06 * t, sx: 1.04 - 0.04 * t });
     },
+    flub: timeline([
+      {
+        ms: 640,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => MOVES.slide.pose(0.15 * t, span),
+      },
+      {
+        // Halfway up the ladder, a paw slips, and down it slides.
+        ms: 360,
+        cues: [{ at: 0, sound: 'whoosh' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const from = MOVES.slide.pose(0.15, span);
+          return pose({ dx: from.dx, lift: from.lift * (1 - t * t), rot: 10 * Math.sin(3 * Math.PI * t), sy: 1 - 0.16 * smooth(seg(t, 0.7, 1)) });
+        },
+      },
+      {
+        ms: 360,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: MOVES.slide.pose(0.15, span).dx * (1 - smooth(t)), lift: arc(t) * 4, sy: 0.84 + 0.16 * smooth(t) }),
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
   },
 
   dive: {
@@ -493,6 +715,31 @@ export const MOVES = {
       const t = seg(k, 0.65, 1);
       return pose({ dx: half + half * t, lift: arc(t) * 18, rot: -10 * Math.sin(Math.PI * t) });
     },
+    flub: timeline([
+      {
+        ms: 580,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'plop', fx: 'balls' }],
+        pose: (t, span) => MOVES.dive.pose(0.25 * t, span),
+      },
+      {
+        // In, and in, and in — up to its ears.
+        ms: 560,
+        cues: [{ at: 0.6, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span / 2, sy: 1 - 0.55 * smooth(t), sx: 1 + 0.1 * smooth(t) }),
+      },
+      {
+        ms: 480,
+        cues: [{ at: 0.3, sound: 'plop', fx: 'balls' }],
+        pose: (t, span) => pose({ dx: span / 2, sy: 0.45, sx: 1.1, rot: 10 * Math.sin(6 * Math.PI * t) }),
+      },
+      {
+        // And a great wriggle out, backwards.
+        ms: 520,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: (span / 2) * (1 - smooth(t)), lift: arc(t) * 14, rot: -16 * Math.sin(Math.PI * t), sy: 0.45 + 0.55 * smooth(unit(t * 2)), sx: 1.1 - 0.1 * smooth(unit(t * 2)) }),
+      },
+      { ms: 600, pose: (t) => shakeOff(t) },
+    ]),
   },
 
   duck: {

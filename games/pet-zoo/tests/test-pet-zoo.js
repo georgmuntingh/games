@@ -6741,6 +6741,12 @@ test('a flub starts at the entry and ends there, level, the right shape, and the
   assertEqual(pickFlub(courseLayout(['tunnel']).pieces, 'tunnel', () => 0), -1, 'a favourite-only course flubbed');
 });
 
+test('every piece goes wrong in a way of its own', () => {
+  for (const entry of EVERY_RUN) {
+    assert(COURSE_MOVES[entry.move].flub, `${entry.id} falls back on the general tumble`);
+  }
+});
+
 test('the pause table counts down three, two, one', () => {
   const said = COURSE_MOVES.pause.cues.filter((c) => c.say).map((c) => c.say);
   assertEqual(said.join(), '3,2,1');

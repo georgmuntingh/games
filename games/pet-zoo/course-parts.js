@@ -26,6 +26,10 @@ const POLES = [-10.5, -3.5, 3.5, 10.5];
 const LIMBO = { x: -8.6, y: -14.9, len: 17.2 };
 const LIMBO_FALL = (Math.asin(14 / LIMBO.len) * 180) / Math.PI;
 
+/** The hurdle's bar: the peg it stays on when knocked, and how far it swings down to the ground. */
+const HURDLE = { x: -7, y: -10.6, len: 15.4 };
+const HURDLE_FALL = (Math.asin(9.6 / HURDLE.len) * 180) / Math.PI;
+
 /** Where the tyre hangs from. */
 const TYRE_PIVOT = -37;
 
@@ -73,6 +77,8 @@ export const COURSE_PARTS = {
       </g>
       <circle cx="-7" cy="-13.4" r="1.3" fill="${c.bloom}" />
       <circle cx="7" cy="-13.4" r="1.3" fill="${c.bloom}" />`,
+    // Knocked, the bar comes off its right-hand peg and swings down from the left one to the ground.
+    rig: (p) => ({ '.crs-bar': `rotate(${(HURDLE_FALL * p.part).toFixed(2)} ${HURDLE.x} ${HURDLE.y})` }),
   },
 
   limbo: {
@@ -177,11 +183,17 @@ export const COURSE_PARTS = {
       <ellipse cx="0" cy="-0.4" rx="5" ry="1.6" fill="${c.groundRim}" />
       <path d="M0 0 L0 -12" stroke="${c.wood}" stroke-width="2" stroke-linecap="round" />
       <path d="M-4 0 L0 -3 L4 0" fill="none" stroke="${c.wood}" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M0 -38 A5.4 13 0 0 0 0 -12" fill="none" stroke="${c.nestDark}" stroke-width="2.6" />`,
+      <g class="crs-hoop">
+        <path d="M0 -38 A5.4 13 0 0 0 0 -12" fill="none" stroke="${c.nestDark}" stroke-width="2.6" />
+      </g>`,
     front: (c) => `
-      <path d="M0 -12 A5.4 13 0 0 0 0 -38" fill="none" stroke="${c.accent}" stroke-width="2.6" />
-      <path d="M0 -12 A5.4 13 0 0 0 0 -38" fill="none" stroke="#fff8e0" stroke-width="2.6"
-            stroke-dasharray="3 4" opacity="0.7" />`,
+      <g class="crs-hoop">
+        <path d="M0 -12 A5.4 13 0 0 0 0 -38" fill="none" stroke="${c.accent}" stroke-width="2.6" />
+        <path d="M0 -12 A5.4 13 0 0 0 0 -38" fill="none" stroke="#fff8e0" stroke-width="2.6"
+              stroke-dasharray="3 4" opacity="0.7" />
+      </g>`,
+    // Bonked, the hoop spins on its stand: seen side on, turning round is going thin and back.
+    rig: (p) => ({ '.crs-hoop': `scale(${Math.cos((p.part * Math.PI) / 180).toFixed(3)} 1)` }),
   },
 
   table: {
