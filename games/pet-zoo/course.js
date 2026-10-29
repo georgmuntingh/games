@@ -31,11 +31,15 @@ export const COURSE = [
   { id: 'hurdle', price: 40, tier: 0, move: 'jump', span: 20 },
   { id: 'limbo', price: 40, tier: 0, move: 'duck', span: 22 },
   { id: 'stones', price: 45, tier: 0, move: 'hop', span: 28 },
+  { id: 'leaves', price: 45, tier: 0, move: 'pounce', span: 26 },
   { id: 'tunnel', price: 50, tier: 0, move: 'crawl', span: 28 },
+  { id: 'sprinkler', price: 50, tier: 0, move: 'dash', span: 26 },
+  { id: 'bubbles', price: 55, tier: 0, move: 'bubble', span: 24 },
   { id: 'hoop', price: 60, tier: 1, move: 'leap', span: 22 },
   { id: 'table', price: 60, tier: 1, move: 'pause', span: 24 },
   { id: 'tyre', price: 65, tier: 1, move: 'tyre', span: 22 },
   { id: 'weave', price: 70, tier: 1, move: 'weave', span: 28 },
+  { id: 'pool', price: 70, tier: 1, move: 'flop', span: 28 },
   { id: 'ramp', price: 75, tier: 1, move: 'climb', span: 28 },
   { id: 'aframe', price: 75, tier: 1, move: 'scramble', span: 28 },
   { id: 'bridge', price: 80, tier: 1, move: 'wobble', span: 30 },
@@ -113,18 +117,44 @@ export function favouriteObstacleOf(itemId) {
  */
 export const LANE = { x0: SAFE.x0 + 14, x1: SAFE.x1 - 14 };
 
+/* ------------------------------------------------------------------- frozen */
+
+/**
+ * In the snowfield, or on a snowy day anywhere, the wet pieces freeze: the paddling pool is an
+ * ice rink to skate across, the sprinkler throws snowflakes, and the leaf pile is a snow pile.
+ * Same piece, same price, same place in the course — only how it looks and how it is run.
+ */
+export const isFrozen = ({ biome, weather } = {}) => biome === 'snowfield' || weather === 'snow';
+
+/** What freezing changes, piece by piece: the move it is run with, and any sound swapped. */
+export const FROZEN = {
+  pool: { move: 'skate' },
+  sprinkler: { sounds: { hiss: 'brr' } },
+  leaves: {},
+};
+
 /**
  * The course laid out: each piece's centre and its entry and exit, left to right in running
  * order, with whatever the pieces leave of the lane shared out evenly before, between and after
  * them. Derived, never stored — the same three ids give the same course on every device.
  */
-export function courseLayout(ids, lane = LANE) {
+export function courseLayout(ids, lane = LANE, { frozen = false } = {}) {
   const pieces = sanitizeCourse(ids).map((id) => obstacleById.get(id));
   const used = pieces.reduce((sum, entry) => sum + entry.span, 0);
   const gap = Math.max(0, (lane.x1 - lane.x0 - used) / (pieces.length + 1));
   let x = lane.x0 + gap;
   const placed = pieces.map((entry) => {
-    const at = { id: entry.id, move: entry.move, span: entry.span, x0: x, x: x + entry.span / 2, x1: x + entry.span };
+    const ice = frozen && Object.hasOwn(FROZEN, entry.id) ? FROZEN[entry.id] : null;
+    const at = {
+      id: entry.id,
+      move: ice?.move ?? entry.move,
+      span: entry.span,
+      frozen: Boolean(ice),
+      sounds: ice?.sounds ?? {},
+      x0: x,
+      x: x + entry.span / 2,
+      x1: x + entry.span,
+    };
     x += entry.span + gap;
     return at;
   });
@@ -232,6 +262,12 @@ const turn = (deg) => {
   const d = ((deg % 360) + 360) % 360;
   return d > 180 ? d - 360 : d;
 };
+
+/** How high the leaf pile is heaped, and the paddling pool's inflatable rim. */
+export const PILE = 8;
+export const POOL_RIM = 7;
+/** How far the oscillating sprinkler sweeps either way. */
+const SWEEP = 32;
 
 /** The monkey bars: how high a hanging pet's feet are, and where the rungs are from the middle. */
 export const HANG = 9;
@@ -848,6 +884,241 @@ export const MOVES = {
         },
       },
       { ms: 600, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  dash: {
+    // Straight through the sprinkler, scrunched up against the wet, and a shake dry the far side.
+    // `part` is the sprinkler's sweep, back and forth all the while.
+    ...timeline([
+      {
+        ms: 1000,
+        cues: [{ at: 0, sound: 'hiss' }, { at: 0.38, fx: 'spray' }, { at: 0.62, fx: 'spray' }],
+        pose: (t, span) => {
+          const wet = smooth(seg(t, 0.25, 0.4)) * (1 - smooth(seg(t, 0.65, 0.8)));
+          return pose({
+            dx: span * t,
+            lift: 2.4 * Math.abs(Math.sin(3 * Math.PI * t)),
+            rot: -7 * wet,
+            sy: 1 - 0.12 * wet,
+            sx: 1 + 0.06 * wet,
+            part: SWEEP * Math.sin(3 * Math.PI * t),
+          });
+        },
+      },
+      {
+        ms: 420,
+        cues: [{ at: 0.1, fx: 'drip' }],
+        pose: (t, span) => pose({ dx: span, sx: 1 + 0.1 * Math.sin(8 * Math.PI * t) * (1 - t), rot: 5 * Math.sin(8 * Math.PI * t) * (1 - t) }),
+      },
+    ]),
+    flub: timeline([
+      {
+        // Right in the face.
+        ms: 420,
+        cues: [{ at: 0, sound: 'hiss' }, { at: 1, sound: 'splash', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * 0.25 * t, lift: 2.4 * Math.abs(Math.sin(2 * Math.PI * t)), part: -SWEEP * smooth(t) }),
+      },
+      {
+        // Spluttering, back it goes, and the sprinkler sweeps on round.
+        ms: 560,
+        cues: [{ at: 0, fx: 'spray' }],
+        pose: (t, span) =>
+          pose({
+            dx: span * 0.25 * (1 - smooth(t)),
+            lift: 2 * Math.abs(Math.sin(3 * Math.PI * t)),
+            rot: -12 * Math.sin(5 * Math.PI * t) * (1 - t),
+            part: -SWEEP * Math.cos(Math.PI * t / 2),
+          }),
+      },
+      { ms: 700, cues: [{ at: 0.1, fx: 'drip' }], pose: (t) => shakeOff(t, { sx: 1 + 0.1 * Math.sin(8 * Math.PI * t) * (1 - t) }) },
+    ]),
+  },
+
+  pounce: {
+    // A great pounce into the middle of the leaf pile, a rummage, and out the far side.
+    ...timeline([
+      {
+        ms: 460,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'plop', fx: 'leaves' }],
+        pose: (t, span) => pose({ dx: (span / 2) * t, lift: arc(t) * 16, rot: 22 * Math.sin(Math.PI * t), sy: 1 + 0.06 * arc(t) }),
+      },
+      {
+        ms: 760,
+        cues: [{ at: 0.2, sound: 'rustle' }, { at: 0.6, sound: 'rustle', fx: 'leaves' }],
+        pose: (t, span) =>
+          pose({ dx: span / 2, lift: 0.8 * Math.abs(Math.sin(5 * Math.PI * t)), rot: 9 * Math.sin(5 * Math.PI * t), sy: 1 - 0.08 * arc(t) }),
+      },
+      {
+        ms: 460,
+        cues: [{ at: 0, sound: 'hop', fx: 'leaves' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: (span / 2) * (1 + t), lift: arc(t) * 12, rot: 14 * Math.sin(Math.PI * t) }),
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 460,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'plop', fx: 'leaves' }],
+        pose: (t, span) => pose({ dx: (span / 2) * t, lift: arc(t) * 16, rot: 22 * Math.sin(Math.PI * t), sy: 1 + 0.06 * arc(t) }),
+      },
+      {
+        // Down, and down, and gone.
+        ms: 520,
+        cues: [{ at: 0.6, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span / 2, sy: 1 - 0.75 * smooth(t), sx: 1 + 0.1 * smooth(t), hide: t > 0.95 }),
+      },
+      {
+        ms: 420,
+        cues: [{ at: 0.3, sound: 'rustle', fx: 'leaves' }],
+        pose: (t, span) => pose({ dx: span / 2, sy: 0.25, sx: 1.1, hide: true }),
+      },
+      {
+        // Out backwards, wearing some of it.
+        ms: 520,
+        cues: [{ at: 0, sound: 'hop', fx: 'hat' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: (span / 2) * (1 - smooth(t)), lift: arc(t) * 12, rot: -24 * Math.sin(Math.PI * t), sy: 0.25 + 0.75 * smooth(unit(t * 2)), sx: 1.1 - 0.1 * smooth(unit(t * 2)) }),
+      },
+      { ms: 760, pose: (t) => shakeOff(t, { sx: 1 + 0.08 * Math.sin(8 * Math.PI * t) * (1 - t) }) },
+    ]),
+  },
+
+  bubble: {
+    // The machine blows, and the pet bounces along under the bubbles popping them on its nose.
+    ms: 1500,
+    cues: [{ at: 0, sound: 'hop', fx: 'bubbles' }]
+      .concat([1 / 6, 1 / 2, 5 / 6].map((at) => ({ at, sound: 'pop', fx: 'popped' })))
+      .concat([{ at: 1, fx: 'land' }]),
+    pose: (k, span) => {
+      const hop = Math.abs(Math.sin(3 * Math.PI * unit(k)));
+      return pose({ dx: span * k, lift: hop * 13, rot: -8 * hop, sy: 1 + 0.08 * hop, sx: 1 - 0.05 * hop });
+    },
+    flub: timeline([
+      {
+        // Gazing up at them, it walks straight under one.
+        ms: 440,
+        cues: [{ at: 0, fx: 'bubbles' }, { at: 0.9, sound: 'pop', fx: 'popped' }],
+        pose: (t, span) => pose({ dx: span * 0.25 * t, rot: -12 * smooth(t), lift: 1.2 * Math.abs(Math.sin(2 * Math.PI * t)) }),
+      },
+      {
+        // It tickles. A big build-up, and an enormous sneeze.
+        ms: 420,
+        cues: [{ at: 0.85, sound: 'hiccup', fx: 'bonk' }],
+        pose: (t, span) => {
+          const build = smooth(seg(t, 0, 0.8));
+          const sneeze = smooth(seg(t, 0.8, 1));
+          return pose({ dx: span * 0.25, rot: -12 - 10 * build + 30 * sneeze, sy: 1 + 0.08 * build - 0.12 * sneeze });
+        },
+      },
+      {
+        ms: 480,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span * 0.25, lift: 0 }, t, { rot: 8 * (1 - t) - 40 * Math.sin(Math.PI * t), sy: 0.96 + 0.04 * t }),
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  flop: {
+    // A belly flop into the paddling pool, a paddle across, out over the rim and a good shake.
+    ...timeline([
+      {
+        ms: 480,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'splash', fx: 'bigsplash' }],
+        pose: (t, span) => pose({ dx: 0.42 * span * t, lift: arc(t) * 14 + 1.5 * smooth(t), rot: 55 * smooth(t), sy: 1 - 0.1 * smooth(t) }),
+      },
+      {
+        ms: 1000,
+        cues: [{ at: 0.4, sound: 'splash', fx: 'spray' }],
+        pose: (t, span) =>
+          pose({
+            dx: span * (0.42 + 0.26 * t),
+            lift: 1.5 + 0.8 * Math.sin(4 * Math.PI * t),
+            rot: 55 * (1 - smooth(t)) + 5 * Math.sin(6 * Math.PI * t),
+            sy: 0.9 + 0.1 * smooth(t),
+          }),
+      },
+      {
+        ms: 420,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * (0.68 + 0.32 * t), lift: 1.5 * (1 - t) + arc(t) * (POOL_RIM + 2) }),
+      },
+      {
+        ms: 380,
+        cues: [{ at: 0.1, fx: 'drip' }],
+        pose: (t, span) => pose({ dx: span, sx: 1 + 0.12 * Math.sin(8 * Math.PI * t) * (1 - t), rot: 6 * Math.sin(8 * Math.PI * t) * (1 - t) }),
+      },
+    ]),
+    flub: timeline([
+      {
+        // One toe in, to see.
+        ms: 520,
+        pose: (t, span) => pose({ dx: span * 0.12 * smooth(seg(t, 0, 0.6)), rot: 16 * smooth(seg(t, 0.5, 1)), sy: 1 - 0.05 * smooth(seg(t, 0.5, 1)) }),
+      },
+      {
+        // Brr.
+        ms: 420,
+        cues: [{ at: 0, sound: 'brr', fx: 'bonk' }],
+        pose: (t, span) =>
+          pose({ dx: span * 0.12, rot: 16 * (1 - smooth(t)) + 4 * Math.sin(14 * Math.PI * t), sx: 1 - 0.06 * Math.abs(Math.sin(14 * Math.PI * t)), sy: 0.95 + 0.05 * smooth(t) }),
+      },
+      {
+        ms: 420,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * 0.12 * (1 - smooth(t)), lift: arc(t) * 6, rot: -10 * Math.sin(Math.PI * t) }),
+      },
+      { ms: 600, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  skate: {
+    // The frozen pool: a step onto the ice, a long glide with a twirl in the middle, and off.
+    ...timeline([
+      {
+        ms: 320,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: 0.15 * span * t, lift: arc(t) * 5 }),
+      },
+      {
+        ms: 1300,
+        cues: [{ at: 0, sound: 'whoosh' }, { at: 0.45, sound: 'sparkle' }],
+        pose: (t, span) => {
+          const spin = seg(t, 0.35, 0.75);
+          return pose({
+            dx: span * (0.15 + 0.7 * (1 - (1 - t) ** 2)),
+            rot: 10 * Math.sin(2 * Math.PI * t) * (1 - spin * (1 - spin) * 4),
+            // Turning right round: seen side on, a twirl is the pet going thin and wide again.
+            sx: Math.cos(2 * Math.PI * smooth(spin)),
+          });
+        },
+      },
+      {
+        ms: 320,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * (0.85 + 0.15 * t), lift: arc(t) * 5 }),
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 320,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: 0.15 * span * t, lift: arc(t) * 5 }),
+      },
+      {
+        // Its feet go one way and the rest of it the other.
+        ms: 560,
+        cues: [{ at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span * (0.15 + 0.2 * t), rot: 14 * Math.sin(5 * Math.PI * t) * (1 - t) - 50 * t * t, lift: 3 * arc(seg(t, 0.6, 1)) }),
+      },
+      {
+        // And off it slides, on its bottom, all the way back.
+        ms: 640,
+        cues: [{ at: 0, sound: 'whoosh' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span * 0.35 * (1 - smooth(t)), rot: -50 + 20 * smooth(t), sy: 0.88, sx: 1.06 }),
+      },
+      {
+        ms: 640,
+        pose: (t) => pose({ rot: -30 * (1 - smooth(t)) + 6 * Math.sin(6 * Math.PI * t) * (1 - t), sy: 0.88 + 0.12 * smooth(t), sx: 1.06 - 0.06 * smooth(t) }),
+      },
     ]),
   },
 };

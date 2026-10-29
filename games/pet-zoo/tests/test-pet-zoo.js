@@ -358,7 +358,9 @@ import {
   flubCues,
   flubMs,
   flubPose,
+  FROZEN,
   isCourseUnlocked,
+  isFrozen,
   LANE,
   LOG,
   MAX_COURSE,
@@ -6655,6 +6657,11 @@ test('a pet’s favourite obstacle is its own, and the same every time', () => {
 
 describe('the obstacle course — laid out and run');
 
+/** Every way a piece can be run: as it is, and — for the wet ones — frozen. */
+const EVERY_RUN = COURSE.flatMap((entry) =>
+  FROZEN[entry.id]?.move ? [entry, { ...entry, id: `${entry.id} (frozen)`, move: FROZEN[entry.id].move }] : [entry]
+);
+
 test('any three pieces fit the lane, inside the safe box, without touching', () => {
   assert(LANE.x0 >= SAFE.x0 && LANE.x1 <= SAFE.x1, 'the lane runs off the safe box');
   for (const a of COURSE_IDS) {
@@ -6676,7 +6683,7 @@ test('any three pieces fit the lane, inside the safe box, without touching', () 
 });
 
 test('every move leaves the ground where it starts and lands level where it ends', () => {
-  for (const entry of COURSE) {
+  for (const entry of EVERY_RUN) {
     const { pose, ms, cues } = COURSE_MOVES[entry.move];
     for (const [k, dx] of [[0, 0], [1, entry.span]]) {
       const p = pose(k, entry.span);
@@ -6697,7 +6704,7 @@ test('every move leaves the ground where it starts and lands level where it ends
 });
 
 test('a flub starts at the entry and ends there, level, the right shape, and the piece at rest', () => {
-  for (const entry of COURSE) {
+  for (const entry of EVERY_RUN) {
     const { move, span } = entry;
     const rest = COURSE_MOVES[move].pose(0, span);
     const start = flubPose(move, 0, span);
@@ -6759,6 +6766,26 @@ test('on the rope bridge and the rolling log, the pet stands on the thing that m
     const p = COURSE_MOVES.logroll.pose(k, log.span);
     assertClose(p.dx - log.span / 2, p.part, 1e-6, `the log rolled out from under it at ${k.toFixed(2)}`);
     assert(p.lift >= 2 * LOG.r - 1e-6, `it sank into the log at ${k.toFixed(2)}`);
+  }
+});
+
+test('the wet pieces freeze in the snowfield and on a snowy day, and nothing else does', () => {
+  assert(isFrozen({ biome: 'snowfield' }) && isFrozen({ biome: 'meadow', weather: 'snow' }));
+  assert(!isFrozen({ biome: 'meadow', weather: 'rain' }) && !isFrozen({}) && !isFrozen());
+  const ids = ['pool', 'sprinkler', 'hurdle'];
+  const warm = courseLayout(ids).pieces;
+  const cold = courseLayout(ids, LANE, { frozen: true }).pieces;
+  assertEqual(warm.map((piece) => piece.move).join(), 'flop,dash,jump');
+  assertEqual(cold.map((piece) => piece.move).join(), 'skate,dash,jump', 'the pool is not an ice rink');
+  assertEqual(cold.map((piece) => piece.frozen).join(), 'true,true,false', 'the hurdle froze');
+  assertEqual(cold[1].sounds.hiss, 'brr', 'a sprinkler of snowflakes still hisses');
+  // Freezing changes how it is run, never where it stands.
+  assertEqual(cold.map((piece) => piece.x).join(), warm.map((piece) => piece.x).join());
+  for (const id of Object.keys(FROZEN)) {
+    assert(COURSE.some((entry) => entry.id === id), `${id} freezes but is never sold`);
+    const c = habitatFor(4, 15).palette;
+    const svg = obstacleSvg(id, c, { frozen: true });
+    assert(svg !== obstacleSvg(id, c) && !svg.includes('undefined') && !svg.includes('NaN'), `${id} has no frozen look`);
   }
 });
 

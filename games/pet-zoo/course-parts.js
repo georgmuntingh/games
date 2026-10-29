@@ -17,7 +17,7 @@
 // Every number a rig turns a pose into lives here, next to the drawing it moves, so the plank
 // and the pivot it turns about can never be changed one without the other.
 
-import { BRIDGE, deckDip, LOG, RUNGS, WHEEL } from './course.js';
+import { BRIDGE, deckDip, LOG, PILE, POOL_RIM, RUNGS, WHEEL } from './course.js';
 
 /** The weave poles, from the left: passed on alternate sides. */
 const POLES = [-10.5, -3.5, 3.5, 10.5];
@@ -32,6 +32,18 @@ const TYRE_PIVOT = -37;
 /** The rope bridge's boards, from the middle, and where each rests unladen. */
 const BOARDS = Array.from({ length: 12 }, (_, i) => -11 + 2 * i);
 const boardY = (u) => -(BRIDGE.y - BRIDGE.sag * (1 - (u / BRIDGE.half) ** 2));
+
+/**
+ * The colours a frozen piece is drawn in — still the home's own, only colder: snow is its
+ * lightest stone and ice its lightest water, so a frozen pool in a glowvale home glows faintly.
+ */
+const icy = (c) => ({ snow: c.stoneLight, snowShade: c.stone, ice: c.waterLight, iceDeep: c.water, sparkle: '#fff8e0' });
+
+/** The leaf pile's leaves, or the snow pile's lumps: [x, y, rotation, which colour]. */
+const PILE_BITS = [
+  [-9.6, -2.2, 30, 0], [-6.4, -4.6, -20, 1], [-3, -6, 60, 2], [0.6, -5.2, -40, 0], [4, -6.2, 10, 3],
+  [7, -4, -60, 1], [9.8, -1.8, 25, 2], [-5, -1.6, 80, 3], [1.8, -2.4, -15, 1], [6, -1.4, 45, 0],
+];
 
 /** The hamster wheel's rungs, round its rim. */
 const WHEEL_RUNGS = Array.from({ length: 14 }, (_, i) => (i / 14) * 2 * Math.PI);
@@ -88,6 +100,61 @@ export const COURSE_PARTS = {
       <ellipse cx="0" cy="-1.7" rx="2.6" ry="1.1" fill="${c.stoneLight}" />
       <ellipse cx="7" cy="-1.4" rx="3.2" ry="1.6" fill="${c.stone}" />
       <ellipse cx="7" cy="-1.9" rx="2.4" ry="1" fill="${c.stoneLight}" />`,
+  },
+
+  leaves: {
+    back: (c, { frozen } = {}) => `
+      <ellipse cx="0" cy="-0.4" rx="13.4" ry="2" fill="${c.groundRim}" />
+      <path d="M-12.6 0 Q-10.4 -${PILE} 0 -${PILE + 0.6} Q10.4 -${PILE} 12.6 0 Z" fill="${frozen ? icy(c).snowShade : c.leafDark}" />`,
+    // The near side of the heap, which the pet sinks behind.
+    front: (c, { frozen } = {}) => {
+      const colors = frozen ? [icy(c).snow, icy(c).sparkle, icy(c).snow, icy(c).ice] : [c.leaf, c.accent, c.bloom, c.leafDark];
+      const bit = ([x, y, r, i]) =>
+        frozen
+          ? `<circle cx="${x}" cy="${y}" r="1.5" fill="${colors[i]}" />`
+          : `<ellipse cx="${x}" cy="${y}" rx="1.9" ry="0.9" transform="rotate(${r} ${x} ${y})" fill="${colors[i]}" />`;
+      return `
+      <path d="M-13 0 Q-11 -6.4 0 -6.8 Q11 -6.4 13 0 Z" fill="${frozen ? icy(c).snow : c.leaf}" />
+      ${PILE_BITS.map(bit).join('')}
+      ${frozen ? `<path d="M-8 -5 Q0 -6.6 8 -5" fill="none" stroke="${icy(c).sparkle}" stroke-width="0.6" opacity="0.8" />` : ''}`;
+    },
+  },
+
+  sprinkler: {
+    back: (c, { frozen } = {}) => `
+      <ellipse cx="0" cy="-0.3" rx="12.4" ry="1.6" fill="${frozen ? icy(c).snow : c.groundRim}" opacity="${frozen ? 0.9 : 0.6}" />
+      <path d="M-5 0 L-4 -2 L4 -2 L5 0 Z" fill="${c.stone}" />
+      <path d="M-4.6 -3.6 L4.6 -3.6" stroke="${c.accent}" stroke-width="1.6" stroke-linecap="round" />
+      <path d="M-3 -3.6 L-2.4 -3.6 M0 -3.6 L0.6 -3.6 M3 -3.6 L3.6 -3.6" stroke="${c.nestDark}" stroke-width="0.6" />
+      <path d="M-3.6 -2 L-3.6 -3.4 M3.6 -2 L3.6 -3.4" stroke="${c.stone}" stroke-width="0.8" />`,
+    // The water in front, so the pet is seen to run through it and not behind it.
+    front: (c, { frozen } = {}) => {
+      const jet = frozen ? icy(c).sparkle : c.waterLight;
+      return `
+      <g class="crs-spray">
+        ${[-12, -7, -2.4, 2.4, 7, 12]
+          .map((x) => `<path d="M0 -3.6 Q${(x * 0.4).toFixed(1)} ${-36 + Math.abs(x)} ${x} -1" fill="none" stroke="${jet}" stroke-width="${frozen ? 1.2 : 1}"
+            stroke-dasharray="${frozen ? '0.5 2.2' : '2.4 1.6'}" stroke-linecap="round" opacity="0.8" />`)
+          .join('')}
+      </g>`;
+    },
+    // It sweeps from side to side, the whole fan of water with it.
+    rig: (p) => ({ '.crs-spray': `rotate(${p.part.toFixed(1)} 0 -3.6)` }),
+  },
+
+  bubbles: {
+    back: (c) => `
+      <ellipse cx="-6" cy="-0.3" rx="5.4" ry="1.2" fill="${c.groundRim}" />
+      <path d="M-10.4 0 L-10.4 -6 Q-10.4 -7 -9.4 -7 L-2.6 -7 Q-1.6 -7 -1.6 -6 L-1.6 0 Z" fill="${c.accent}" />
+      <circle cx="-6" cy="-3.6" r="2.2" fill="${c.nestDark}" opacity="0.5" />
+      <path d="M-7.6 -3.6 L-4.4 -3.6 M-6 -5.2 L-6 -2" stroke="#fff8e0" stroke-width="0.6" opacity="0.7" />
+      <path d="M-3 -7 L-1 -10.4" stroke="${c.stone}" stroke-width="0.8" />
+      <circle cx="-0.4" cy="-11.6" r="1.6" fill="none" stroke="${c.bloom}" stroke-width="0.7" />
+      ${[[2, -16, 2.2], [-3, -21, 1.6], [5.6, -24, 2.6], [0, -29, 1.8], [8.6, -14, 1.4]]
+        .map(([x, y, r]) => `
+      <circle cx="${x}" cy="${y}" r="${r}" fill="#ffffff" fill-opacity="0.2" stroke="${c.waterLight}" stroke-width="0.45" />
+      <path d="M${x - r * 0.5} ${y - r * 0.2} A${r * 0.6} ${r * 0.6} 0 0 1 ${x - r * 0.1} ${y - r * 0.55}" fill="none" stroke="#ffffff" stroke-width="0.4" opacity="0.9" />`)
+        .join('')}`,
   },
 
   tunnel: {
@@ -160,6 +227,30 @@ export const COURSE_PARTS = {
         return `translate(${x} 0) rotate(${(p.part * 9 * near).toFixed(1)})`;
       }),
     }),
+  },
+
+  pool: {
+    back: (c, { frozen } = {}) =>
+      frozen
+        ? `
+      <ellipse cx="0" cy="-1" rx="14" ry="2.6" fill="${icy(c).snow}" />
+      <ellipse cx="0" cy="-1.2" rx="12.2" ry="1.9" fill="${icy(c).ice}" />
+      <path d="M-8 -1.6 L-4 -0.8 M2 -1.8 L7 -1" stroke="${icy(c).sparkle}" stroke-width="0.5" opacity="0.9" />`
+        : `
+      <ellipse cx="0" cy="-0.4" rx="14" ry="2" fill="${c.groundRim}" />
+      <ellipse cx="0" cy="-${POOL_RIM}" rx="13.4" ry="2.6" fill="${c.bloom}" />
+      <ellipse cx="0" cy="-${POOL_RIM - 0.6}" rx="12" ry="2" fill="${c.water}" />
+      <path d="M-6 -${POOL_RIM - 0.8} L-2 -${POOL_RIM - 0.6} M3 -${POOL_RIM - 1} L7 -${POOL_RIM - 0.8}" stroke="${c.waterLight}" stroke-width="0.6" />`,
+    // The near side of the rim: in front of a pet in the water, so it is seen to be in it.
+    front: (c, { frozen } = {}) =>
+      frozen
+        ? `
+      <path d="M-14 -0.4 Q-13 -2.2 -9 -1.8 Q0 -1.2 9 -1.8 Q13 -2.2 14 -0.4 Q0 1 -14 -0.4 Z" fill="${icy(c).snow}" />`
+        : `
+      <path d="M-13.4 -${POOL_RIM} L13.4 -${POOL_RIM} Q14.6 -${POOL_RIM} 14.6 -${POOL_RIM - 1.4} L14.6 -1.2 Q14.6 0 13.4 0 L-13.4 0 Q-14.6 0 -14.6 -1.2 L-14.6 -${POOL_RIM - 1.4} Q-14.6 -${POOL_RIM} -13.4 -${POOL_RIM} Z" fill="${c.accent}" />
+      <path d="M-14.6 -${(POOL_RIM / 2).toFixed(1)} L14.6 -${(POOL_RIM / 2).toFixed(1)}" stroke="#fff8e0" stroke-width="1.6" opacity="0.85" />
+      <path d="M-13 -${POOL_RIM - 0.6} L13 -${POOL_RIM - 0.6}" stroke="#fff8e0" stroke-width="0.6" opacity="0.6" />
+      <circle cx="-8" cy="-1.6" r="0.8" fill="${c.bloom}" /><circle cx="0" cy="-1.6" r="0.8" fill="${c.bloom}" /><circle cx="8" cy="-1.6" r="0.8" fill="${c.bloom}" />`,
   },
 
   ramp: {
@@ -334,9 +425,12 @@ function pitBalls(c, top) {
   return out.join('');
 }
 
-/** Both layers together, for anywhere the pet is not in between them — the shop card. */
-export const obstacleSvg = (id, c) => {
+/**
+ * Both layers together, for anywhere the pet is not in between them — the shop card. `opts` is
+ * passed on to the drawing: `{ frozen }` for a snowy home.
+ */
+export const obstacleSvg = (id, c, opts = {}) => {
   const part = COURSE_PARTS[id];
   if (!part) return '';
-  return `${part.back(c)}${part.front ? part.front(c) : ''}`;
+  return `${part.back(c, opts)}${part.front ? part.front(c, opts) : ''}`;
 };

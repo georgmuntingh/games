@@ -106,6 +106,7 @@ import {
   courseOf,
   courseOwns,
   isCourseUnlocked,
+  isFrozen,
   obstacleById,
   sellObstacle,
 } from './course.js';
@@ -3095,8 +3096,10 @@ function courseCard(entry, pet, petLabel) {
 /** An obstacle on its own, both layers, in the colours of the home it is going to. */
 function courseArt(id) {
   const pet = state.items[shopPetId];
-  const c = habitatOf(pet ?? { h: 12, m: 0 }).palette;
-  return `<svg viewBox="-19 -40 38 42" aria-hidden="true" focusable="false">${obstacleSvg(id, c)}</svg>`;
+  const home = habitatOf(pet ?? { h: 12, m: 0 });
+  // A snowfield pet's pool is an ice rink all year round; see coursePreviewMarkup.
+  const frozen = isFrozen({ biome: home.biome });
+  return `<svg viewBox="-19 -40 38 42" aria-hidden="true" focusable="false">${obstacleSvg(id, home.palette, { frozen })}</svg>`;
 }
 
 /**

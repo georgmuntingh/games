@@ -236,6 +236,16 @@ const SOUNDS = {
       tone(ac, { type: 'triangle', freq: 700 + i * 160, endFreq: 420, duration: 0.05, gain: 0.025, delay: 0.1 + i * 0.07 });
     }
   },
+  // The sprinkler starting up: a soft rushing hiss, made of quick scratchy little bursts.
+  hiss(ac) {
+    for (let i = 0; i < 6; i += 1) {
+      tone(ac, { type: 'sawtooth', freq: 2600 + (i % 3) * 400, endFreq: 1800, duration: 0.05, gain: 0.008, delay: i * 0.045 });
+    }
+  },
+  // A bubble on a nose: one tiny bright pop.
+  pop(ac) {
+    tone(ac, { type: 'sine', freq: 900, endFreq: 1700, duration: 0.05, gain: 0.06 });
+  },
   // The hamster wheel going round: a dry little two-note squeak.
   squeak(ac) {
     tone(ac, { type: 'triangle', freq: 1700, endFreq: 2100, duration: 0.05, gain: 0.03 });

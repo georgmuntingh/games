@@ -53,7 +53,7 @@ import {
 import { hash, portraitOf, SPECIES, speciesFor, traitIndexFor } from './pets.js';
 import { shelters, veilFor, WEATHERS } from './weather.js';
 import { itemById as shopItemById, MAX_DECOR, sanitizeDecor, slotOf } from './shop.js';
-import { courseLayout, sanitizeCourse } from './course.js';
+import { courseLayout, isFrozen, sanitizeCourse } from './course.js';
 import { COURSE_FLAG, obstacleSvg } from './course-parts.js';
 
 export { HORIZON, PET_FOOT, PET_SIZE, ROAM, SAFE, VIEW, WALK_Y };
@@ -846,10 +846,13 @@ function courseFlagMarkup(habitat, c, label) {
  * them, and between runs they are folded away.
  */
 function coursePreviewMarkup(habitat, c) {
-  const { pieces } = courseLayout(habitat.course);
+  // A snowfield home's pool and sprinkler are frozen every day of the year, so the shop shows
+  // them that way. Anywhere else they freeze only on a snowy day, which the shop knows nothing of.
+  const frozen = isFrozen({ biome: habitat.biome });
+  const { pieces } = courseLayout(habitat.course, undefined, { frozen });
   if (!pieces.length) return '';
   return `<g class="hab-course-preview">${pieces
-    .map((piece) => `<g transform="translate(${n(piece.x)} ${WALK_Y})">${obstacleSvg(piece.id, c)}</g>`)
+    .map((piece) => `<g transform="translate(${n(piece.x)} ${WALK_Y})">${obstacleSvg(piece.id, c, { frozen: piece.frozen })}</g>`)
     .join('')}</g>`;
 }
 
