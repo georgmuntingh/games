@@ -2056,16 +2056,13 @@ body.in-habitat .zoo-bar {
 
 /* Every piece grows up out of the ground and folds back down into it, and the flag waves about
    its foot: so they all scale and turn about the bottom middle of themselves. */
+/* The moving parts inside a piece are turned about points of their own, which the rig in
+   course-parts.js names, so they take none of this. */
 .hab-obstacle .crs-art,
 .hab-obstacle .crs-tube,
-.hab-obstacle .crs-bar,
 .crs-flag-art {
   transform-box: fill-box;
   transform-origin: 50% 100%;
-}
-
-.hab-obstacle .crs-bar {
-  transform-origin: 0% 50%;
 }
 
 .habitat .hab-course-flag {

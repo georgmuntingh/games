@@ -35,7 +35,18 @@ import {
   WALK_Y,
 } from './habitat.js';
 import { audio } from './audio.js';
-import { courseLayout, favouriteObstacleOf, flubCues, flubMs, flubPose, MOVES as COURSE_MOVES, pickFlub } from './course.js';
+import {
+  courseLayout,
+  favouriteObstacleOf,
+  flubCues,
+  flubMs,
+  flubPose,
+  isFrozen,
+  LANE,
+  MOVES as COURSE_MOVES,
+  MUZZLE,
+  pickFlub,
+} from './course.js';
 import { ballColors, COURSE_PARTS } from './course-parts.js';
 import { tasteOf } from './snacks.js';
 import { shelters, slows } from './weather.js';
@@ -1086,13 +1097,13 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   }
 
   /** A word in a bubble over the pet's head, floating up and away. */
-  function say(text, className = 'hab-say') {
+  function say(text, className = 'hab-say', lift = 0) {
     if (!actors || !pet) return;
     const node = svgEl('g', { class: `hab-bubble ${className}` });
     const width = Math.max(18, text.length * 4.2 + 8);
     node.innerHTML = `<rect x="${(-width / 2).toFixed(1)}" y="-6.5" width="${width.toFixed(1)}" height="11" rx="5.5" />
       <text x="0" y="1.6">${text.replace(/[<&>]/g, '')}</text>`;
-    place(node, clamp(pet.x, 16, 184), WALK_Y - 44);
+    place(node, clamp(pet.x, 16, 184), WALK_Y - 44 - lift);
     actors.append(node);
     const art = node;
     if (still) {
@@ -1479,9 +1490,9 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   }
 
   /** A little round thing floating up off the pet and fading — a bubble, a puff of steam. */
-  function float(cls, { dx = 0, dy = -30, r = 1.6, rise = 22, drift = 0, duration = 1200 } = {}) {
+  function float(cls, { dx = 0, dy = -30, r = 1.6, rise = 22, drift = 0, duration = 1200, x = pet.x + pet.facing * dx } = {}) {
     if (!actors || still) return;
-    const node = svgEl('circle', { class: cls, r: String(r), cx: (pet.x + pet.facing * dx).toFixed(2), cy: (WALK_Y + dy).toFixed(2) });
+    const node = svgEl('circle', { class: cls, r: String(r), cx: x.toFixed(2), cy: (WALK_Y + dy).toFixed(2) });
     actors.append(node);
     node
       .animate(
@@ -1601,14 +1612,15 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
   function buildPiece(piece) {
     const part = COURSE_PARTS[piece.id];
     const c = habitat.palette;
+    const opts = { frozen: piece.frozen };
     const back = svgEl('g', { class: `hab-obstacle crs-${piece.id}` });
-    back.innerHTML = `<g class="crs-art">${part.back(c)}</g>`;
+    back.innerHTML = `<g class="crs-art">${part.back(c, opts)}</g>`;
     place(back, piece.x, WALK_Y);
     actors.insertBefore(back, pet.wrap);
     let front = null;
     if (part.front) {
       front = svgEl('g', { class: 'hab-obstacle hab-obstacle-front' });
-      front.innerHTML = `<g class="crs-art">${part.front(c)}</g>`;
+      front.innerHTML = `<g class="crs-art">${part.front(c, opts)}</g>`;
       place(front, piece.x, WALK_Y);
       pet.wrap.after(front);
     }
@@ -1636,7 +1648,8 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
 
   function startCourse() {
     if (courseBlocked()) return;
-    const layout = courseLayout(habitat.course);
+    // Snowing, or a snowfield home: the wet pieces are frozen today.
+    const layout = courseLayout(habitat.course, LANE, { frozen: isFrozen({ biome: habitat.biome, weather }) });
     const favourite = favouriteObstacleOf(habitat.id);
     const pieces = layout.pieces.map(buildPiece);
     popUp(pieces);
@@ -1748,31 +1761,65 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
     if (now() - seg.began >= (seg.ms ?? 0)) nextSeg();
   }
 
-  /** The piece's own moving part, kept in step with the pet on it. */
+  /** The piece's own moving parts, kept in step with the pet on it — in front of it and behind. */
   function movePart(piece, p) {
-    if (piece.move === 'tip') {
-      piece.back.querySelector('.crs-plank')?.setAttribute('transform', `rotate(${p.part.toFixed(2)} 0 -6)`);
-    } else if (piece.move === 'bounce') {
-      piece.back.querySelector('.crs-mat')?.setAttribute('transform', `translate(0 ${(p.part * 2.4).toFixed(2)})`);
-    } else if (piece.move === 'weave') {
-      piece.back.querySelectorAll('.crs-pole').forEach((pole, i) => {
-        const x = [-10.5, -3.5, 3.5, 10.5][i];
-        // Only the pole the pet is brushing past sways, and back the way it was pushed.
-        const near = Math.max(0, 1 - Math.abs(piece.x0 + p.dx - (piece.x + x)) / 5);
-        pole.setAttribute('transform', `translate(${x} 0) rotate(${(p.part * 9 * near).toFixed(1)})`);
-      });
+    const rig = COURSE_PARTS[piece.id]?.rig?.(p, piece.span);
+    if (!rig) return;
+    for (const node of [piece.back, piece.front]) {
+      if (!node) continue;
+      for (const [selector, transform] of Object.entries(rig)) {
+        node.querySelectorAll(selector).forEach((part, i) => {
+          part.setAttribute('transform', Array.isArray(transform) ? transform[i] : transform);
+        });
+      }
     }
   }
 
   /** Something that happens at one moment of a move: a sound, and sometimes a bit of business. */
-  function cue({ sound, fx: effect }, piece) {
-    if (sound) audio.play(sound);
+  function cue({ sound, fx: effect, say: words }, piece) {
+    // A frozen piece may sound different: a sprinkler of snowflakes goes brr, not hiss.
+    if (sound) audio.play(piece.sounds?.[sound] ?? sound);
+    // Said over the pet wherever it is standing, up on the table included.
+    if (words) say(words, 'hab-say', coursePose?.lift ?? 0);
     if (!effect || still) return;
     if (effect === 'land') {
       buzz(5);
       if (shelters(weather)) splash(pet.x);
     } else if (effect === 'balls') {
       sprayBalls(piece);
+    } else if (effect === 'spray' || effect === 'drip') {
+      // The wet pieces splash whatever the sky is doing — or, frozen, throw snow about.
+      spatter(pet.x, { count: effect === 'spray' ? 6 : 5, color: piece.frozen ? habitat.palette.stoneLight : habitat.palette.waterLight, y: WALK_Y - (effect === 'spray' ? 16 : 10) });
+    } else if (effect === 'bigsplash') {
+      spatter(pet.x, { count: 12, power: 1.8, color: habitat.palette.waterLight });
+    } else if (effect === 'leaves') {
+      sprayLeaves(piece);
+    } else if (effect === 'bubbles') {
+      blowBubbles(piece);
+    } else if (effect === 'popped') {
+      popBubble((coursePose?.lift ?? 0) + 34);
+    } else if (effect === 'hat') {
+      leafHat(piece);
+    } else if (effect === 'ring') {
+      // The bell, swinging on its bracket.
+      const bell = (piece.front ?? piece.back).querySelector('.crs-bell');
+      if (bell) {
+        bell.style.transformBox = 'fill-box';
+        bell.style.transformOrigin = '50% 0%';
+        bell.animate(
+          [{ rotate: '0deg' }, { rotate: '22deg' }, { rotate: '-16deg' }, { rotate: '9deg' }, { rotate: '-4deg' }, { rotate: '0deg' }],
+          { duration: 900, easing: 'ease-out' }
+        );
+      }
+      heartBurst(pet.art, fx, { count: 1 });
+    } else if (effect === 'smoke' || effect === 'puff') {
+      smoke(piece, effect === 'smoke' ? 7 : 3);
+      if (effect === 'smoke') {
+        buzz([20, 30, 10]);
+        confetti(pet.art, fx, { power: 0.5 });
+      }
+    } else if (effect === 'soot') {
+      spatter(pet.x, { count: 6, color: habitat.palette.stone, y: WALK_Y - 18 });
     } else if (effect === 'rustle') {
       piece.back.querySelector('.crs-tube')?.animate(
         [
@@ -1787,14 +1834,10 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       // The joke: it went wrong. A dazed face, a thump, and the piece itself rocking.
       setMood('droopy');
       buzz([10, 30, 10]);
-      piece.back.querySelector('.crs-art')?.animate(
-        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(4deg)' }, { transform: 'rotate(0deg)' }],
-        { duration: 420, easing: 'ease-out' }
-      );
-      if (piece.move === 'jump') {
-        piece.back.querySelector('.crs-bar')?.animate(
-          [{ transform: 'rotate(0deg)' }, { transform: 'rotate(18deg)' }, { transform: 'rotate(-8deg)' }, { transform: 'rotate(0deg)' }],
-          { duration: 700, easing: 'ease-out' }
+      for (const node of [piece.back, piece.front]) {
+        node?.querySelector('.crs-art')?.animate(
+          [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(4deg)' }, { transform: 'rotate(0deg)' }],
+          { duration: 420, easing: 'ease-out' }
         );
       }
     }
@@ -1818,12 +1861,101 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
 
   /** A landing in the rain throws up a little water. */
   function splash(x) {
-    const color = habitat.palette.waterLight;
-    for (let i = 0; i < 5; i += 1) {
-      const node = svgEl('circle', { class: 'hab-crumb', r: '0.9', fill: color });
-      litter(node, { x: x + (Math.random() - 0.5) * 8, y: WALK_Y - 1, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 30, life: 800 });
-    }
+    spatter(x);
     audio.play('splash');
+  }
+
+  /** Drops flung up and out from `x`: water, or snow off a frozen piece. */
+  function spatter(x, { count = 5, power = 1, color = habitat.palette.waterLight, y = WALK_Y - 1 } = {}) {
+    for (let i = 0; i < count; i += 1) {
+      const node = svgEl('circle', { class: 'hab-crumb', r: '0.9', fill: color });
+      litter(node, {
+        x: x + (Math.random() - 0.5) * 8 * power,
+        y,
+        vx: (Math.random() - 0.5) * 50 * power,
+        vy: (-40 - Math.random() * 30) * power,
+        life: 800,
+      });
+    }
+  }
+
+  /** Into the leaf pile, and up go the leaves — or the snow, off a snow pile. */
+  function sprayLeaves(piece) {
+    const c = habitat.palette;
+    const colors = piece.frozen ? [c.stoneLight, '#fff8e0', c.waterLight] : [c.leaf, c.accent, c.bloom, c.leafDark];
+    for (let i = 0; i < 7; i += 1) {
+      const fill = colors[i % colors.length];
+      const node = piece.frozen
+        ? svgEl('circle', { class: 'hab-crumb', r: '1.1', fill })
+        : svgEl('ellipse', { class: 'hab-crumb', rx: '1.6', ry: '0.8', fill });
+      litter(node, { x: piece.x + (Math.random() - 0.5) * 14, y: WALK_Y - 7, vx: (Math.random() - 0.5) * 60, vy: -60 - Math.random() * 50, life: 1400 });
+    }
+  }
+
+  /** The machine puffs a string of bubbles up into the air. */
+  function blowBubbles(piece) {
+    for (let i = 0; i < 6; i += 1) {
+      setTimeout(() => {
+        if (!actors || !pet) return;
+        float('hab-bubble-pop', {
+          x: piece.x - 0.4 + (Math.random() - 0.3) * 6,
+          dy: -12,
+          r: 1.2 + Math.random() * 1.4,
+          rise: 22 + Math.random() * 14,
+          drift: 4 + Math.random() * 10,
+          duration: 1600 + Math.random() * 600,
+        });
+      }, i * 160);
+    }
+  }
+
+  /** A cloud of smoke out of the cannon's mouth. */
+  function smoke(piece, count) {
+    for (let i = 0; i < count; i += 1) {
+      float('hab-steam', {
+        x: piece.x + MUZZLE.u + 1 + (Math.random() - 0.5) * 4,
+        dy: -MUZZLE.y - 2,
+        r: 2.2 + Math.random() * 2,
+        rise: 8 + Math.random() * 12,
+        drift: 4 + Math.random() * 12,
+        duration: 900 + Math.random() * 500,
+      });
+    }
+  }
+
+  /** One bubble, popped on the pet's nose: a ring that bursts outward and is gone. */
+  function popBubble(height) {
+    if (!actors || !pet) return;
+    const node = svgEl('circle', { class: 'hab-bubble-pop', r: '2.2', cx: (pet.x + 6).toFixed(2), cy: (WALK_Y - height).toFixed(2) });
+    node.style.transformBox = 'fill-box';
+    node.style.transformOrigin = '50% 50%';
+    actors.append(node);
+    node
+      .animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(2.4)', opacity: 0 }], { duration: 260, easing: 'ease-out' })
+      .finished.catch(() => {})
+      .finally(() => node.remove());
+  }
+
+  /** Out of the pile backwards, with a leaf (or a lump of snow) stuck on its head, shaken off. */
+  function leafHat(piece) {
+    const c = habitat.palette;
+    const hat = piece.frozen
+      ? svgEl('circle', { r: '2.4', cx: '0', cy: String(4 - PET_FOOT.y), fill: c.stoneLight })
+      : svgEl('ellipse', { rx: '3.4', ry: '1.5', cx: '0', cy: String(4 - PET_FOOT.y), fill: c.leaf, transform: `rotate(-20 0 ${4 - PET_FOOT.y})` });
+    hat.setAttribute('class', 'hab-hat');
+    pet.wrap.append(hat);
+    hat
+      .animate(
+        [
+          { translate: '0 0', rotate: '0deg', opacity: 1 },
+          { translate: '0 0', rotate: '0deg', opacity: 1, offset: 0.6 },
+          { translate: '10px -6px', rotate: '80deg', opacity: 1, offset: 0.75 },
+          { translate: '16px 24px', rotate: '160deg', opacity: 0 },
+        ],
+        { duration: 1500, easing: 'ease-in' }
+      )
+      .finished.catch(() => {})
+      .finally(() => hat.remove());
   }
 
   /** Over the line. Bigger if its favourite was in the course. */

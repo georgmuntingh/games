@@ -347,23 +347,30 @@ import {
   TOPPERS,
 } from '../pet-parts.js';
 import {
+  BRIDGE,
   buyObstacle,
   COURSE,
   COURSE_IDS,
   courseLayout,
   courseOf,
+  deckDip,
   favouriteObstacleOf,
+  FINALE,
   flubCues,
   flubMs,
   flubPose,
+  FROZEN,
   isCourseUnlocked,
+  isFrozen,
   LANE,
+  LOG,
   MAX_COURSE,
   MOVES as COURSE_MOVES,
   pickFlub,
   sanitizeCourse,
   SEESAW_TILT,
   sellObstacle,
+  TABLE_TOP,
 } from '../course.js';
 import { COURSE_FLAG, COURSE_PARTS, obstacleSvg } from '../course-parts.js';
 import {
@@ -6651,6 +6658,11 @@ test('a pet’s favourite obstacle is its own, and the same every time', () => {
 
 describe('the obstacle course — laid out and run');
 
+/** Every way a piece can be run: as it is, and — for the wet ones — frozen. */
+const EVERY_RUN = COURSE.flatMap((entry) =>
+  FROZEN[entry.id]?.move ? [entry, { ...entry, id: `${entry.id} (frozen)`, move: FROZEN[entry.id].move }] : [entry]
+);
+
 test('any three pieces fit the lane, inside the safe box, without touching', () => {
   assert(LANE.x0 >= SAFE.x0 && LANE.x1 <= SAFE.x1, 'the lane runs off the safe box');
   for (const a of COURSE_IDS) {
@@ -6658,7 +6670,9 @@ test('any three pieces fit the lane, inside the safe box, without touching', () 
       for (const c of COURSE_IDS) {
         if (a === b || b === c || a === c) continue;
         const { start, finish, pieces } = courseLayout([a, b, c]);
-        assertEqual(pieces.map((piece) => piece.id).join(), [a, b, c].join(), 'the running order is not the buying order');
+        // The buying order, except that the bell always comes last.
+        const order = [a, b, c].filter((id) => !FINALE.has(id)).concat([a, b, c].filter((id) => FINALE.has(id)));
+        assertEqual(pieces.map((piece) => piece.id).join(), order.join(), 'the running order is not the buying order');
         let edge = start;
         for (const piece of pieces) {
           assert(piece.x0 >= edge, `${a},${b},${c}: ${piece.id} overlaps what is before it`);
@@ -6672,7 +6686,7 @@ test('any three pieces fit the lane, inside the safe box, without touching', () 
 });
 
 test('every move leaves the ground where it starts and lands level where it ends', () => {
-  for (const entry of COURSE) {
+  for (const entry of EVERY_RUN) {
     const { pose, ms, cues } = COURSE_MOVES[entry.move];
     for (const [k, dx] of [[0, 0], [1, entry.span]]) {
       const p = pose(k, entry.span);
@@ -6692,13 +6706,31 @@ test('every move leaves the ground where it starts and lands level where it ends
   }
 });
 
-test('a flub tumbles back to the start, and only ever happens off the favourite', () => {
-  for (const entry of COURSE) {
-    const end = flubPose(entry.move, 1, entry.span);
+test('a flub starts at the entry and ends there, level, the right shape, and the piece at rest', () => {
+  for (const entry of EVERY_RUN) {
+    const { move, span } = entry;
+    const rest = COURSE_MOVES[move].pose(0, span);
+    const start = flubPose(move, 0, span);
+    assertClose(start.dx, 0, 1e-6, `${entry.id}'s flub starts somewhere other than the entry`);
+    assertClose(start.lift, 0, 1e-6, `${entry.id}'s flub starts in the air`);
+    const end = flubPose(move, 1, span);
     assertClose(end.dx, 0, 1e-6, `${entry.id}'s flub ends somewhere other than the start`);
     assertClose(end.lift, 0, 1e-6, `${entry.id}'s flub ends in the air`);
-    assert(flubMs(entry.move) > COURSE_MOVES[entry.move].ms * 0.4, `${entry.id}'s flub is over too soon`);
-    assert(flubCues(entry.move).some((c) => c.sound === 'knock'), `${entry.id}'s flub never bonks`);
+    assertClose(((end.rot % 360) + 360) % 360, 0, 1e-6, `${entry.id}'s flub ends leaning`);
+    assertClose(end.sx, 1, 1e-6, `${entry.id}'s flub ends squashed`);
+    assertClose(end.sy, 1, 1e-6, `${entry.id}'s flub ends squashed`);
+    assert(!end.hide, `${entry.id}'s flub ends out of sight`);
+    // Or the retry starts with the piece somewhere the move does not expect it.
+    assertClose(end.part, rest.part, 1e-6, `${entry.id}'s flub leaves the piece out of place`);
+    for (let k = 0; k <= 1; k += 0.01) {
+      const p = flubPose(move, k, span);
+      assert(p.lift >= -1e-6 && p.lift < WALK_Y - 20, `${entry.id}'s flub left the scene at ${k.toFixed(2)}`);
+      assert(p.dx >= -1e-6 && p.dx <= span + 1e-6, `${entry.id}'s flub went off its piece at ${k.toFixed(2)}`);
+    }
+    assert(flubMs(move) > COURSE_MOVES[move].ms * 0.4, `${entry.id}'s flub is over too soon`);
+    const cues = flubCues(move);
+    assert(cues.every((c) => c.at >= 0 && c.at <= 1), `${entry.id}'s flub has a cue outside it`);
+    assertEqual(cues.filter((c) => c.fx === 'bonk').length, 1, `${entry.id}'s flub should go wrong exactly once`);
   }
   const pieces = courseLayout(['hurdle', 'tunnel', 'slide']).pieces;
   assertEqual(pickFlub(pieces, 'hurdle', () => 0.99), -1, 'a high roll still flubbed');
@@ -6707,6 +6739,70 @@ test('a flub tumbles back to the start, and only ever happens off the favourite'
     assert(at === -1 || pieces[at].id !== 'tunnel', 'it flubbed its favourite');
   }
   assertEqual(pickFlub(courseLayout(['tunnel']).pieces, 'tunnel', () => 0), -1, 'a favourite-only course flubbed');
+});
+
+test('every piece goes wrong in a way of its own', () => {
+  for (const entry of EVERY_RUN) {
+    assert(COURSE_MOVES[entry.move].flub, `${entry.id} falls back on the general tumble`);
+  }
+});
+
+test('the pause table counts down three, two, one', () => {
+  const said = COURSE_MOVES.pause.cues.filter((c) => c.say).map((c) => c.say);
+  assertEqual(said.join(), '3,2,1');
+  const ats = COURSE_MOVES.pause.cues.filter((c) => c.say).map((c) => c.at);
+  assert(ats.every((at, i) => !i || at > ats[i - 1]), 'the count is out of order');
+  for (const at of ats) {
+    assertClose(COURSE_MOVES.pause.pose(at, 24).lift, TABLE_TOP, 2, 'it counts somewhere other than on the table');
+  }
+});
+
+test('on the rope bridge and the rolling log, the pet stands on the thing that moves', () => {
+  const bridge = COURSE.find((entry) => entry.id === 'bridge');
+  for (let k = 0.15; k <= 0.85; k += 0.01) {
+    const p = COURSE_MOVES.wobble.pose(k, bridge.span);
+    const at = p.dx - bridge.span / 2;
+    if (Math.abs(at) > BRIDGE.half - 1) continue;
+    // The deck under its feet: where it rests, less however far the pet presses it down there.
+    const deck = BRIDGE.y - BRIDGE.sag * (1 - (at / BRIDGE.half) ** 2) - deckDip(at, at, p.part);
+    assertClose(p.lift, deck, 1e-6, `off the deck at ${k.toFixed(2)}`);
+  }
+  for (const end of [-BRIDGE.half, BRIDGE.half]) {
+    assertClose(deckDip(end, 0, 5), 0, 1e-9, 'the deck dips at its posts');
+  }
+  const log = COURSE.find((entry) => entry.id === 'log');
+  for (let k = 0.2; k <= 0.8; k += 0.01) {
+    const p = COURSE_MOVES.logroll.pose(k, log.span);
+    assertClose(p.dx - log.span / 2, p.part, 1e-6, `the log rolled out from under it at ${k.toFixed(2)}`);
+    assert(p.lift >= 2 * LOG.r - 1e-6, `it sank into the log at ${k.toFixed(2)}`);
+  }
+});
+
+test('the bell is rung last, whenever it was bought, and the save keeps the order it was bought in', () => {
+  const pet = buyObstacle(buyObstacle(buyObstacle({ decor: [] }, 'bell'), 'hurdle'), 'tunnel');
+  assertEqual(courseOf(pet).join(), 'bell,hurdle,tunnel', 'the stored order changed');
+  assertEqual(courseLayout(courseOf(pet)).pieces.map((piece) => piece.id).join(), 'hurdle,tunnel,bell');
+  assertEqual(courseLayout(['bell']).pieces.map((piece) => piece.id).join(), 'bell');
+});
+
+test('the wet pieces freeze in the snowfield and on a snowy day, and nothing else does', () => {
+  assert(isFrozen({ biome: 'snowfield' }) && isFrozen({ biome: 'meadow', weather: 'snow' }));
+  assert(!isFrozen({ biome: 'meadow', weather: 'rain' }) && !isFrozen({}) && !isFrozen());
+  const ids = ['pool', 'sprinkler', 'hurdle'];
+  const warm = courseLayout(ids).pieces;
+  const cold = courseLayout(ids, LANE, { frozen: true }).pieces;
+  assertEqual(warm.map((piece) => piece.move).join(), 'flop,dash,jump');
+  assertEqual(cold.map((piece) => piece.move).join(), 'skate,dash,jump', 'the pool is not an ice rink');
+  assertEqual(cold.map((piece) => piece.frozen).join(), 'true,true,false', 'the hurdle froze');
+  assertEqual(cold[1].sounds.hiss, 'brr', 'a sprinkler of snowflakes still hisses');
+  // Freezing changes how it is run, never where it stands.
+  assertEqual(cold.map((piece) => piece.x).join(), warm.map((piece) => piece.x).join());
+  for (const id of Object.keys(FROZEN)) {
+    assert(COURSE.some((entry) => entry.id === id), `${id} freezes but is never sold`);
+    const c = habitatFor(4, 15).palette;
+    const svg = obstacleSvg(id, c, { frozen: true });
+    assert(svg !== obstacleSvg(id, c) && !svg.includes('undefined') && !svg.includes('NaN'), `${id} has no frozen look`);
+  }
 });
 
 describe('the obstacle course — in the habitat');
@@ -6760,6 +6856,38 @@ test('the seesaw is drawn at rest the way the pet finds it', () => {
   const svg = obstacleSvg('seesaw', habitatFor(4, 15).palette);
   assert(svg.includes(`rotate(-${SEESAW_TILT.toFixed(2)} 0 -6)`), 'the plank and the move disagree');
   assertClose(COURSE_MOVES.tip.pose(0.01, 30).part, -SEESAW_TILT, 1e-9);
+});
+
+test('every moving part is drawn where its move picks it up', () => {
+  // The rig at the opening pose must put each part exactly where the drawing has it, or the
+  // part jumps the moment the pet steps on.
+  const c = habitatFor(4, 15).palette;
+  const matrixOf = (node) => node.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix();
+  for (const entry of COURSE) {
+    const rig = COURSE_PARTS[entry.id].rig?.(COURSE_MOVES[entry.move].pose(0, entry.span), entry.span);
+    if (!rig) continue;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.innerHTML = obstacleSvg(entry.id, c);
+    for (const [selector, transform] of Object.entries(rig)) {
+      const nodes = [...svg.querySelectorAll(selector)];
+      assert(nodes.length, `${entry.id}'s rig moves ${selector}, which is never drawn`);
+      nodes.forEach((node, i) => {
+        const drawn = matrixOf(node);
+        node.setAttribute('transform', Array.isArray(transform) ? transform[i] : transform);
+        const rigged = matrixOf(node);
+        for (const key of ['a', 'b', 'c', 'd', 'e', 'f']) {
+          assertClose(rigged[key], drawn[key], 0.02, `${entry.id}'s ${selector} jumps as the move starts (${key})`);
+        }
+      });
+    }
+  }
+});
+
+test('the course is shelved by tier, then price', () => {
+  for (let i = 1; i < COURSE.length; i += 1) {
+    const [a, b] = [COURSE[i - 1], COURSE[i]];
+    assert(a.tier < b.tier || (a.tier === b.tier && a.price <= b.price), `${b.id} is shelved out of order`);
+  }
 });
 
 test('the flag and every piece draw in every palette', () => {
