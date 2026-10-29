@@ -236,6 +236,11 @@ const SOUNDS = {
       tone(ac, { type: 'triangle', freq: 700 + i * 160, endFreq: 420, duration: 0.05, gain: 0.025, delay: 0.1 + i * 0.07 });
     }
   },
+  // The hamster wheel going round: a dry little two-note squeak.
+  squeak(ac) {
+    tone(ac, { type: 'triangle', freq: 1700, endFreq: 2100, duration: 0.05, gain: 0.03 });
+    tone(ac, { type: 'triangle', freq: 1900, endFreq: 1500, duration: 0.06, gain: 0.025, delay: 0.07 });
+  },
   // A landing in the rain.
   splash(ac) {
     for (let i = 0; i < 3; i += 1) {

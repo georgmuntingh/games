@@ -38,9 +38,13 @@ export const COURSE = [
   { id: 'weave', price: 70, tier: 1, move: 'weave', span: 28 },
   { id: 'ramp', price: 75, tier: 1, move: 'climb', span: 28 },
   { id: 'aframe', price: 75, tier: 1, move: 'scramble', span: 28 },
+  { id: 'bridge', price: 80, tier: 1, move: 'wobble', span: 30 },
   { id: 'beam', price: 85, tier: 2, move: 'balance', span: 30 },
   { id: 'seesaw', price: 90, tier: 2, move: 'tip', span: 30 },
+  { id: 'log', price: 95, tier: 2, move: 'logroll', span: 28 },
+  { id: 'wheel', price: 100, tier: 2, move: 'spin', span: 26 },
   { id: 'trampoline', price: 110, tier: 2, move: 'bounce', span: 24 },
+  { id: 'monkeybars', price: 110, tier: 2, move: 'hang', span: 30 },
   { id: 'slide', price: 125, tier: 3, move: 'slide', span: 30 },
   { id: 'ballpit', price: 150, tier: 3, move: 'dive', span: 28 },
 ];
@@ -138,6 +142,8 @@ export function courseLayout(ids, lane = LANE) {
 //   part  how far the obstacle's own moving part has gone: the seesaw's tilt in degrees, the
 //         trampoline mat's sag from 0 to 1, the poles' wobble, the tyre's swing. What it means
 //         is the piece's own business; course-parts.js turns it into a transform
+//   at    (the rope bridge only) where along the deck it is pressed, when that is not simply
+//         under the pet — which it is not once the pet has been thrown off
 //
 // Every move starts and ends standing on the ground, level and the right shape, so a run can go
 // straight from one to the next. tests/ holds every one of them to that.
@@ -198,6 +204,38 @@ const RAMP_TOP = 13;
 export const TABLE_TOP = 9;
 export const PEAK = 14;
 const TYRE_SWING = 16;
+
+/**
+ * The rope bridge: its deck hangs between posts BRIDGE.half either side of the middle, BRIDGE.y
+ * up at the ends and sagging BRIDGE.sag more in the middle under its own weight. A pet on it
+ * pulls it down further still, most right under its feet.
+ */
+export const BRIDGE = { half: 12, y: 8, sag: 1.2 };
+/** How far below its resting line the deck is pressed at `u`, with a pet `depth` deep at `at`. */
+export function deckDip(u, at, depth) {
+  const a = Math.max(-BRIDGE.half + 0.5, Math.min(BRIDGE.half - 0.5, at));
+  const tent = u <= a ? (u + BRIDGE.half) / (a + BRIDGE.half) : (BRIDGE.half - u) / (BRIDGE.half - a);
+  return depth * unit(tent);
+}
+/** Where the deck is, unladen, `u` along from the middle. */
+const deckRest = (u) => BRIDGE.y - BRIDGE.sag * (1 - (u / BRIDGE.half) ** 2);
+/** How deep a pet presses the deck where it stands — nothing at the posts, most in the middle. */
+const press = (at, bounce) => bounce * unit(1 - (at / BRIDGE.half) ** 2);
+
+/** The log: how big it is, and where it lies before and after a roll (its centre, from the middle). */
+export const LOG = { r: 5.5, from: -8, to: 8 };
+
+/** The hamster wheel: its centre's height, and how far in from its rim a pet's feet are. */
+export const WHEEL = { y: 15, r: 13, feet: 11.4 };
+/** Turning is in degrees, and only ever matters modulo a whole turn. */
+const turn = (deg) => {
+  const d = ((deg % 360) + 360) % 360;
+  return d > 180 ? d - 360 : d;
+};
+
+/** The monkey bars: how high a hanging pet's feet are, and where the rungs are from the middle. */
+export const HANG = 9;
+export const RUNGS = [-10, -5, 0, 5, 10];
 
 /**
  * Each move: how long it takes, its pose at progress `k` (0..1) across an obstacle `span` wide,
@@ -556,6 +594,260 @@ export const MOVES = {
         },
       },
       { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  wobble: {
+    // Up onto the rope bridge, across it as it dips and bounces underfoot, and off. `part` is how
+    // far the deck is pressed down right under the pet; the rig works out the rest of it.
+    ...timeline([
+      {
+        ms: 320,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => {
+          const at = -BRIDGE.half + 1;
+          const depth = press(at, 2) * smooth(t);
+          return pose({ dx: (span / 2 + at) * t, lift: (deckRest(at) - depth) * smooth(t) + arc(t) * 5, part: depth });
+        },
+      },
+      {
+        ms: 1700,
+        cues: [{ at: 0.15, sound: 'creak' }, { at: 0.55, sound: 'creak' }],
+        pose: (t, span) => {
+          const at = -BRIDGE.half + 1 + (2 * BRIDGE.half - 2) * t;
+          const depth = press(at, 2 + 0.9 * Math.sin(8 * Math.PI * t));
+          return pose({ dx: span / 2 + at, lift: deckRest(at) - depth, rot: 6 * Math.sin(5 * Math.PI * t), part: depth });
+        },
+      },
+      {
+        ms: 320,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const at = BRIDGE.half - 1;
+          const depth = press(at, 2) * (1 - smooth(t));
+          return pose({ dx: span / 2 + at + (span / 2 - at) * t, lift: (deckRest(at) - depth) * (1 - smooth(t)) + arc(t) * 5, part: depth });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 320,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => {
+          const at = -BRIDGE.half + 1;
+          const depth = press(at, 2) * smooth(t);
+          return pose({ dx: (span / 2 + at) * t, lift: (deckRest(at) - depth) * smooth(t) + arc(t) * 5, part: depth });
+        },
+      },
+      {
+        // Too bouncy. Each bounce bigger than the last, until the deck throws it.
+        ms: 640,
+        cues: [{ at: 0.3, sound: 'creak' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const at = -BRIDGE.half + 1 + 5 * t;
+          const depth = press(at, 2 + 2.6 * t * Math.abs(Math.sin(3.5 * Math.PI * t)));
+          return pose({ dx: span / 2 + at, lift: deckRest(at) - depth, rot: -10 * t * Math.sin(5 * Math.PI * t), part: depth });
+        },
+      },
+      {
+        ms: 560,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const at = -BRIDGE.half + 6;
+          const thrown = press(at, 2 + 2.6 * Math.abs(Math.sin(3.5 * Math.PI)));
+          const from = { dx: span / 2 + at, lift: deckRest(at) - thrown };
+          // Flung off backwards, and the deck bouncing on without it, where it was, until it settles.
+          const depth = thrown * Math.cos(3 * Math.PI * t) * (1 - smooth(t));
+          return tumbleBack(from, t, { lift: from.lift * (1 - smooth(t)) + arc(t) * 10, part: depth, at });
+        },
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  logroll: {
+    // Up onto the log, and run along on top of it as it rolls across, then off the far side.
+    // `part` is where the log's centre is, from the middle of the piece.
+    ...timeline([
+      {
+        ms: 360,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2 + LOG.from) * t, lift: 2 * LOG.r * smooth(t) + arc(t) * 6, part: LOG.from }),
+      },
+      {
+        ms: 1400,
+        cues: [{ at: 0.1, sound: 'rustle' }, { at: 0.5, sound: 'rustle' }],
+        pose: (t, span) => {
+          const u = LOG.from + (LOG.to - LOG.from) * smooth(t);
+          const stride = Math.sin(10 * Math.PI * t);
+          return pose({ dx: span / 2 + u, lift: 2 * LOG.r + 0.8 * Math.abs(stride), rot: 5 * stride, part: u });
+        },
+      },
+      {
+        ms: 360,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span / 2 + LOG.to + (span / 2 - LOG.to) * t, lift: 2 * LOG.r * (1 - smooth(t)) + arc(t) * 6, part: LOG.to }),
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 360,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2 + LOG.from) * t, lift: 2 * LOG.r * smooth(t) + arc(t) * 6, part: LOG.from }),
+      },
+      {
+        ms: 480,
+        cues: [{ at: 0.2, sound: 'rustle' }],
+        pose: (t, span) => {
+          const u = LOG.from + 5 * smooth(t);
+          return pose({ dx: span / 2 + u, lift: 2 * LOG.r + 0.8 * Math.abs(Math.sin(6 * Math.PI * t)), rot: 5 * Math.sin(6 * Math.PI * t), part: u });
+        },
+      },
+      {
+        // The log changes its mind and rolls back. Arms going like windmills.
+        ms: 380,
+        cues: [{ at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const u = LOG.from + 5 - 2 * smooth(t);
+          return pose({ dx: span / 2 + u, lift: 2 * LOG.r, rot: -22 * smooth(t) + 8 * Math.sin(8 * Math.PI * t), part: u });
+        },
+      },
+      {
+        ms: 500,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const u = LOG.from + 3;
+          return tumbleBack({ dx: span / 2 + u, lift: 2 * LOG.r }, t, { rot: -22 - 30 * Math.sin(Math.PI * t) + 22 * smooth(t), part: u - 3 * smooth(t) });
+        },
+      },
+      { ms: 700, pose: (t) => shakeOff(t, { part: LOG.from }) },
+    ]),
+  },
+
+  spin: {
+    // Into the wheel, run like anything while it spins, and hop out. `part` is the wheel's turn.
+    ...timeline([
+      {
+        ms: 400,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2) * t, lift: (WHEEL.y - WHEEL.feet) * smooth(t) + arc(t) * 7 }),
+      },
+      {
+        ms: 1600,
+        cues: [0.15, 0.45, 0.75].map((at) => ({ at, sound: 'squeak' })),
+        pose: (t, span) => {
+          const stride = Math.sin(14 * Math.PI * t);
+          const lean = smooth(seg(t, 0, 0.15)) * (1 - smooth(seg(t, 0.85, 1)));
+          return pose({ dx: span / 2, lift: WHEEL.y - WHEEL.feet + 0.8 * Math.abs(stride), rot: 12 * lean + 4 * stride * lean, part: turn(-500 * t * t) });
+        },
+      },
+      {
+        ms: 420,
+        cues: [{ at: 1, fx: 'land' }],
+        // Out, and the wheel coasting on to a stop.
+        pose: (t, span) =>
+          pose({ dx: (span / 2) * (1 + t), lift: (WHEEL.y - WHEEL.feet) * (1 - smooth(t)) + arc(t) * 8, part: turn(-500 - 120 * Math.sin((Math.PI / 2) * t)) }),
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 400,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2) * t, lift: (WHEEL.y - WHEEL.feet) * smooth(t) + arc(t) * 7 }),
+      },
+      {
+        // Too fast: the wheel carries it up and round the back.
+        ms: 720,
+        cues: [{ at: 0.2, sound: 'squeak' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const angle = 110 * t * t;
+          const rad = (angle * Math.PI) / 180;
+          return pose({
+            dx: span / 2 - WHEEL.feet * Math.sin(rad),
+            lift: WHEEL.y - WHEEL.feet * Math.cos(rad),
+            rot: -angle,
+            part: turn(-300 * t * t),
+          });
+        },
+      },
+      {
+        // And flings it out the way it came in, the wheel spinning down to a stop.
+        ms: 560,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const rad = (110 * Math.PI) / 180;
+          const from = { dx: span / 2 - WHEEL.feet * Math.sin(rad), lift: WHEEL.y - WHEEL.feet * Math.cos(rad) };
+          return tumbleBack(from, t, { rot: -110 * (1 - smooth(t)) - 360 * smooth(t), part: turn(-300 - 60 * smooth(t)) });
+        },
+      },
+      // Dizzy: a long slow wobble rather than a quick shake.
+      { ms: 900, pose: (t) => pose({ rot: 12 * Math.sin(t * 4 * Math.PI) * (1 - t), sx: 1 + 0.05 * Math.sin(t * 6 * Math.PI) * (1 - t) }) },
+    ]),
+  },
+
+  hang: {
+    // Jump up to the first rung, swing hand over hand along them, and drop off the end.
+    ...timeline([
+      {
+        ms: 380,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2 + RUNGS[0]) * t, lift: HANG * smooth(t) + arc(t) * 5, sy: 1 - 0.12 * smooth(t) }),
+      },
+      {
+        ms: 1600,
+        cues: RUNGS.slice(1).map((_, i) => ({ at: (i + 1) / (RUNGS.length - 1), sound: 'tick' })),
+        pose: (t, span) => {
+          const swings = RUNGS.length - 1;
+          const local = (t * swings) % 1;
+          const reach = RUNGS[0] + (RUNGS[RUNGS.length - 1] - RUNGS[0]) * t;
+          return pose({ dx: span / 2 + reach, lift: HANG - 1.6 * arc(local), rot: 12 * Math.sin(2 * Math.PI * local), sy: 0.88, sx: 1.04 });
+        },
+      },
+      {
+        ms: 380,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const from = span / 2 + RUNGS[RUNGS.length - 1];
+          return pose({ dx: from + (span - from) * t, lift: HANG * (1 - t * t), sy: 0.88 + 0.12 * smooth(t), sx: 1.04 - 0.04 * smooth(t) });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 380,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) => pose({ dx: (span / 2 + RUNGS[0]) * t, lift: HANG * smooth(t) + arc(t) * 5, sy: 1 - 0.12 * smooth(t) }),
+      },
+      {
+        // One swing, a dangle by a single paw, and its grip goes.
+        ms: 760,
+        cues: [{ at: 0.45, sound: 'tick' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => {
+          const swing = unit(t / 0.5);
+          const dangle = seg(t, 0.5, 1);
+          return pose({
+            dx: span / 2 + RUNGS[0] + (RUNGS[1] - RUNGS[0]) * swing,
+            lift: HANG - 1.6 * arc(swing),
+            rot: t < 0.5 ? 12 * Math.sin(2 * Math.PI * swing) : 14 * Math.sin(4 * Math.PI * dangle) * dangle,
+            sy: 0.88,
+            sx: 1.04,
+          });
+        },
+      },
+      {
+        // Down it drops, and trudges back to the start.
+        ms: 300,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span / 2 + RUNGS[1], lift: HANG * (1 - t * t), sy: 0.88 - 0.1 * t, sx: 1.04 + 0.08 * t }),
+      },
+      {
+        ms: 520,
+        pose: (t, span) => {
+          const e = smooth(t);
+          return pose({ dx: (span / 2 + RUNGS[1]) * (1 - e), lift: 1.2 * Math.abs(Math.sin(4 * Math.PI * t)), sy: 0.78 + 0.22 * e, sx: 1.12 - 0.12 * e });
+        },
+      },
+      { ms: 600, pose: (t) => shakeOff(t) },
     ]),
   },
 };

@@ -17,6 +17,8 @@
 // Every number a rig turns a pose into lives here, next to the drawing it moves, so the plank
 // and the pivot it turns about can never be changed one without the other.
 
+import { BRIDGE, deckDip, LOG, RUNGS, WHEEL } from './course.js';
+
 /** The weave poles, from the left: passed on alternate sides. */
 const POLES = [-10.5, -3.5, 3.5, 10.5];
 
@@ -26,6 +28,13 @@ const LIMBO_FALL = (Math.asin(14 / LIMBO.len) * 180) / Math.PI;
 
 /** Where the tyre hangs from. */
 const TYRE_PIVOT = -37;
+
+/** The rope bridge's boards, from the middle, and where each rests unladen. */
+const BOARDS = Array.from({ length: 12 }, (_, i) => -11 + 2 * i);
+const boardY = (u) => -(BRIDGE.y - BRIDGE.sag * (1 - (u / BRIDGE.half) ** 2));
+
+/** The hamster wheel's rungs, round its rim. */
+const WHEEL_RUNGS = Array.from({ length: 14 }, (_, i) => (i / 14) * 2 * Math.PI);
 
 /** The start flag, the only part of a course that stands in the habitat between runs. */
 export const COURSE_FLAG = (c) => `
@@ -175,6 +184,28 @@ export const COURSE_PARTS = {
       <path d="M-4.4 -4.4 L4.4 -4.4" stroke="${c.stone}" stroke-width="0.9" stroke-linecap="round" />`,
   },
 
+  bridge: {
+    back: (c) => `
+      <ellipse cx="-13.4" cy="-0.3" rx="2" ry="0.8" fill="${c.groundRim}" />
+      <ellipse cx="13.4" cy="-0.3" rx="2" ry="0.8" fill="${c.groundRim}" />
+      <path d="M-13.4 0 L-13.4 -15 M13.4 0 L13.4 -15" stroke="${c.wood}" stroke-width="1.8" stroke-linecap="round" />
+      <circle cx="-13.4" cy="-15.4" r="1.2" fill="${c.accent}" />
+      <circle cx="13.4" cy="-15.4" r="1.2" fill="${c.accent}" />
+      <path d="M-13.4 -14 Q0 -9.6 13.4 -14" fill="none" stroke="${c.nestLight}" stroke-width="0.8" />
+      <path d="M-13.4 -8 Q0 -5 13.4 -8" fill="none" stroke="${c.nestDark}" stroke-width="0.6" opacity="0.6" />
+      ${BOARDS.map(
+        (u) => `
+      <g class="crs-board">
+        <path d="M${u} ${(boardY(u) - 0.6).toFixed(2)} L${u} ${(-14 + 4.4 * (1 - (u / 13.4) ** 2)).toFixed(2)}" stroke="${c.nestLight}" stroke-width="0.4" opacity="0.8" />
+        <rect x="${(u - 0.85).toFixed(2)}" y="${(boardY(u) - 0.6).toFixed(2)}" width="1.7" height="1.3" rx="0.3" fill="${c.wood}" />
+      </g>`
+      ).join('')}`,
+    // Every board dips with the deck: most where the pet is, tapering to nothing at the posts.
+    rig: (p, span) => ({
+      '.crs-board': BOARDS.map((u) => `translate(0 ${deckDip(u, p.at ?? p.dx - span / 2, p.part).toFixed(2)})`),
+    }),
+  },
+
   beam: {
     back: (c) => `
       <ellipse cx="-8" cy="-0.3" rx="2.8" ry="1" fill="${c.groundRim}" />
@@ -199,6 +230,47 @@ export const COURSE_PARTS = {
     rig: (p) => ({ '.crs-plank': `rotate(${p.part.toFixed(2)} 0 -6)` }),
   },
 
+  log: {
+    back: (c) => `
+      <ellipse cx="0" cy="-0.3" rx="14" ry="1.4" fill="${c.groundRim}" opacity="0.8" />
+      <g class="crs-log" transform="translate(${LOG.from} 0)">
+        <circle cx="0" cy="${-LOG.r}" r="${LOG.r}" fill="${c.wood}" stroke="${c.nestDark}" stroke-width="1" />
+        <circle cx="0" cy="${-LOG.r}" r="${LOG.r - 1.8}" fill="none" stroke="${c.nestLight}" stroke-width="0.6" />
+        <circle cx="0" cy="${-LOG.r}" r="${LOG.r - 3.4}" fill="none" stroke="${c.nestLight}" stroke-width="0.5" />
+        <path d="M0 ${-LOG.r} L${(LOG.r - 1).toFixed(1)} ${-LOG.r - 1.6}" stroke="${c.nestDark}" stroke-width="0.6" />
+        <circle cx="${-LOG.r + 2}" cy="${-LOG.r + 1.6}" r="0.7" fill="${c.accent}" />
+      </g>`,
+    // Rolling along the ground: as far round as it has come along, a whole turn per circumference.
+    rig: (p) => {
+      const deg = ((p.part - LOG.from) / LOG.r) * (180 / Math.PI);
+      return { '.crs-log': `translate(${p.part.toFixed(2)} 0) rotate(${deg.toFixed(1)} 0 ${-LOG.r})` };
+    },
+  },
+
+  wheel: {
+    back: (c) => `
+      <ellipse cx="0" cy="-0.3" rx="11" ry="1.4" fill="${c.groundRim}" />
+      <path d="M-8 0 L0 ${-WHEEL.y} L8 0" fill="none" stroke="${c.stone}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
+      <circle cx="0" cy="${-WHEEL.y}" r="${WHEEL.r}" fill="${c.glow}" fill-opacity="0.18" stroke="${c.accent}" stroke-width="1.6" />
+      <g class="crs-wheel">
+        ${[0, 1, 2, 3, 4, 5]
+          .map((i) => {
+            const a = (i / 6) * 2 * Math.PI;
+            return `<path d="M0 ${-WHEEL.y} L${(Math.sin(a) * WHEEL.r).toFixed(2)} ${(-WHEEL.y - Math.cos(a) * WHEEL.r).toFixed(2)}" stroke="${c.stoneLight}" stroke-width="0.7" />`;
+          })
+          .join('')}
+        ${WHEEL_RUNGS.map(
+          (a) => `<circle cx="${(Math.sin(a) * (WHEEL.r - 0.4)).toFixed(2)}" cy="${(-WHEEL.y - Math.cos(a) * (WHEEL.r - 0.4)).toFixed(2)}" r="0.6" fill="${c.nestDark}" />`
+        ).join('')}
+      </g>
+      <circle cx="0" cy="${-WHEEL.y}" r="1.4" fill="${c.nestDark}" />`,
+    // The near rim, in front of the pet running inside.
+    front: (c) => `
+      <circle cx="0" cy="${-WHEEL.y}" r="${WHEEL.r}" fill="none" stroke="${c.accent}" stroke-width="1.1" opacity="0.85" />
+      <path d="M-10.6 ${-WHEEL.y - 7.5} A${WHEEL.r} ${WHEEL.r} 0 0 1 -3 ${-WHEEL.y - 12.6}" fill="none" stroke="#fff8e0" stroke-width="0.6" opacity="0.6" />`,
+    rig: (p) => ({ '.crs-wheel': `rotate(${p.part.toFixed(1)} 0 ${-WHEEL.y})` }),
+  },
+
   trampoline: {
     back: (c) => `
       <path d="M-8.6 0 L-9.6 -6 M8.6 0 L9.6 -6 M-3 0 L-3.4 -5 M3 0 L3.4 -5" stroke="${c.stone}" stroke-width="1.3" stroke-linecap="round" />
@@ -209,6 +281,18 @@ export const COURSE_PARTS = {
       <ellipse cx="0" cy="-6" rx="11" ry="2.6" fill="none" stroke="#fff8e0" stroke-width="0.8"
                stroke-dasharray="2.4 2" opacity="0.7" />`,
     rig: (p) => ({ '.crs-mat': `translate(0 ${(p.part * 2.4).toFixed(2)})` }),
+  },
+
+  monkeybars: {
+    back: (c) => `
+      <ellipse cx="-13.4" cy="-0.3" rx="2.2" ry="0.8" fill="${c.groundRim}" />
+      <ellipse cx="13.4" cy="-0.3" rx="2.2" ry="0.8" fill="${c.groundRim}" />
+      <path d="M-13.4 0 L-13.4 -37 M13.4 0 L13.4 -37" stroke="${c.wood}" stroke-width="1.8" stroke-linecap="round" />
+      <path d="M-13.4 -8 L-10.6 -8 M-13.4 -16 L-10.6 -16 M-13.4 -24 L-10.6 -24" stroke="${c.wood}" stroke-width="1" stroke-linecap="round" />`,
+    // The bars in front, so a hanging pet has hold of them rather than hanging behind them.
+    front: (c) => `
+      <path d="M-14.4 -37.2 L14.4 -37.2" stroke="${c.wood}" stroke-width="2" stroke-linecap="round" />
+      ${RUNGS.map((x) => `<circle cx="${x}" cy="-37.2" r="1.25" fill="${c.accent}" stroke="#fff8e0" stroke-width="0.4" />`).join('')}`,
   },
 
   slide: {

@@ -347,17 +347,20 @@ import {
   TOPPERS,
 } from '../pet-parts.js';
 import {
+  BRIDGE,
   buyObstacle,
   COURSE,
   COURSE_IDS,
   courseLayout,
   courseOf,
+  deckDip,
   favouriteObstacleOf,
   flubCues,
   flubMs,
   flubPose,
   isCourseUnlocked,
   LANE,
+  LOG,
   MAX_COURSE,
   MOVES as COURSE_MOVES,
   pickFlub,
@@ -6735,6 +6738,27 @@ test('the pause table counts down three, two, one', () => {
   assert(ats.every((at, i) => !i || at > ats[i - 1]), 'the count is out of order');
   for (const at of ats) {
     assertClose(COURSE_MOVES.pause.pose(at, 24).lift, TABLE_TOP, 2, 'it counts somewhere other than on the table');
+  }
+});
+
+test('on the rope bridge and the rolling log, the pet stands on the thing that moves', () => {
+  const bridge = COURSE.find((entry) => entry.id === 'bridge');
+  for (let k = 0.15; k <= 0.85; k += 0.01) {
+    const p = COURSE_MOVES.wobble.pose(k, bridge.span);
+    const at = p.dx - bridge.span / 2;
+    if (Math.abs(at) > BRIDGE.half - 1) continue;
+    // The deck under its feet: where it rests, less however far the pet presses it down there.
+    const deck = BRIDGE.y - BRIDGE.sag * (1 - (at / BRIDGE.half) ** 2) - deckDip(at, at, p.part);
+    assertClose(p.lift, deck, 1e-6, `off the deck at ${k.toFixed(2)}`);
+  }
+  for (const end of [-BRIDGE.half, BRIDGE.half]) {
+    assertClose(deckDip(end, 0, 5), 0, 1e-9, 'the deck dips at its posts');
+  }
+  const log = COURSE.find((entry) => entry.id === 'log');
+  for (let k = 0.2; k <= 0.8; k += 0.01) {
+    const p = COURSE_MOVES.logroll.pose(k, log.span);
+    assertClose(p.dx - log.span / 2, p.part, 1e-6, `the log rolled out from under it at ${k.toFixed(2)}`);
+    assert(p.lift >= 2 * LOG.r - 1e-6, `it sank into the log at ${k.toFixed(2)}`);
   }
 });
 
