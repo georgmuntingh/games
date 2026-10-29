@@ -251,6 +251,29 @@ const SOUNDS = {
     tone(ac, { type: 'triangle', freq: 1700, endFreq: 2100, duration: 0.05, gain: 0.03 });
     tone(ac, { type: 'triangle', freq: 1900, endFreq: 1500, duration: 0.06, gain: 0.025, delay: 0.07 });
   },
+  // The bell at the top of the striker: a bright clang with a long shimmer after it.
+  clang(ac) {
+    tone(ac, { type: 'triangle', freq: 1046, duration: 0.6, gain: 0.07 });
+    tone(ac, { type: 'sine', freq: 2093, duration: 0.45, gain: 0.035 });
+    tone(ac, { type: 'sine', freq: 3136, duration: 0.25, gain: 0.015 });
+  },
+  // Down the zipline: a long rising-then-falling zing.
+  zip(ac) {
+    tone(ac, { type: 'sawtooth', freq: 500, endFreq: 1400, duration: 0.35, gain: 0.012 });
+    tone(ac, { type: 'sine', freq: 1400, endFreq: 700, duration: 0.5, gain: 0.03, delay: 0.3 });
+  },
+  // The cannon. Big and round and soft — a cartoon boom, not a bang.
+  boom(ac) {
+    tone(ac, { type: 'sine', freq: 140, endFreq: 40, duration: 0.5, gain: 0.16 });
+    tone(ac, { type: 'triangle', freq: 260, endFreq: 70, duration: 0.25, gain: 0.06 });
+  },
+  // And the cannon that did not go off: a damp little fizzle.
+  pfft(ac) {
+    for (let i = 0; i < 3; i += 1) {
+      tone(ac, { type: 'sawtooth', freq: 1200 - i * 300, endFreq: 400, duration: 0.07, gain: 0.01, delay: i * 0.05 });
+    }
+    tone(ac, { type: 'sine', freq: 220, endFreq: 140, duration: 0.15, gain: 0.04, delay: 0.12 });
+  },
   // A landing in the rain.
   splash(ac) {
     for (let i = 0; i < 3; i += 1) {

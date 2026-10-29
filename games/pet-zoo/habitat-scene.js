@@ -35,7 +35,18 @@ import {
   WALK_Y,
 } from './habitat.js';
 import { audio } from './audio.js';
-import { courseLayout, favouriteObstacleOf, flubCues, flubMs, flubPose, isFrozen, LANE, MOVES as COURSE_MOVES, pickFlub } from './course.js';
+import {
+  courseLayout,
+  favouriteObstacleOf,
+  flubCues,
+  flubMs,
+  flubPose,
+  isFrozen,
+  LANE,
+  MOVES as COURSE_MOVES,
+  MUZZLE,
+  pickFlub,
+} from './course.js';
 import { ballColors, COURSE_PARTS } from './course-parts.js';
 import { tasteOf } from './snacks.js';
 import { shelters, slows } from './weather.js';
@@ -1789,6 +1800,26 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
       popBubble((coursePose?.lift ?? 0) + 34);
     } else if (effect === 'hat') {
       leafHat(piece);
+    } else if (effect === 'ring') {
+      // The bell, swinging on its bracket.
+      const bell = (piece.front ?? piece.back).querySelector('.crs-bell');
+      if (bell) {
+        bell.style.transformBox = 'fill-box';
+        bell.style.transformOrigin = '50% 0%';
+        bell.animate(
+          [{ rotate: '0deg' }, { rotate: '22deg' }, { rotate: '-16deg' }, { rotate: '9deg' }, { rotate: '-4deg' }, { rotate: '0deg' }],
+          { duration: 900, easing: 'ease-out' }
+        );
+      }
+      heartBurst(pet.art, fx, { count: 1 });
+    } else if (effect === 'smoke' || effect === 'puff') {
+      smoke(piece, effect === 'smoke' ? 7 : 3);
+      if (effect === 'smoke') {
+        buzz([20, 30, 10]);
+        confetti(pet.art, fx, { power: 0.5 });
+      }
+    } else if (effect === 'soot') {
+      spatter(pet.x, { count: 6, color: habitat.palette.stone, y: WALK_Y - 18 });
     } else if (effect === 'rustle') {
       piece.back.querySelector('.crs-tube')?.animate(
         [
@@ -1879,6 +1910,20 @@ export function createHabitatScene({ host, fx, onSnackEaten = () => {} }) {
           duration: 1600 + Math.random() * 600,
         });
       }, i * 160);
+    }
+  }
+
+  /** A cloud of smoke out of the cannon's mouth. */
+  function smoke(piece, count) {
+    for (let i = 0; i < count; i += 1) {
+      float('hab-steam', {
+        x: piece.x + MUZZLE.u + 1 + (Math.random() - 0.5) * 4,
+        dy: -MUZZLE.y - 2,
+        r: 2.2 + Math.random() * 2,
+        rise: 8 + Math.random() * 12,
+        drift: 4 + Math.random() * 12,
+        duration: 900 + Math.random() * 500,
+      });
     }
   }
 

@@ -17,7 +17,7 @@
 // Every number a rig turns a pose into lives here, next to the drawing it moves, so the plank
 // and the pivot it turns about can never be changed one without the other.
 
-import { BRIDGE, deckDip, LOG, PILE, POOL_RIM, RUNGS, WHEEL } from './course.js';
+import { BALL, BRIDGE, CABLE, cableY, deckDip, HANDLE, LOG, MUZZLE, PILE, POOL_RIM, RUNGS, STRIKER, TARGET, TROLLEY, WHEEL } from './course.js';
 
 /** The weave poles, from the left: passed on alternate sides. */
 const POLES = [-10.5, -3.5, 3.5, 10.5];
@@ -44,6 +44,9 @@ const PILE_BITS = [
   [-9.6, -2.2, 30, 0], [-6.4, -4.6, -20, 1], [-3, -6, 60, 2], [0.6, -5.2, -40, 0], [4, -6.2, 10, 3],
   [7, -4, -60, 1], [9.8, -1.8, 25, 2], [-5, -1.6, 80, 3], [1.8, -2.4, -15, 1], [6, -1.4, 45, 0],
 ];
+
+/** A ball or a log rolling along the ground: along by `at`, and turned as far as it has rolled. */
+const rolled = (at, { r, from }) => `translate(${at.toFixed(2)} 0) rotate(${(((at - from) / r) * (180 / Math.PI)).toFixed(1)} 0 ${-r})`;
 
 /** The hamster wheel's rungs, round its rim. */
 const WHEEL_RUNGS = Array.from({ length: 14 }, (_, i) => (i / 14) * 2 * Math.PI);
@@ -332,10 +335,7 @@ export const COURSE_PARTS = {
         <circle cx="${-LOG.r + 2}" cy="${-LOG.r + 1.6}" r="0.7" fill="${c.accent}" />
       </g>`,
     // Rolling along the ground: as far round as it has come along, a whole turn per circumference.
-    rig: (p) => {
-      const deg = ((p.part - LOG.from) / LOG.r) * (180 / Math.PI);
-      return { '.crs-log': `translate(${p.part.toFixed(2)} 0) rotate(${deg.toFixed(1)} 0 ${-LOG.r})` };
-    },
+    rig: (p) => ({ '.crs-log': rolled(p.part, LOG) }),
   },
 
   wheel: {
@@ -360,6 +360,33 @@ export const COURSE_PARTS = {
       <circle cx="0" cy="${-WHEEL.y}" r="${WHEEL.r}" fill="none" stroke="${c.accent}" stroke-width="1.1" opacity="0.85" />
       <path d="M-10.6 ${-WHEEL.y - 7.5} A${WHEEL.r} ${WHEEL.r} 0 0 1 -3 ${-WHEEL.y - 12.6}" fill="none" stroke="#fff8e0" stroke-width="0.6" opacity="0.6" />`,
     rig: (p) => ({ '.crs-wheel': `rotate(${p.part.toFixed(1)} 0 ${-WHEEL.y})` }),
+  },
+
+  bell: {
+    back: (c) => {
+      const x = STRIKER.post;
+      return `
+      <ellipse cx="0" cy="-0.3" rx="9.6" ry="1.4" fill="${c.groundRim}" />
+      <path d="M${STRIKER.pad - 4.4} -1.2 L${STRIKER.pad + 4.4} -1.2 L${STRIKER.pad + 4} 0 L${STRIKER.pad - 4} 0 Z" fill="${c.accent}" />
+      <path d="M${STRIKER.pad + 4.2} -0.8 L${x - 1} -2" stroke="${c.stone}" stroke-width="0.8" />`;
+    },
+    // The post in front of the pet stamping beside it, so the puck can be seen to fly.
+    front: (c) => {
+      const x = STRIKER.post;
+      return `
+      <path d="M${x} 0 L${x} -34.6" stroke="${c.wood}" stroke-width="2.6" stroke-linecap="round" />
+      <path d="M${x} -8 L${x - 1.6} -8 M${x} -14 L${x - 1.6} -14 M${x} -20 L${x - 1.6} -20 M${x} -26 L${x - 1.6} -26" stroke="${c.nestLight}" stroke-width="0.7" />
+      <path d="M${x - 1.4} 0 L${x} -3 L${x + 1.4} 0 Z" fill="${c.stone}" />
+      <g class="crs-puck">
+        <rect x="${x - 1.6}" y="-5.4" width="3.2" height="2.2" rx="0.6" fill="${c.bloom}" stroke="${c.nestDark}" stroke-width="0.4" />
+      </g>
+      <g class="crs-bell">
+        <path d="M${x} -34.4 Q${x - 3.4} -34.4 ${x - 3.4} -37 Q${x - 3.4} -39.2 ${x} -39.2 Q${x + 3.4} -39.2 ${x + 3.4} -37 Q${x + 3.4} -34.4 ${x} -34.4 Z" fill="${c.glowDeep}" />
+        <path d="M${x - 4} -34.4 L${x + 4} -34.4" stroke="${c.glowDeep}" stroke-width="1" stroke-linecap="round" />
+        <path d="M${x - 2} -37.6 Q${x - 1.4} -38.6 ${x - 0.2} -38.6" fill="none" stroke="#fff8e0" stroke-width="0.5" opacity="0.8" />
+      </g>`;
+    },
+    rig: (p) => ({ '.crs-puck': `translate(0 ${(-STRIKER.rise * p.part).toFixed(2)})` }),
   },
 
   trampoline: {
@@ -398,6 +425,20 @@ export const COURSE_PARTS = {
       <path d="M-4 -12 L-4 0 M2 -3.4 L2 0" stroke="${c.stone}" stroke-width="1" stroke-linecap="round" />`,
   },
 
+  bigball: {
+    back: (c) => `
+      <ellipse cx="0" cy="-0.3" rx="14" ry="1.4" fill="${c.groundRim}" opacity="0.8" />
+      <g class="crs-ball" transform="translate(${BALL.from} 0)">
+        <circle cx="0" cy="${-BALL.r}" r="${BALL.r}" fill="${c.accent}" />
+        <path d="M0 ${-2 * BALL.r} A${BALL.r} ${BALL.r} 0 0 1 ${BALL.r} ${-BALL.r} L0 ${-BALL.r} Z" fill="${c.bloom}" />
+        <path d="M0 0 A${BALL.r} ${BALL.r} 0 0 1 ${-BALL.r} ${-BALL.r} L0 ${-BALL.r} Z" fill="${c.bloom}" />
+        <path d="M${BALL.r} ${-BALL.r} A${BALL.r} ${BALL.r} 0 0 1 0 0 L0 ${-BALL.r} Z" fill="#fff8e0" opacity="0.85" />
+        <circle cx="0" cy="${-BALL.r}" r="1.2" fill="#fff8e0" />
+        <circle cx="0" cy="${-BALL.r}" r="${BALL.r}" fill="none" stroke="${c.nestDark}" stroke-width="0.5" opacity="0.5" />
+      </g>`,
+    rig: (p) => ({ '.crs-ball': rolled(p.part, BALL) }),
+  },
+
   ballpit: {
     back: (c) => `
       <path d="M-12.6 -12 L12.6 -12 L11.4 -13.6 L-11.4 -13.6 Z" fill="${c.nestDark}" />
@@ -408,6 +449,51 @@ export const COURSE_PARTS = {
       <circle cx="-6.6" cy="-5.6" r="1.6" fill="${c.accent}" opacity="0.7" />
       <circle cx="0" cy="-5.6" r="1.6" fill="${c.bloom}" opacity="0.7" />
       <circle cx="6.6" cy="-5.6" r="1.6" fill="${c.glowDeep}" opacity="0.7" />`,
+  },
+
+  zipline: {
+    back: (c) => `
+      <ellipse cx="${CABLE.x0}" cy="-0.3" rx="2.4" ry="0.9" fill="${c.groundRim}" />
+      <ellipse cx="${CABLE.x1}" cy="-0.3" rx="2.4" ry="0.9" fill="${c.groundRim}" />
+      <path d="M${CABLE.x0} 0 L${CABLE.x0} ${CABLE.y0 - 0.4} M${CABLE.x1} 0 L${CABLE.x1} ${CABLE.y1 - 0.4}" stroke="${c.wood}" stroke-width="1.8" stroke-linecap="round" />
+      <path d="M${CABLE.x0 + 1.6} 0 L${CABLE.x0 + 1.6} ${CABLE.y0 + 4}" stroke="${c.wood}" stroke-width="0.8" />
+      ${[6, 12, 18, 24, 30].map((y) => `<path d="M${CABLE.x0} -${y} L${CABLE.x0 + 1.6} -${y}" stroke="${c.wood}" stroke-width="0.7" />`).join('')}
+      <path d="M${CABLE.x0} ${CABLE.y0} L${CABLE.x1} ${CABLE.y1}" stroke="${c.stone}" stroke-width="0.6" />
+      <circle cx="${CABLE.x1}" cy="${CABLE.y1 - 0.4}" r="1.1" fill="${c.accent}" />`,
+    // The handle in front, so a pet hanging from it has hold of it.
+    front: (c) => {
+      const y = cableY(TROLLEY.from);
+      return `
+      <g class="crs-trolley">
+        <circle cx="${TROLLEY.from}" cy="${(y - 0.6).toFixed(2)}" r="1.1" fill="${c.nestDark}" />
+        <path d="M${TROLLEY.from} ${y.toFixed(2)} L${TROLLEY.from - 1.6} ${(y + HANDLE).toFixed(2)} M${TROLLEY.from} ${y.toFixed(2)} L${TROLLEY.from + 1.6} ${(y + HANDLE).toFixed(2)}"
+              stroke="${c.stone}" stroke-width="0.5" />
+        <path d="M${TROLLEY.from - 2.6} ${(y + HANDLE).toFixed(2)} L${TROLLEY.from + 2.6} ${(y + HANDLE).toFixed(2)}" stroke="${c.accent}" stroke-width="1.3" stroke-linecap="round" />
+      </g>`;
+    },
+    // Along the cable, and down it as it goes.
+    rig: (p) => {
+      const u = TROLLEY.from + (TROLLEY.to - TROLLEY.from) * p.part;
+      return { '.crs-trolley': `translate(${(u - TROLLEY.from).toFixed(2)} ${(cableY(u) - cableY(TROLLEY.from)).toFixed(2)})` };
+    },
+  },
+
+  cannon: {
+    back: (c) => `
+      <ellipse cx="2" cy="-0.3" rx="14.6" ry="1.4" fill="${c.groundRim}" />
+      <ellipse cx="${TARGET}" cy="-0.6" rx="4.6" ry="1.3" fill="${c.accent}" />
+      <ellipse cx="${TARGET}" cy="-0.7" rx="2.6" ry="0.8" fill="#fff8e0" />
+      <ellipse cx="${TARGET}" cy="-0.75" rx="1" ry="0.35" fill="${c.accent}" />
+      <g class="crs-barrel">
+        <path d="M-14.4 -3.2 L${MUZZLE.u - 0.6} ${-MUZZLE.y - 2.2} L${MUZZLE.u + 1.6} ${-MUZZLE.y + 2.2} L-12.2 0.8 Z" fill="${c.nestDark}" />
+        <path d="M${MUZZLE.u - 1.2} ${-MUZZLE.y - 3} L${MUZZLE.u + 2.4} ${-MUZZLE.y + 2.8}" stroke="${c.stone}" stroke-width="1.6" stroke-linecap="round" />
+        <path d="M-9.6 -5.4 L-7.8 -1.6" stroke="${c.accent}" stroke-width="1.2" />
+        <path d="M-15 -2 Q-17 -3 -16.4 -5.4" fill="none" stroke="${c.wood}" stroke-width="0.5" />
+      </g>
+      <circle cx="-9" cy="-3" r="3" fill="${c.wood}" stroke="${c.nestDark}" stroke-width="0.6" />
+      <circle cx="-9" cy="-3" r="0.8" fill="${c.nestDark}" />`,
+    // A shiver while the fuse burns, and a kick back along itself on the bang.
+    rig: (p) => ({ '.crs-barrel': `translate(${(-2.4 * p.part).toFixed(2)} ${(1.4 * p.part).toFixed(2)})` }),
   },
 };
 

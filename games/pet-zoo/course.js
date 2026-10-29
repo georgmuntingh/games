@@ -14,7 +14,8 @@
 // finish and check the pet leaves the ground where it started and lands where it should.
 //
 // Prices against wallet.js, the same reasoning as the furniture: the cheapest piece is about a
-// session away and the dearest about five, and there is something to buy at every tier.
+// session away and the dearest few a proper thing to save up for, and there is something to buy
+// at every tier.
 //
 // Nothing here earns anything. A course is free play, exactly as the rest of a habitat is.
 
@@ -45,16 +46,27 @@ export const COURSE = [
   { id: 'bridge', price: 80, tier: 1, move: 'wobble', span: 30 },
   { id: 'beam', price: 85, tier: 2, move: 'balance', span: 30 },
   { id: 'seesaw', price: 90, tier: 2, move: 'tip', span: 30 },
+  { id: 'bell', price: 90, tier: 2, move: 'ring', span: 20 },
   { id: 'log', price: 95, tier: 2, move: 'logroll', span: 28 },
   { id: 'wheel', price: 100, tier: 2, move: 'spin', span: 26 },
   { id: 'trampoline', price: 110, tier: 2, move: 'bounce', span: 24 },
   { id: 'monkeybars', price: 110, tier: 2, move: 'hang', span: 30 },
   { id: 'slide', price: 125, tier: 3, move: 'slide', span: 30 },
+  { id: 'bigball', price: 140, tier: 3, move: 'roll', span: 28 },
   { id: 'ballpit', price: 150, tier: 3, move: 'dive', span: 28 },
+  { id: 'zipline', price: 160, tier: 3, move: 'zip', span: 30 },
+  { id: 'cannon', price: 200, tier: 3, move: 'blast', span: 30 },
 ];
 
 /** Three, which is what fits across the walk line side by side with room to run between. */
 export const MAX_COURSE = 3;
+
+/**
+ * Pieces that are always run last, whenever they were bought: ringing the bell is how a course
+ * ends. Only the running order changes — what is stored is still the buying order, so selling
+ * the bell and buying it back leaves everything else where it was.
+ */
+export const FINALE = new Set(['bell']);
 
 export const COURSE_IDS = COURSE.map((entry) => entry.id);
 
@@ -139,7 +151,9 @@ export const FROZEN = {
  * them. Derived, never stored — the same three ids give the same course on every device.
  */
 export function courseLayout(ids, lane = LANE, { frozen = false } = {}) {
-  const pieces = sanitizeCourse(ids).map((id) => obstacleById.get(id));
+  const owned = sanitizeCourse(ids);
+  const order = [...owned.filter((id) => !FINALE.has(id)), ...owned.filter((id) => FINALE.has(id))];
+  const pieces = order.map((id) => obstacleById.get(id));
   const used = pieces.reduce((sum, entry) => sum + entry.span, 0);
   const gap = Math.max(0, (lane.x1 - lane.x0 - used) / (pieces.length + 1));
   let x = lane.x0 + gap;
@@ -268,6 +282,33 @@ export const PILE = 8;
 export const POOL_RIM = 7;
 /** How far the oscillating sprinkler sweeps either way. */
 const SWEEP = 32;
+
+/**
+ * The bell: the pad the pet stomps on and the post the puck flies up, from the middle — far
+ * enough apart that the puck is not hidden behind the pet — and how far up it flies.
+ */
+export const STRIKER = { pad: -5, post: 8, rise: 29 };
+
+/** The giant ball, like the log only bigger and much harder to stay on. */
+export const BALL = { r: 7, from: -7, to: 7 };
+
+/**
+ * The zipline: its cable, from the top of the tall post down to the short one, and the handle
+ * hanging HANDLE below it. A pet hanging on tucks its legs up, which is what TUCK is: how tall it
+ * is from the handle to its feet. Where it runs from and to, as a share of the way along.
+ */
+export const CABLE = { x0: -13, y0: -39, x1: 13, y1: -30 };
+export const HANDLE = 3;
+const TUCK = 25;
+export const TROLLEY = { from: -11, to: 11 };
+export const cableY = (u) => CABLE.y0 + ((CABLE.y1 - CABLE.y0) * (u - CABLE.x0)) / (CABLE.x1 - CABLE.x0);
+const zipLift = (u) => Math.max(0, -cableY(u) - HANDLE - TUCK);
+
+/** The cannon: where its mouth is, from the middle, and how high; and how high the breech is. */
+export const MUZZLE = { u: -5, y: 12 };
+const BREECH = 6;
+/** Where the landing target is, from the middle. */
+export const TARGET = 10;
 
 /** The monkey bars: how high a hanging pet's feet are, and where the rungs are from the middle. */
 export const HANG = 9;
@@ -1119,6 +1160,238 @@ export const MOVES = {
         ms: 640,
         pose: (t) => pose({ rot: -30 * (1 - smooth(t)) + 6 * Math.sin(6 * Math.PI * t) * (1 - t), sy: 0.88 + 0.12 * smooth(t), sx: 1.06 - 0.06 * smooth(t) }),
       },
+    ]),
+  },
+
+  ring: {
+    // A big jump, a stomp on the pad, and up flies the puck to ring the bell. `part` is how far up
+    // the post the puck has got, 0 to 1.
+    ...timeline([
+      {
+        ms: 440,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'boing' }],
+        pose: (t, span) => pose({ dx: (span / 2 + STRIKER.pad) * t, lift: arc(t) * 18, sy: 1 + 0.08 * arc(t), sx: 1 - 0.05 * arc(t) }),
+      },
+      {
+        ms: 760,
+        cues: [{ at: 0.4, sound: 'clang', fx: 'ring' }],
+        pose: (t, span) => {
+          const up = t < 0.4 ? 1 - (1 - t / 0.4) ** 2 : 1 - seg(t, 0.4, 1) ** 2;
+          const look = smooth(seg(t, 0, 0.2)) * (1 - smooth(seg(t, 0.8, 1)));
+          return pose({ dx: span / 2 + STRIKER.pad, rot: -14 * look, sy: 1 - 0.12 * (1 - smooth(unit(t * 5))) + 0.06 * look, part: up });
+        },
+      },
+      {
+        ms: 400,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const from = span / 2 + STRIKER.pad;
+          return pose({ dx: from + (span - from) * t, lift: arc(t) * 10, rot: 12 * Math.sin(Math.PI * t) });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        // Far too keen: right over the pad, and down on its back.
+        ms: 520,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: (span / 2 + STRIKER.pad + 2) * t, lift: arc(t) * 22, rot: -150 * smooth(t) }),
+      },
+      {
+        // A feeble wobble from the puck, and a roll back over to where it started.
+        ms: 680,
+        cues: [{ at: 0.2, sound: 'tick' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const lie = unit(t / 0.4);
+          const roll = seg(t, 0.4, 1);
+          return pose({
+            dx: (span / 2 + STRIKER.pad + 2) * (1 - smooth(roll)),
+            lift: arc(roll) * 4,
+            rot: -150 - 210 * smooth(roll),
+            sx: 1 + 0.06 * Math.sin(lie * 6 * Math.PI) * (1 - roll),
+            part: 0.25 * arc(lie),
+          });
+        },
+      },
+      { ms: 700, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  roll: {
+    // Up onto the giant ball and walk it across — wobbling all the way — and a bow off the end.
+    ...timeline([
+      {
+        ms: 420,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'boing' }],
+        pose: (t, span) => pose({ dx: (span / 2 + BALL.from) * t, lift: 2 * BALL.r * smooth(t) + arc(t) * 7, part: BALL.from }),
+      },
+      {
+        ms: 1600,
+        cues: [{ at: 0.3, sound: 'tick' }, { at: 0.6, sound: 'tick' }],
+        pose: (t, span) => {
+          const u = BALL.from + (BALL.to - BALL.from) * smooth(t);
+          return pose({
+            dx: span / 2 + u,
+            lift: 2 * BALL.r + 0.6 * Math.abs(Math.sin(8 * Math.PI * t)),
+            rot: 14 * Math.sin(3 * Math.PI * t) * arc(t),
+            part: u,
+          });
+        },
+      },
+      {
+        ms: 440,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const from = span / 2 + BALL.to;
+          return pose({ dx: from + (span - from) * t, lift: 2 * BALL.r * (1 - smooth(t)) + arc(t) * 7, rot: 360 * smooth(t), part: BALL.to });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 420,
+        cues: [{ at: 0, sound: 'hop' }, { at: 1, sound: 'boing' }],
+        pose: (t, span) => pose({ dx: (span / 2 + BALL.from) * t, lift: 2 * BALL.r * smooth(t) + arc(t) * 7, part: BALL.from }),
+      },
+      {
+        // Wobble. Wobble. WOBBLE.
+        ms: 620,
+        cues: [{ at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) => pose({ dx: span / 2 + BALL.from, lift: 2 * BALL.r, rot: 24 * t * Math.sin(5 * Math.PI * t), part: BALL.from }),
+      },
+      {
+        // The ball goes one way and the pet the other.
+        ms: 520,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => tumbleBack({ dx: span / 2 + BALL.from, lift: 2 * BALL.r }, t, { part: BALL.from - 3 * arc(t) }),
+      },
+      { ms: 700, pose: (t) => shakeOff(t, { part: BALL.from }) },
+    ]),
+  },
+
+  zip: {
+    // Up to the handle, and down the line — legs tucked, leaning back — and a drop at the end.
+    // `part` is how far along the cable the handle has run, 0 to 1.
+    ...timeline([
+      {
+        ms: 440,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) =>
+          pose({ dx: (span / 2 + TROLLEY.from) * t, lift: zipLift(TROLLEY.from) * smooth(t) + arc(t) * 6, sy: 1 - 0.18 * smooth(t), sx: 1 + 0.05 * smooth(t) }),
+      },
+      {
+        ms: 1000,
+        cues: [{ at: 0, sound: 'zip' }],
+        pose: (t, span) => {
+          const along = t * t;
+          const u = TROLLEY.from + (TROLLEY.to - TROLLEY.from) * along;
+          return pose({ dx: span / 2 + u, lift: zipLift(u), rot: -16 * smooth(unit(t * 3)) + 4 * Math.sin(6 * Math.PI * t), sy: 0.82, sx: 1.05, part: along });
+        },
+      },
+      {
+        ms: 380,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const from = span / 2 + TROLLEY.to;
+          return pose({
+            dx: from + (span - from) * t,
+            lift: zipLift(TROLLEY.to) * (1 - t * t) + arc(t) * 3,
+            rot: -16 * (1 - smooth(t)),
+            sy: 0.82 + 0.18 * smooth(t),
+            sx: 1.05 - 0.05 * smooth(t),
+            part: 1,
+          });
+        },
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 440,
+        cues: [{ at: 0, sound: 'hop' }],
+        pose: (t, span) =>
+          pose({ dx: (span / 2 + TROLLEY.from) * t, lift: zipLift(TROLLEY.from) * smooth(t) + arc(t) * 6, sy: 1 - 0.18 * smooth(t), sx: 1 + 0.05 * smooth(t) }),
+      },
+      {
+        // Stuck. Kicking does nothing at all.
+        ms: 760,
+        cues: [{ at: 0.2, sound: 'tick' }, { at: 0.5, sound: 'tick' }, { at: 1, sound: 'knock', fx: 'bonk' }],
+        pose: (t, span) =>
+          pose({ dx: span / 2 + TROLLEY.from, lift: zipLift(TROLLEY.from), rot: 14 * Math.sin(4 * Math.PI * t), sy: 0.82, sx: 1.05, part: 0.015 * arc(unit(t * 4)) }),
+      },
+      {
+        ms: 300,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => pose({ dx: span / 2 + TROLLEY.from, lift: zipLift(TROLLEY.from) * (1 - t * t), sy: 0.82 - 0.08 * t, sx: 1.05 + 0.05 * t }),
+      },
+      {
+        ms: 440,
+        pose: (t, span) => {
+          const e = smooth(t);
+          return pose({ dx: (span / 2 + TROLLEY.from) * (1 - e), lift: Math.abs(Math.sin(3 * Math.PI * t)), sy: 0.74 + 0.26 * e, sx: 1.1 - 0.1 * e });
+        },
+      },
+      { ms: 600, pose: (t) => shakeOff(t) },
+    ]),
+  },
+
+  blast: {
+    // Into the barrel, a fizzing fuse, BOOM — and a great somersaulting arc to the far side.
+    // `part` is the barrel's kick: a shiver while the fuse burns, a jolt back on the bang.
+    ...timeline([
+      {
+        ms: 520,
+        cues: [{ at: 0, sound: 'hop' }, { at: 0.85, sound: 'rustle' }],
+        pose: (t, span) => pose({ dx: (span / 2 + MUZZLE.u - 4) * t, lift: BREECH * smooth(t) + arc(t) * 10, sy: 1 - 0.5 * smooth(seg(t, 0.5, 1)), hide: t > 0.85 }),
+      },
+      {
+        ms: 640,
+        cues: [{ at: 0, sound: 'sizzle' }],
+        pose: (t, span) => pose({ dx: span / 2 + MUZZLE.u - 4, lift: BREECH, sy: 0.5, hide: true, part: 0.25 * Math.sin(24 * Math.PI * t) * t }),
+      },
+      {
+        ms: 1150,
+        cues: [{ at: 0, sound: 'boom', fx: 'smoke' }, { at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          // Down on the target, which stands a little short of the far end.
+          const from = span / 2 + MUZZLE.u;
+          const to = span / 2 + TARGET;
+          return pose({
+            dx: from + (to - from) * t,
+            lift: MUZZLE.y * (1 - t) + arc(t) * 34,
+            rot: 360 * smooth(t),
+            sy: 1 + 0.12 * arc(t),
+            sx: 1 - 0.08 * arc(t),
+            part: 1 - smooth(seg(t, 0, 0.4)),
+          });
+        },
+      },
+      {
+        ms: 300,
+        pose: (t, span) => pose({ dx: span / 2 + TARGET + (span / 2 - TARGET) * t, lift: arc(t) * 4 }),
+      },
+    ]),
+    flub: timeline([
+      {
+        ms: 520,
+        cues: [{ at: 0, sound: 'hop' }, { at: 0.85, sound: 'rustle' }],
+        pose: (t, span) => pose({ dx: (span / 2 + MUZZLE.u - 4) * t, lift: BREECH * smooth(t) + arc(t) * 10, sy: 1 - 0.5 * smooth(seg(t, 0.5, 1)), hide: t > 0.85 }),
+      },
+      {
+        // The fuse fizzes… and fizzles. Pfft.
+        ms: 760,
+        cues: [{ at: 0, sound: 'sizzle' }, { at: 0.75, sound: 'pfft', fx: 'bonk' }, { at: 0.76, fx: 'puff' }],
+        pose: (t, span) => pose({ dx: span / 2 + MUZZLE.u - 4, lift: BREECH, sy: 0.5, hide: true, part: 0.25 * Math.sin(24 * Math.PI * t) * (1 - t) * t * 4 }),
+      },
+      {
+        // Out the back it crawls, sooty.
+        ms: 560,
+        cues: [{ at: 1, fx: 'land' }],
+        pose: (t, span) => {
+          const e = smooth(t);
+          return pose({ dx: (span / 2 + MUZZLE.u - 4) * (1 - e), lift: BREECH * (1 - t * t), sy: 0.5 + 0.5 * e, sx: 1.1 - 0.1 * e });
+        },
+      },
+      { ms: 700, cues: [{ at: 0.15, fx: 'soot' }], pose: (t) => shakeOff(t, { sx: 1 + 0.08 * Math.sin(8 * Math.PI * t) * (1 - t) }) },
     ]),
   },
 };

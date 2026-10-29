@@ -355,6 +355,7 @@ import {
   courseOf,
   deckDip,
   favouriteObstacleOf,
+  FINALE,
   flubCues,
   flubMs,
   flubPose,
@@ -6669,7 +6670,9 @@ test('any three pieces fit the lane, inside the safe box, without touching', () 
       for (const c of COURSE_IDS) {
         if (a === b || b === c || a === c) continue;
         const { start, finish, pieces } = courseLayout([a, b, c]);
-        assertEqual(pieces.map((piece) => piece.id).join(), [a, b, c].join(), 'the running order is not the buying order');
+        // The buying order, except that the bell always comes last.
+        const order = [a, b, c].filter((id) => !FINALE.has(id)).concat([a, b, c].filter((id) => FINALE.has(id)));
+        assertEqual(pieces.map((piece) => piece.id).join(), order.join(), 'the running order is not the buying order');
         let edge = start;
         for (const piece of pieces) {
           assert(piece.x0 >= edge, `${a},${b},${c}: ${piece.id} overlaps what is before it`);
@@ -6767,6 +6770,13 @@ test('on the rope bridge and the rolling log, the pet stands on the thing that m
     assertClose(p.dx - log.span / 2, p.part, 1e-6, `the log rolled out from under it at ${k.toFixed(2)}`);
     assert(p.lift >= 2 * LOG.r - 1e-6, `it sank into the log at ${k.toFixed(2)}`);
   }
+});
+
+test('the bell is rung last, whenever it was bought, and the save keeps the order it was bought in', () => {
+  const pet = buyObstacle(buyObstacle(buyObstacle({ decor: [] }, 'bell'), 'hurdle'), 'tunnel');
+  assertEqual(courseOf(pet).join(), 'bell,hurdle,tunnel', 'the stored order changed');
+  assertEqual(courseLayout(courseOf(pet)).pieces.map((piece) => piece.id).join(), 'hurdle,tunnel,bell');
+  assertEqual(courseLayout(['bell']).pieces.map((piece) => piece.id).join(), 'bell');
 });
 
 test('the wet pieces freeze in the snowfield and on a snowy day, and nothing else does', () => {
